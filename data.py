@@ -221,6 +221,21 @@ def handle_label_filename(filename, to_ipa = None):
     return info
 
 class Label:
+    '''
+    Structure of the label file:
+    label starts with some metadata, followed by lines of time information
+    #                   start of the lines with time information
+    0.000       117     diphone_label
+    start_time  121     b (begin?) start time of first phoneme
+    end_time    121     m (end?) end time of first phoneme
+    [optional]  121     1 or 2  if this line is present
+                        it is the start time of the second phoneme
+                        otherwise it 'm' is the start time of the second phoneme
+    end_time    121     m end time of second phoneme
+    duration    117     diphone_label duration of audio file
+    signal wav_filename
+    '''
+
     def __init__(self, filename):
         self.filename = filename
         self._add_label()
