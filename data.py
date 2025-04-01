@@ -10,6 +10,7 @@ def open_responses(pp_id = 1, gate = 1):
     pp = locations.rawdata / f'pp{pp_id:02d}_gate{gate}'
     with open(pp) as f:
         t = f.read().split('\n')
+    t = [x for x in t if x]
     return t
 
 class Participants:
@@ -19,7 +20,7 @@ class Participants:
 
     def __repr__(self):
         m = f'(Participants) n: {self.n_participants}'
-        m += f', n_trials: {self.n_trials}'
+        m += f', n_trials: {self.n_trials} n_errors: {self.n_errors}'
         return m
 
     def _add_participants(self):
@@ -28,6 +29,7 @@ class Participants:
             self.participants.append(Participant(pp_id))
         self.n_participants = len(self.participants)
         self.n_trials = sum([p.n_trials for p in self.participants])
+        self.n_errors = sum([p.n_errors for p in self.participants])
     
 
 class Participant:
@@ -37,7 +39,7 @@ class Participant:
     
     def __repr__(self):
         m = f'(Participant) pp_id: {self.pp_id}'
-        m += f', n_trials: {self.n_trials}'
+        m += f', n_trials: {self.n_trials} n_errors: {self.n_errors}'
         return m
 
     def _add_responses(self):
@@ -45,6 +47,7 @@ class Participant:
         for gate in range(1, 7):
             self.responses.append(Response(self.pp_id, gate))
         self.n_trials = sum([r.n_trials for r in self.responses])
+        self.n_errors = sum([r.n_errors for r in self.responses])
 
 class Response:
     def __init__(self, pp_id, gate):
@@ -52,11 +55,72 @@ class Response:
         self.gate = gate
         self.data = open_responses(pp_id, gate)
         self.n_trials = len(self.data)
+        self._parse_data()
 
     def __repr__(self):
         m = f'(Response) pp_id: {self.pp_id}, gate: {self.gate}'
-        m += f', n_trials: {self.n_trials}'
+        m += f', n_trials: {self.n_trials} n_errors: {self.n_errors}'
         return m
+
+    def _parse_data(self):
+        self.responses= []
+        self.errors = []
+        for line in self.data:
+            response = Response_line(line, self)
+            if response.ok:
+                self.responses.append(response)
+            else:
+                self.errors.append(Response_line(line, self))
+        self.n_errors = len(self.errors)
+
+def parse_response_line(line):
+    gt, response = line.split('||')
+    gt_phoneme1, gt_phoneme2, coding = gt.split(':')
+    gt_phoneme1 = gt_phoneme1.strip()
+    gt_phoneme1 = pm.to_ipa_org[gt_phoneme1]
+    gt_phoneme2 = pm.to_ipa_org[gt_phoneme2]
+    coding = coding.strip()
+    coding_label = coding_dict[coding]
+    response = response.strip()
+    assert len(response) == 2
+    response_labels = [pm.to_ipa_org[r] for r in response]
+    response_phoneme1, response_phoneme2 = response_labels
+    info = {'gt_phoneme1': gt_phoneme1, 'gt_phoneme2': gt_phoneme2,
+        'coding': coding, 'coding_label': coding_label, 'response': response,
+        'response_phoneme1': response_phoneme1, 
+        'response_phoneme2': response_phoneme2}
+    return info
+
+def response_lines_to_confusion_dict(response_lines):
+    response_dict = {}
+    for rl in response_lines:
+        response_dict[response.gt] = response
+    return response_dict
+    
+class Response_line:
+    def __init__(self, line, parent):
+        self.line = line
+        self.parent = parent
+        try: self._parse_line()
+        except ValueError: self.ok = False
+        else: self.ok = True
+
+    def __repr__(self):
+        if not self.ok:
+            return f'(Response_line) invalid line: {self.line}'
+        m = f'(Response_line) gt: {self.gt}, response: {self.response}'
+        return m
+
+    def _parse_line(self):
+        self.info = parse_response_line(self.line)
+        for k, v in self.info.items():
+            setattr(self, k, v)
+        self.gt = f'{self.gt_phoneme1} {self.gt_phoneme2}'
+        self.response = f'{self.response_phoneme1} {self.response_phoneme2}'
+
+
+
+
 
 def _clean_row(row):
     cleaned_row = [char for char in ''.join(row).split()]
