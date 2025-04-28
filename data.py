@@ -1,3 +1,4 @@
+import json
 import locations
 import matplotlib.pyplot as plt
 import numpy as np
@@ -13,6 +14,15 @@ def open_responses(pp_id = 1, gate = 1):
         t = f.read().split('\n')
     t = [x for x in t if x]
     return t
+
+def save_per_participant_confusion_dicts(participants = None, filename = ''):
+    if not filename:
+        filename = '../per_participant_confusion_dicts.json'
+    if not participants:
+        participants = Participants()
+    with open(filename, 'w') as f:
+        json.dump(participants.confusion_dict, f, indent=4)
+    print(f'Saved per participant confusion dicts to {filename}')
 
 class Participants:
     def __init__(self, pp_ids = pp_ids, labels = None,):
@@ -33,6 +43,17 @@ class Participants:
         self.n_participants = len(self.participants)
         self.n_trials = sum([p.n_trials for p in self.participants])
         self.n_errors = sum([p.n_errors for p in self.participants])
+
+    @property
+    def confusion_dict(self):
+        if hasattr(self, '_confusion_dict'):
+            return self._confusion_dict
+        d = {}
+        for participant in self.participants:
+            pp_id = participant.pp_id
+            d[f'pp{pp_id}'] = participant.confusion_dict
+        self._confusion_dict = d
+        return self._confusion_dict
     
 
 class Participant:
@@ -60,6 +81,53 @@ class Participant:
         if not hasattr(self.parent, 'labels'):
             return None
         return self.parent.labels
+
+    def get_gate_responses(self, gate):
+        if gate < 1 or gate > 6:
+            raise ValueError('Gate must be between 1 - 6')
+        return self.responses[gate - 1]
+
+    def gate_phoneme_position_to_confusion_dict(self, gate, phoneme_position):
+        if gate < 1 or gate > 6:
+            raise ValueError('Gate must be between 1 - 6')
+        if phoneme_position < 1 or phoneme_position > 2:
+            raise ValueError('phoneme_position must be 1 or 2')
+        responses =  self.responses[gate - 1]
+        return responses.confusion_dict[f'phoneme{phoneme_position}']
+
+    @property
+    def confusion_dict(self):
+        if hasattr(self, '_confusion_dict'):
+            return self._confusion_dict
+        d = {}
+        for responses in self.responses:
+            gate= responses.gate
+            d[f'gate{gate}'] = responses.confusion_dict
+        self._confusion_dict = d
+        return self._confusion_dict
+
+    def matrices(self, diphone_positions = [1, 2], gates = [1, 2, 3, 4, 5, 6]):
+        if hasattr(self, '_matrices'):
+            return self._matrices
+        m = Matrices(diphone_positions = diphone_positions,
+            gates = gates, participant = self)
+        self._matrices = m
+        return self._matrices
+
+
+    def plot_confusion_matrices(self,save = False):
+        matrices = self.matrices()
+        matrices.plot()
+        plt.show()
+        plt.tight_layout()
+        plt.show()
+        if save:
+            p = locations.matrix_plots / f'pp{self.pp_id}_confusion_matrices.pdf'
+            filename = str(p)
+            plt.savefig(filename)
+            print(f'Saved confusion matrices to {filename}')
+
+
 
 class Response:
     def __init__(self, pp_id, gate, parent = None):
@@ -94,6 +162,38 @@ class Response:
             return None
         return self.parent.labels
 
+    @property
+    def confusion_dict(self):
+        if hasattr(self, '_confusion_dict'):
+            return self._confusion_dict
+       
+        self._confusion_dict = response_lines_to_confusion_dict(self.responses)
+        return self._confusion_dict
+
+    @property
+    def confusion_dict_phoneme1(self):
+        return self.confusion_dict['phoneme1'] 
+
+    @property
+    def confusion_dict_phoneme2(self):
+        return self.confusion_dict['phoneme2']
+        
+
+
+def response_lines_to_confusion_dict(response_lines):
+    output = {'phoneme1': {}, 'phoneme2': {}}
+    for response in response_lines:
+        for phoneme_position in [1, 2]:
+            d = output[f'phoneme{phoneme_position}'] 
+            gt, hyp = getattr(response, f'gt_phoneme{phoneme_position}'), \
+                getattr(response, f'response_phoneme{phoneme_position}')
+            if gt not in d:
+                d[gt] = {}
+            if hyp not in d[gt]:
+                d[gt][hyp] = 0
+            d[gt][hyp] += 1
+    return output
+
 def parse_response_line(line):
     gt, response = line.split('||')
     gt_phoneme1, gt_phoneme2, coding = gt.split(':')
@@ -112,11 +212,8 @@ def parse_response_line(line):
         'response_phoneme2': response_phoneme2}
     return info
 
-def response_lines_to_confusion_dict(response_lines):
-    response_dict = {}
-    for rl in response_lines:
-        response_dict[response.gt] = response
-    return response_dict
+            
+
     
 class Response_line:
     def __init__(self, line, parent):
@@ -189,11 +286,23 @@ def load_matrix(filename = '', diphone_position = 1, gate = 1):
     matrix = np.array(matrix)
     return matrix, row_names, column_names, filename
 
+def _get_row_and_column_names():
+    m = Matrix()
+    return m.row_names, m.column_names
+
 class Matrix:
-    def __init__(self,diphone_position= 1, gate = 1, filename = ''):
+    def __init__(self,diphone_position= 1, gate = 1, filename = '', 
+        confusion_dict = None, participant = None):
         self.diphone_position = diphone_position
         self.gate = gate
         self.filename = filename
+        self.confusion_dict = confusion_dict
+        if participant:
+            d = participant.gate_phoneme_position_to_confusion_dict(gate, 
+                diphone_position)
+            self.confusion_dict = d
+            self.participant = participant
+            self.pp_id = participant.pp_id
         self.to_ipa_org = pm.to_ipa_org
         self._add_matrix()
         self._normalise_matrix()
@@ -204,9 +313,14 @@ class Matrix:
         m = f'(Matrix) diphone position: {self.diphone_position}'
         m += f', gate: {self.gate}'
         m += f', {self.n_rows} X {self.n_columns}'
+        if hasattr(self, 'pp_id'):
+            m += f', particpant id: {self.pp_id}'
         return m
 
     def _add_matrix(self):
+        if self.confusion_dict:
+            self._add_matrix_from_confusion_dict()
+            return
         matrix, _row_names, _column_names, filename = load_matrix(
             diphone_position = self.diphone_position, gate = self.gate,
             filename = self.filename)
@@ -218,6 +332,20 @@ class Matrix:
         self.n_columns = len(self._column_names)
         self.row_names = [self.to_ipa_org[r] for r in self._row_names]
         self.column_names = [self.to_ipa_org[c] for c in self._column_names]
+
+
+    def _add_matrix_from_confusion_dict(self):
+        self.row_names, self.column_names = _get_row_and_column_names()
+        self.n_rows = len(self.row_names)
+        self.n_columns = len(self.column_names)
+        self.matrix = np.zeros((self.n_rows, self.n_columns))
+        for gt in self.confusion_dict.keys():
+            for  hyp in self.confusion_dict[gt].keys():
+                count = self.confusion_dict[gt][hyp]
+                gt_index = self.row_names.index(gt)
+                hyp_index = self.column_names.index(hyp)
+                self.matrix[gt_index, hyp_index] = count
+        
 
     def _normalise_matrix(self):
         row_norms = np.linalg.norm(self.matrix, axis = 1, keepdims = True)
@@ -235,7 +363,9 @@ class Matrix:
         if not ax: fig, ax = plt.subplots(1, 1, figsize = (15, 15))
         im = ax.imshow(matrix, cmap = color_scheme)
         if show_colorbar:
-            plt.colorbar()
+            try:plt.colorbar()
+            except RuntimeError:
+                fig.colorbar(im, ax=ax)
         ax.set_title(f'{name}')
         ax.set_xticks( range(self.n_columns)) 
         ax.set_xticklabels( self.column_names, rotation = 90)
@@ -249,9 +379,11 @@ class Matrix:
 
 
 class Matrices:
-    def __init__(self, diphone_positions = [1, 2], gates = [1, 2, 3, 4, 5, 6]):
+    def __init__(self, diphone_positions = [1, 2], gates = [1, 2, 3, 4, 5, 6],
+        participant = None): 
         self.diphone_positions = diphone_positions
         self.gates = gates
+        self.participant = participant
         self._add_matrices()
 
     def __repr__(self):
@@ -264,7 +396,8 @@ class Matrices:
         self.matrices = []
         for diphone_position in self.diphone_positions:
             for gate in self.gates:
-                self.matrices.append(Matrix(diphone_position, gate))
+                self.matrices.append(Matrix(diphone_position, gate, 
+                    participant = self.participant))
         '''
         # unknown format
         for f in ['con_conf_matrix_gates14.dat', 'vow_conf_matrix_gates14.dat']:
