@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from pathlib import Path
 import phoneme_mapper as pm
+# from progressbar import progressbar
 
 pp_ids = [1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 15, 16, 17, 19, 20, 21]
 
@@ -14,8 +15,10 @@ def open_responses(pp_id = 1, gate = 1):
     return t
 
 class Participants:
-    def __init__(self, pp_ids = pp_ids):
+    def __init__(self, pp_ids = pp_ids, labels = None,):
         self.pp_ids = pp_ids
+        if labels is None: self.labels = Labels()
+        else: self.labels = labels
         self._add_participants()
 
     def __repr__(self):
@@ -26,15 +29,16 @@ class Participants:
     def _add_participants(self):
         self.participants = []
         for pp_id in self.pp_ids:
-            self.participants.append(Participant(pp_id))
+            self.participants.append(Participant(pp_id, self))
         self.n_participants = len(self.participants)
         self.n_trials = sum([p.n_trials for p in self.participants])
         self.n_errors = sum([p.n_errors for p in self.participants])
     
 
 class Participant:
-    def __init__(self, pp_id = 1):
+    def __init__(self, pp_id = 1, parent = None):
         self.pp_id = pp_id
+        self.parent = parent
         self._add_responses()
     
     def __repr__(self):
@@ -45,14 +49,23 @@ class Participant:
     def _add_responses(self):
         self.responses = []
         for gate in range(1, 7):
-            self.responses.append(Response(self.pp_id, gate))
+            self.responses.append(Response(self.pp_id, gate, self))
         self.n_trials = sum([r.n_trials for r in self.responses])
         self.n_errors = sum([r.n_errors for r in self.responses])
 
+    @property
+    def labels(self):
+        if self.parent is None:
+            return None
+        if not hasattr(self.parent, 'labels'):
+            return None
+        return self.parent.labels
+
 class Response:
-    def __init__(self, pp_id, gate):
+    def __init__(self, pp_id, gate, parent = None):
         self.pp_id = pp_id
         self.gate = gate
+        self.parent = parent
         self.data = open_responses(pp_id, gate)
         self.n_trials = len(self.data)
         self._parse_data()
@@ -72,6 +85,14 @@ class Response:
             else:
                 self.errors.append(Response_line(line, self))
         self.n_errors = len(self.errors)
+
+    @property
+    def labels(self):
+        if self.parent is None:
+            return None
+        if not hasattr(self.parent, 'labels'):
+            return None
+        return self.parent.labels
 
 def parse_response_line(line):
     gt, response = line.split('||')
@@ -104,6 +125,7 @@ class Response_line:
         try: self._parse_line()
         except ValueError: self.ok = False
         else: self.ok = True
+        if self.ok: self.set_label()
 
     def __repr__(self):
         if not self.ok:
@@ -117,6 +139,28 @@ class Response_line:
             setattr(self, k, v)
         self.gt = f'{self.gt_phoneme1} {self.gt_phoneme2}'
         self.response = f'{self.response_phoneme1} {self.response_phoneme2}'
+
+    def set_label(self):
+        if self.labels is None:
+            self.label = None
+            return
+        p1, p2, coding = self.gt_phoneme1, self.gt_phoneme2, self.coding
+        labels = self.labels.get_labels(p1, p2, coding)
+        self.label = labels[0] if labels else None
+        if len(labels) > 1:
+            print(f'Warning: multiple labels found for {p1} {p2} {coding}')
+            self.all_found_labels = labels
+        else: self.all_found_labels = []
+        self.n_labels = len(labels)
+
+    @property
+    def labels(self):
+        if self.parent is None:
+            return None
+        if not hasattr(self.parent, 'labels'):
+            return None
+        return self.parent.labels
+        
 
 
 
@@ -250,12 +294,13 @@ coding_dict = {'0': 'unstresssed', '1': 'stressed',
     '2': 'syllable boundary in diphone, stress on second phoneme', 
     '3': 'syllable boundary in diphone, stress on first phoneme',
     's': 'segment contains two strong vowels both stressed',
-    'w': 'segment contains two weak vowels both stressed'}
+    'w': 'segment contains two weak vowels both stressed',
+    'b': 'leading environment'}
 
 def _handle_second_phoneme(disc2, to_ipa):
     if len(disc2) == 1:
         phoneme2, coding = to_ipa[disc2], None
-    elif disc2[1] in '0123sw':
+    elif disc2[1] in '0123swb':
         phoneme2, coding = to_ipa[disc2[0]], disc2[1:]
     elif disc2[:2] in to_ipa:
         phoneme2, coding = to_ipa[disc2[:2]], disc2[2:]
@@ -278,11 +323,42 @@ def handle_label_filename(filename, to_ipa = None):
     phoneme1 = to_ipa[disc1]
     phoneme2, coding, prefix = _handle_second_phoneme(disc2, to_ipa)
     coding_name = coding_dict[coding] if coding else None
-    info = {'filename': filename, 'name': name, 'phoneme_type': phoneme_type,
+    f = str(filename)
+    info = {'filename': f, 'name': name, 'phoneme_type': phoneme_type,
         'disc1': disc1, 'disc2': disc2, 'phoneme1': phoneme1,
         'phoneme2': phoneme2, 'coding': coding, 'coding_name': coding_name,
         'prefix': prefix}
     return info
+
+class Labels:
+    def __init__(self, directory = locations.labels):
+        self.to_ipa = pm.to_ipa
+        self.directory = directory
+        self.filenames = directory.glob('*/*.lab')
+        self.add_labels()
+
+    def add_labels(self):
+        self.labels = []
+        # for filename in progressbar(self.filenames):
+        for filename in self.filenames:
+            self.labels.append(Label(filename, self))
+
+    def get_labels(self, phoneme_1, phoneme_2, coding):
+        '''
+        phoneme_1: str, phoneme 1
+        phoneme_2: str, phoneme 2
+        coding: str, coding of the second phoneme
+        '''
+        labels = []
+        for label in self.labels:
+            if label.phoneme1 == phoneme_1 and label.phoneme2 == phoneme_2:
+                if label.coding == coding:
+                    labels.append(label)
+        return labels
+            
+         
+    
+    
 
 class Label:
     '''
@@ -295,27 +371,123 @@ class Label:
     [optional]  121     1 or 2  if this line is present
                         it is the start time of the second phoneme
                         otherwise it 'm' is the start time of the second phoneme
-    end_time    121     m end time of second phoneme
+    end_time    121     e end time of second phoneme
     duration    117     diphone_label duration of audio file
     signal wav_filename
     '''
 
-    def __init__(self, filename):
+    def __init__(self, filename, parent = None):
         self.filename = filename
-        self._add_label()
-        self.to_ipa = pm.Mapper().to_ipa
-            
-
-    def __repr__(self):
-        m = f'(Label) phoneme 1: {self.phoneme1}'
-        m += f', phoneme 2: {self.phoneme2}'
-        return m
-
-    def _add_label(self):
+        self.parent = parent
+        if self.parent == None: self.to_ipa = pm.to_ipa
+        else: self.to_ipa = self.parent.to_ipa
+        self._add_info()
         with open(self.filename, 'r') as f:
             self.raw_data = f.read().split('\n')
-        self.disc1 = self.filename.split('_')[0]
-        self.disc2 = self.filename.split('_')[1]
-        self.phoneme1 = pm.to_ipa_org[self.disc1]
+        self._parse_label_data()
+        self._set_times()
+        self._find_audio_files()
+            
+    def __repr__(self):
+        m = f'(Label) phoneme 1: {self.phoneme1}'
+        m += f' ({self.phoneme1_start_time:.2f} - {self.phoneme1_end_time:.2f})'
+        m += f', phoneme 2: {self.phoneme2}'
+        m += f' ({self.phoneme2_start_time:.2f} - {self.phoneme2_end_time:.2f})'
+        return m
+
+    def _add_info(self):
+        info = handle_label_filename(self.filename, to_ipa = self.to_ipa)
+        for k, v in info.items():
+            setattr(self, k, v)
+
+    def _parse_label_data(self):
+        label_data = self.raw_data
+        label_lines = label_data[label_data.index('#') + 1:]
+        label_lines = [x for x in label_lines if x]
+        self.label_lines= []
+        for label_line in label_lines:
+            self.label_lines.append(Label_line(label_line, self))
+
+    def _set_times(self):
+        self.timing_ok = True
+        self.start_time = self.label_lines[0].time
+        self.end_time = self.label_lines[-1].time
+        self.duration = self.end_time - self.start_time
+        if 'b' in self.label_to_label_line:
+            self.phoneme1_start_time = self.label_to_label_line['b'].time
+        else:self.phoneme1_start_time = None
+        if 'm' in self.label_to_label_line:
+            self.phoneme1_end_time = self.label_to_label_line['m'].time
+        else: self.phoneme1_end_time = None
+        if '1' in self.label_to_label_line:
+            self.phoneme2_start_time = self.label_to_label_line['1'].time
+        elif '2' in self.label_to_label_line:
+            self.phoneme2_start_time = self.label_to_label_line['2'].time
+        elif 'm' in self.label_to_label_line:
+            self.phoneme2_start_time = self.label_to_label_line['m'].time
+        else: self.phoneme2_start_time = None
+        if 'e' in self.label_to_label_line:
+            self.phoneme2_end_time = self.label_to_label_line['e'].time
+        else: self.phoneme2_end_time = None
+
+    def _find_audio_files(self):
+        p = locations.original / self.phoneme_type
+        name = Path(self.filename).stem.split('.')[0]
+        original_audio = p / f'{name}.wav'
+        self.audio_filenames_ok = True
+        if original_audio.exists():
+            self.original_audio_filename = str(original_audio)
+        else:
+            print(f'Original audio file not found: {original_audio}')
+            self.original_audio_filename = '' 
+            self.audio_filenames_ok = False
+        for gate in range(1, 7):
+            p = locations.gated / self.phoneme_type
+            gated_audio = p / f'{name}{gate}.wav'
+            if gated_audio.exists():
+                setattr(self, f'gated_audio_filename_{gate}', str(gated_audio))
+            else:
+                setattr(self, f'gated_audio_filename_{gate}', '')
+                self.audio_filenames_ok = False
+        self.n_gated_audio_files = len(self.all_gated_audio_filenames)
+
+    @property
+    def label_to_label_line(self):
+        d = {}
+        for line in self.label_lines:
+            d[line.label] = line
+        return d
+
+    def get_gated_audio_filename(self, gate):
+        if gate < 1 or gate > 6:
+            raise ValueError('Gate must be between 1 - 6')
+        if hasattr(self, f'gated_audio_filename_{gate}'):
+            return getattr(self, f'gated_audio_filename_{gate}')
+        else:
+            return None
+
+    @property
+    def all_gated_audio_filenames(self):
+        filenames = []
+        for gate in range(1, 7):
+            filename = self.get_gated_audio_filename(gate)
+            if filename:
+                filenames.append(filename)
+        return filenames
+        
+        
+class Label_line:
+    def __init__(self, label_line, parent = None):
+        self.label_line = label_line
+        time, code, label = [x for x in label_line.split(' ') if x]
+        self.time = float(time)
+        self.code = int(code)
+        self.label = label
+
+    def __repr__(self):
+        m = f'(Label_line) time: {self.time}'
+        m += f', code: {self.code}'
+        m += f', label: {self.label}'
+        return m
             
 
