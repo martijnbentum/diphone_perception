@@ -434,3 +434,4 @@ to_ipa_org = {disc: disc_to_ipa[disc] for disc in phonemes}
 to_ipa_org['-'] = to_ipa_org['_']
 to_ipa_rew = {rewrite_dict.get(key,key):value for key,value in to_ipa_org.items()}
 to_ipa = {recode_dict.get(key,key):value for key,value in to_ipa_rew.items()}
+to_ipa['gx'] = 'ɣ'
