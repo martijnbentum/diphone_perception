@@ -15,6 +15,19 @@ def open_responses(pp_id = 1, gate = 1):
     t = [x for x in t if x]
     return t
 
+def open_gate_timestamps():
+    with open(locations.gate_timestamps) as f:
+        t = [x.split(',') for x in f.read().split('\n')]
+    output = []
+    for line in t:
+        if len(line) == 2:
+            try: line[1] = float(line[1])
+            except ValueError: continue
+            output.append(line)
+    output = {x[0]: x[1] for x in output}
+    return output
+    
+
 def save_per_participant_confusion_dicts(participants = None, filename = ''):
     if not filename:
         filename = '../per_participant_confusion_dicts.json'
@@ -249,6 +262,9 @@ class Response_line:
             self.all_found_labels = labels
         else: self.all_found_labels = []
         self.n_labels = len(labels)
+        if self.label:
+            self.label.add_response(self)
+            
 
     @property
     def labels(self):
@@ -259,7 +275,32 @@ class Response_line:
         return self.parent.labels
         
 
+    @property
+    def gate(self):
+        if self.parent is None:
+            return None
+        if not hasattr(self.parent, 'gate'):
+            return None
+        return self.parent.gate
 
+    @property
+    def pp_id(self):
+        if self.parent is None:
+            return None
+        if not hasattr(self.parent, 'pp_id'):
+            return None
+        return self.parent.pp_id
+
+    @property
+    def info_dict(self):
+        d = {}
+        d['gt_phoneme1'] = self.gt_phoneme1
+        d['gt_phoneme2'] = self.gt_phoneme2
+        d['response_phoneme_1'] = self.response_phoneme1
+        d['response_phoneme_2'] = self.response_phoneme2
+        d['participant'] = self.pp_id
+        d['gate'] = self.gate
+        return d
 
 
 
@@ -468,6 +509,7 @@ class Labels:
         self.to_ipa = pm.to_ipa
         self.directory = directory
         self.filenames = directory.glob('*/*.lab')
+        self.gate_timestamps = open_gate_timestamps()
         self.add_labels()
 
     def add_labels(self):
@@ -489,7 +531,18 @@ class Labels:
                     labels.append(label)
         return labels
             
-         
+    def to_json(self, filename = 'info.json', save = False):
+        labels = [x for x in self.labels if x.n_gated_audio_files >= 4]
+        sorted_labels = sorted(labels, key = lambda x: x.name)
+        d = {}
+        for label in sorted_labels:
+            name = '_'.join(label.name)
+            d[name] = label.info_dict
+        if save:
+            with open(filename, 'w') as f:
+                json.dump(d, f, indent=4)
+            print(f'Saved labels to {filename}')
+        return d
     
     
 
@@ -512,6 +565,9 @@ class Label:
     def __init__(self, filename, parent = None):
         self.filename = filename
         self.parent = parent
+        self.gate_timestamps = parent.gate_timestamps if parent else None
+        if self.gate_timestamps is None:
+            self.gate_timestamps = open_gate_timestamps()
         if self.parent == None: self.to_ipa = pm.to_ipa
         else: self.to_ipa = self.parent.to_ipa
         self._add_info()
@@ -520,6 +576,8 @@ class Label:
         self._parse_label_data()
         self._set_times()
         self._find_audio_files()
+        self.responses = []
+        self.name = (self.phoneme1, self.phoneme2, self.coding)
             
     def __repr__(self):
         m = f'(Label) phoneme 1: {self.phoneme1}'
@@ -584,6 +642,9 @@ class Label:
                 self.audio_filenames_ok = False
         self.n_gated_audio_files = len(self.all_gated_audio_filenames)
 
+    def add_response(self, response):
+        self.responses.append(response)
+
     @property
     def label_to_label_line(self):
         d = {}
@@ -599,6 +660,16 @@ class Label:
         else:
             return None
 
+    def get_gate_timestamp(self, gate):
+        if gate < 1 or gate > 6:
+            raise ValueError('Gate must be between 1 - 6')
+        f = self.get_gated_audio_filename(gate)
+        filename = Path(f).name
+        if filename in self.gate_timestamps:
+            return self.gate_timestamps[filename]
+        else:
+            return None
+
     @property
     def all_gated_audio_filenames(self):
         filenames = []
@@ -607,6 +678,73 @@ class Label:
             if filename:
                 filenames.append(filename)
         return filenames
+
+    @property
+    def all_gated_audio_filenames_with_timestamps(self):
+        filenames = []
+        for gate in range(1, 7):
+            filename = self.get_gated_audio_filename(gate)
+            if filename:
+                timestamp = self.get_gate_timestamp(gate)
+                filenames.append((filename, timestamp))
+        return filenames
+
+    @property
+    def response_dicts(self):
+        output = []
+        for response in self.responses:
+            output.append(response.info_dict)
+        return output
+        
+
+    @property
+    def timestamp_dict(self):
+        d = {}
+        d['start_time'] = self.start_time
+        d['end_time'] = self.end_time
+        d['duration'] = self.duration
+        d['phoneme_1_start_time'] = self.phoneme1_start_time
+        d['phoneme_1_end_time'] = self.phoneme1_end_time
+        d['phoneme_2_start_time'] = self.phoneme2_start_time
+        d['phoneme_2_end_time'] = self.phoneme2_end_time
+        for i in range(1,7):
+            name = f'gate_{i}_timestamp'
+            timestamp = self.get_gate_timestamp(i)
+            if timestamp:d[name] = timestamp
+        return d
+
+    @property
+    def filename_dict(self):
+        d = {}
+        d['original_audio_filename'] = self.original_audio_filename
+        for i in range(1, 7):
+            name = f'gate_{i}_audio_filename'
+            filename = self.get_gated_audio_filename(i)
+            if filename:d[name] = filename
+        d['label_filename'] = self.filename
+        for k, v in d.items():
+            d[k] = v.replace(str(locations.base) + '/', '')
+        return d
+                
+    @property
+    def info_dict(self):
+        d = {}
+        d['diphone'] = f'{self.phoneme1} {self.phoneme2}'
+        d['phoneme_1'] = self.phoneme1
+        d['phoneme_2'] = self.phoneme2
+        d['disc_1'] = self.disc1
+        d['disc_2'] = self.disc2
+        d['phoneme_type'] = self.phoneme_type
+        d['coding'] = self.coding
+        d['coding_name'] = self.coding_name
+        d['prefix'] = self.prefix
+        d.update(self.filename_dict)
+        d.update(self.timestamp_dict)
+        d['responses'] = self.response_dicts
+        return d
+        
+        
+
         
         
 class Label_line:
