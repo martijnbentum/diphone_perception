@@ -1,6 +1,7 @@
 import json
 import locations
 import matplotlib.pyplot as plt
+import metrics
 import numpy as np
 from pathlib import Path
 import phoneme_mapper as pm
@@ -349,6 +350,7 @@ class Matrix:
         self._normalise_matrix()
         self.info = {'row': 'responses, row name is the ground truth phoneme', 
             'column': 'phoneme class, column name is the selected phoneme class'}
+        self.mcc = metrics.confusion_matrix_to_mcc(self.matrix)
 
     def __repr__(self):
         m = f'(Matrix) diphone position: {self.diphone_position}'
@@ -356,6 +358,7 @@ class Matrix:
         m += f', {self.n_rows} X {self.n_columns}'
         if hasattr(self, 'pp_id'):
             m += f', particpant id: {self.pp_id}'
+        m += f', mcc: {self.mcc:.2f}'
         return m
 
     def _add_matrix(self):
@@ -379,7 +382,7 @@ class Matrix:
         self.row_names, self.column_names = _get_row_and_column_names()
         self.n_rows = len(self.row_names)
         self.n_columns = len(self.column_names)
-        self.matrix = np.zeros((self.n_rows, self.n_columns))
+        self.matrix = np.zeros((self.n_rows, self.n_columns), dtype = np.int16)
         for gt in self.confusion_dict.keys():
             for  hyp in self.confusion_dict[gt].keys():
                 count = self.confusion_dict[gt][hyp]
@@ -426,11 +429,16 @@ class Matrices:
         self.gates = gates
         self.participant = participant
         self._add_matrices()
+        self.mccs = [x.mcc for x in self.matrices]
+        self.avg_mcc = np.mean(self.mccs)
+        self.std_mcc = np.std(self.mccs)
 
     def __repr__(self):
         m = f'(Matrices) n: {self.n_matrices}'
         m += f', diphone_positions: {self.diphone_positions}'
         m += f', gates: {self.gates}'
+        m += f', avg mcc: {self.avg_mcc:.2f}'
+        m += f', std mcc: {self.std_mcc:.2f}'
         return m
 
     def _add_matrices(self):
@@ -439,6 +447,7 @@ class Matrices:
             for gate in self.gates:
                 self.matrices.append(Matrix(diphone_position, gate, 
                     participant = self.participant))
+        self.n_matrices = len(self.matrices)
         '''
         # unknown format
         for f in ['con_conf_matrix_gates14.dat', 'vow_conf_matrix_gates14.dat']:
@@ -581,9 +590,11 @@ class Label:
             
     def __repr__(self):
         m = f'(Label) phoneme 1: {self.phoneme1}'
-        m += f' ({self.phoneme1_start_time:.2f} - {self.phoneme1_end_time:.2f})'
+        if self.phoneme1_duration:
+            m += f' ({self.phoneme1_duration:.3f})'
         m += f', phoneme 2: {self.phoneme2}'
-        m += f' ({self.phoneme2_start_time:.2f} - {self.phoneme2_end_time:.2f})'
+        if self.phoneme2_duration:
+            m += f' ({self.phoneme2_duration:.3f})'
         return m
 
     def _add_info(self):
@@ -620,6 +631,14 @@ class Label:
         if 'e' in self.label_to_label_line:
             self.phoneme2_end_time = self.label_to_label_line['e'].time
         else: self.phoneme2_end_time = None
+        if self.phoneme1_start_time and self.phoneme1_end_time:
+            dur= self.phoneme1_end_time - self.phoneme1_start_time
+            self.phoneme1_duration = dur
+        else: self.phoneme1_duration = None
+        if self.phoneme2_start_time and self.phoneme2_end_time:
+            dur = self.phoneme2_end_time - self.phoneme2_start_time
+            self.phoneme2_duration = dur
+        else: self.phoneme2_duration = None
 
     def _find_audio_files(self):
         p = locations.original / self.phoneme_type
