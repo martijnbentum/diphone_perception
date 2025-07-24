@@ -12,8 +12,8 @@ def rsa(distance_matrix1, distance_matrix2):
     '''
     upper_triangle1 = get_upper_triangle_values(distance_matrix1)
     upper_triangle2 = get_upper_triangle_values(distance_matrix2)
-    rsa_spearman, _ = spearmanr(upper_triangle1, upper_triangle2)
-    return rsa_spearman
+    spearman, _ = pearsonr(upper_triangle1, upper_triangle2)
+    return spearman
 
 def confusion_matrix_to_rsa(confusion_matrix1, confusion_matrix2):
     ''' compute the RSA between two confusion matrices.
@@ -24,8 +24,7 @@ def confusion_matrix_to_rsa(confusion_matrix1, confusion_matrix2):
     '''
     jsd1 = confusion_matrix_to_jsd_matrix(confusion_matrix1)
     jsd2 = confusion_matrix_to_jsd_matrix(confusion_matrix2)
-    rsa_spearman = rsa(jsd1, jsd2)
-    return rsa_spearman
+    return rsa(jsd1, jsd2)
 
 def confusion_matrix_to_jsd_matrix(confusion_matrix):
     """
@@ -108,7 +107,7 @@ def confusion_matrix_to_gt_pred(cm):
     return ground_truth, predicted
 
 
-def get_upper_triangle_values(matrix, k = 0):
+def get_upper_triangle_values(matrix):
     """
     Extracts the upper triangle values of a square matrix.
     
@@ -117,7 +116,7 @@ def get_upper_triangle_values(matrix, k = 0):
     
     Returns:
     - upper_triangle_values: 1D numpy array containing the upper triangle values.
-    including the diagonal if k=0.
+    excluding the diagonal if k=1.
     """
-    return matrix[np.triu_indices_from(matrix, k=0)]
+    return matrix[np.triu_indices_from(matrix, k=1)]
 
