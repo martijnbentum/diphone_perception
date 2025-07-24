@@ -1,6 +1,31 @@
 from sklearn.metrics import matthews_corrcoef, accuracy_score
 import numpy as np
 from scipy.spatial.distance import jensenshannon
+from scipy.stats import spearmanr, pearsonr
+
+def rsa(distance_matrix1, distance_matrix2):
+    ''' compute the RSA between two distance matrices.
+    the distance matrices are expected to be square matrices of shape
+        (n_classes, n_classes).
+    the upper triangle of the distance matrices are extracted,
+    and then the RSA is computed with rank correlation.
+    '''
+    upper_triangle1 = get_upper_triangle_values(distance_matrix1)
+    upper_triangle2 = get_upper_triangle_values(distance_matrix2)
+    rsa_spearman, _ = spearmanr(upper_triangle1, upper_triangle2)
+    return rsa_spearman
+
+def confusion_matrix_to_rsa(confusion_matrix1, confusion_matrix2):
+    ''' compute the RSA between two confusion matrices.
+    the confusion matrices are expected to be square matrices of shape 
+        (n_classes, n_classes).
+    the confusion matrices converted to JSD matrices, 
+        and then the RSA is computed with rank correlation.
+    '''
+    jsd1 = confusion_matrix_to_jsd_matrix(confusion_matrix1)
+    jsd2 = confusion_matrix_to_jsd_matrix(confusion_matrix2)
+    rsa_spearman = rsa(jsd1, jsd2)
+    return rsa_spearman
 
 def confusion_matrix_to_jsd_matrix(confusion_matrix):
     """
@@ -81,4 +106,18 @@ def confusion_matrix_to_gt_pred(cm):
             predicted.extend([j] * count)
     
     return ground_truth, predicted
+
+
+def get_upper_triangle_values(matrix, k = 0):
+    """
+    Extracts the upper triangle values of a square matrix.
+    
+    Parameters:
+    - matrix: 2D numpy array or list of lists representing a square matrix.
+    
+    Returns:
+    - upper_triangle_values: 1D numpy array containing the upper triangle values.
+    including the diagonal if k=0.
+    """
+    return matrix[np.triu_indices_from(matrix, k=0)]
 
