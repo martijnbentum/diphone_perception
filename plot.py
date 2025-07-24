@@ -80,8 +80,8 @@ def gather_rsa_values(participants=None):
     matrices_phone1, matrices_phone2 = gather_matrices(participants)
     phone1, phone2 = [], []
     for gate in matrices_phone1:
-        phone1.append(_compute_rsa_for_list_of_matrices(matrices_phone1[gate]))
-        phone2.append(_compute_rsa_for_list_of_matrices(matrices_phone2[gate]))
+        phone1.append(_compute_rsa_for_list_of_confusion_matrices(matrices_phone1[gate]))
+        phone2.append(_compute_rsa_for_list_of_confusion_matrices(matrices_phone2[gate]))
     phone1 = np.array(phone1).transpose()
     phone2 = np.array(phone2).transpose()
     return phone1, phone2
