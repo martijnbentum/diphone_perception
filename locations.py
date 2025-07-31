@@ -12,3 +12,5 @@ rawdata = responses / 'rawdata'
 
 matrix_plots = base / 'confusion_matrix_plots'
 gate_timestamps = base / 'tone_timestamps.csv'
+
+model_responses = Path('model_responses')
