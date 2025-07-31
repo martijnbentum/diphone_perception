@@ -328,13 +328,19 @@ def load_matrix(filename = '', diphone_position = 1, gate = 1):
     matrix = np.array(matrix)
     return matrix, row_names, column_names, filename
 
-def _get_row_and_column_names():
-    m = Matrix()
-    return m.row_names, m.column_names
+def _get_row_and_column_names(remove_phonemes = []):
+    _, _row_names, _column_names, _ = load_matrix()
+    _row_names = [pm.to_ipa_org[r] for r in _row_names]
+    _column_names = [pm.to_ipa_org[c] for c in _column_names]
+    row_names = [r for r in _row_names if r not in remove_phonemes]
+    column_names = [c for c in _column_names if c not in remove_phonemes]
+    return row_names, column_names
+    
 
 class Matrix:
     def __init__(self,diphone_position= 1, gate = 1, filename = '', 
-        confusion_dict = None, participant = None):
+        confusion_dict = None, participant = None, name = None, 
+        remove_phonemes = []):
         self.diphone_position = diphone_position
         self.gate = gate
         self.filename = filename
@@ -345,6 +351,8 @@ class Matrix:
             self.confusion_dict = d
             self.participant = participant
             self.pp_id = participant.pp_id
+        self.name = name
+        self.remove_phonemes = remove_phonemes
         self.to_ipa_org = pm.to_ipa_org
         self._add_matrix()
         self._normalise_matrix()
@@ -369,17 +377,16 @@ class Matrix:
             diphone_position = self.diphone_position, gate = self.gate,
             filename = self.filename)
         self.matrix = matrix
-        self._row_names = _row_names
-        self._column_names = _column_names
+        self.row_names, self.column_names = _get_row_and_column_names(
+            remove_phonemes = self.remove_phonemes)
         self.filename = filename
-        self.n_rows = len(self._row_names)
-        self.n_columns = len(self._column_names)
-        self.row_names = [self.to_ipa_org[r] for r in self._row_names]
-        self.column_names = [self.to_ipa_org[c] for c in self._column_names]
+        self.n_rows = len(self.row_names)
+        self.n_columns = len(self.column_names)
 
 
     def _add_matrix_from_confusion_dict(self):
-        self.row_names, self.column_names = _get_row_and_column_names()
+        self.row_names, self.column_names = _get_row_and_column_names(
+            remove_phonemes = self.remove_phonemes)
         self.n_rows = len(self.row_names)
         self.n_columns = len(self.column_names)
         self.matrix = np.zeros((self.n_rows, self.n_columns), dtype = np.int16)
@@ -389,6 +396,20 @@ class Matrix:
                 gt_index = self.row_names.index(gt)
                 hyp_index = self.column_names.index(hyp)
                 self.matrix[gt_index, hyp_index] = count
+
+    def remove_phonemes_from_matrix(self, phonemes_to_remove = []):
+        if not phonemes_to_remove:
+            phonemes_to_remove = find_phonemes_without_response(
+                self.confusion_dict)
+        print(f'Removing phonemes: {phonemes_to_remove}')
+        confusion_dict = remove_phonemes_from_confusion_dict(
+            self.confusion_dict, phonemes_to_remove)
+        m = Matrix(diphone_position = self.diphone_position,
+            gate = self.gate, confusion_dict = confusion_dict,
+            name = self.name,remove_phonemes = phonemes_to_remove)
+            
+        return m, phonemes_to_remove
+    
         
 
     def _normalise_matrix(self):
@@ -779,5 +800,91 @@ class Label_line:
         m += f', code: {self.code}'
         m += f', label: {self.label}'
         return m
+
+def load_all_model_responses_matrices(model_names = []):
+    if not model_names:
+        model_names = ['finetuned', 'pretrained', 'nonspeech']
+    d = {}
+    for model_name in model_names:
+        p = locations.model_responses / model_name
+        filenames = p.glob('*.json')
+        d[model_name] = []
+        for filename in filenames:
+            m, skipped_phonemes = load_model_responses_matrix(str(filename))
+            mm, removed_phonemes = m.remove_phonemes_from_matrix()
+            d[model_name].append( 
+                {'matrix': m, 
+                'skipped_phonemes': skipped_phonemes, 
+                'reduced_matrix': mm,
+                'removed_phonemes':removed_phonemes} )
+    return d
+
+    
+    
+
             
+def load_model_responses_matrix(filename):
+    with open(filename, 'r') as fin:
+        d = json.load(fin)
+    row_names = Matrix().row_names
+    confusion_dict = {phoneme: {} for phoneme in row_names}
+    gt1, gt2 = 'gt_phoneme1', 'gt_phoneme2'
+    r1, r2 = 'response_phoneme_1', 'response_phoneme_2'
+    skipped_phonemes = []
+    for value in d.values():
+        responses = value['responses']
+        if len(responses) != 1:
+            m = f'Expected 1 response, got {len(responses)}'
+            raise ValueError(m)
+        response = responses[0]
+        if gt1 not in response or gt2 not in response:
+            m = f'Expected {gt1} or {gt2} in response, got {response}'
+            raise ValueError(m)
+        if gt1 in response:
+            gt = response[gt1]
+            r = response[r1]
+            position = 1
+        elif gt2 in response:
+            gt = response[gt2]
+            r = response[r2]
+            position = 2
+        if gt not in row_names: 
+            skipped_phonemes.append(gt)
+            continue
+        if r not in row_names:
+            skipped_phonemes.append(r)
+            continue
+        if r not in confusion_dict[gt]:
+            confusion_dict[gt][r] = 0
+        confusion_dict[gt][r] += 1
+    gate = response['gate']
+    model_name= response['participant']
+    m = Matrix(diphone_position = position, gate = gate, 
+        confusion_dict = confusion_dict, name = model_name)
+    return m, list(set(skipped_phonemes))
+
+
+def find_phonemes_without_response(confusion_dict):
+    phonemes_without_response = []
+    for ground_truth in confusion_dict.keys():
+        if confusion_dict[ground_truth] == {}:
+            phonemes_without_response.append(ground_truth)
+    return phonemes_without_response
+
+def remove_phonemes_from_confusion_dict(confusion_dict, phonemes_to_remove = []):
+    if not phonemes_to_remove:
+        print('No phonemes to remove set, finding phonemes without response...')
+        phonemes_to_remove = find_phonemes_without_response(confusion_dict)
+    output = {}
+    for gt in confusion_dict:
+        if gt in phonemes_to_remove:
+            continue
+        responses = confusion_dict[gt]
+        new_responses = {}
+        for hyp in responses:
+            if hyp in phonemes_to_remove:
+                continue
+            new_responses[hyp] = responses[hyp]
+        output[gt] = new_responses
+    return output
 
