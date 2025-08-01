@@ -113,6 +113,62 @@ def gather_matrices(participants=None):
                 raise ValueError(f"Invalid diphone position: {m.diphone_position}")
     return phone1, phone2
 
+def add_mcc_point_from_matrix(matrix, marker = None, color = None,
+    update_legend = True, show = True, add_label = True, alpha = 1.0):
+    marker_dict = {'finetuned': 'v', 'pretrained': 's', 'nonspeech': '*'}
+    x = matrix.gate - 1
+    phone_position = matrix.diphone_position
+    label = f'Phone {phone_position} ({matrix.name})'
+    if color is None:
+        color = 'blue' if phone_position == 1 else 'red'
+    if marker is None:
+        default_marker = 'o' if phone_position == 1 else 'x'
+        marker = marker_dict.get(matrix.name, default_marker)
+    if add_label:
+        plt.plot(x, matrix.mcc, marker=marker, color=color, label=label,
+            alpha=alpha)
+    else:
+        plt.plot(x, matrix.mcc, marker=marker, color=color, alpha=alpha)
+    if update_legend: plt.legend()
+    if show: plt.show()
+
+def add_mcc_points_from_matrices(matrices, alpha = 1.,repress_label= False):
+    names = []
+    for matrix in matrices:
+        if matrix.name not in names and not repress_label:
+            add_label = True
+            names.append(matrix.name)
+        else: add_label = False
+        add_mcc_point_from_matrix(matrix, add_label = add_label,
+            update_legend = False, show = False, alpha = alpha)
+    plt.legend()
+    plt.show()
+
+def _collect_model_matrices(model_responses=None):
+    if model_responses is None:
+        model_responses= data.load_all_model_responses_matrices()
+    matrices = []
+    for k, mr in model_responses.items():
+        for r in mr:
+            matrices.append( r['reduced_matrix'] )
+    return matrices
+
+def collect_participant_matrices(participants=None):
+    if participants is None:
+        participants = data.Participants()
+    matrices = []
+    for participant in participants.participants:
+        matrices.extend(participant.matrices().matrices)
+    return matrices
+
+def add_all_mcc_points_from_model_matrices(model_responses= None, 
+    participants = None):
+    if participants: plot_participants_mcc(participants, .99)
+    matrices = _collect_model_matrices(model_responses)
+    add_mcc_points_from_matrices(matrices)
+    
+    
+
 def matrix_to_mean_and_ci(matrix, ci = .95):
     """
     Calculate the mean and confidence interval of a matrix.
