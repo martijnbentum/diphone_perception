@@ -449,6 +449,7 @@ class Matrices:
         self.diphone_positions = diphone_positions
         self.gates = gates
         self.participant = participant
+        self.name = f'pp-{participant.pp_id}' if participant else ''
         self._add_matrices()
         self.mccs = [x.mcc for x in self.matrices]
         self.avg_mcc = np.mean(self.mccs)
@@ -467,7 +468,7 @@ class Matrices:
         for diphone_position in self.diphone_positions:
             for gate in self.gates:
                 self.matrices.append(Matrix(diphone_position, gate, 
-                    participant = self.participant))
+                    participant = self.participant, name = self.name,))
         self.n_matrices = len(self.matrices)
         '''
         # unknown format
