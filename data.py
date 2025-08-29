@@ -838,14 +838,14 @@ def load_model_responses_matrix(filename):
             m = f'Expected 1 response, got {len(responses)}'
             raise ValueError(m)
         response = responses[0]
-        if gt1 not in response or gt2 not in response:
-            m = f'Expected {gt1} or {gt2} in response, got {response}'
+        if r1 not in response and r2 not in response:
+            m = f'Expected {r1} or {r2} in response, got {response}'
             raise ValueError(m)
-        if gt1 in response:
+        if r1 in response:
             gt = response[gt1]
             r = response[r1]
             position = 1
-        elif gt2 in response:
+        elif r2 in response:
             gt = response[gt2]
             r = response[r2]
             position = 2
