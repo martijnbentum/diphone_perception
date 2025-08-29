@@ -24,3 +24,13 @@ csv_logs = Path('csv_logs')
 selected_phonemes = csv_logs / 'success.csv'
 selected_sentences = Path('selected_sentences.json')
 
+
+pretraining = Path('/vol/mlusers/mbentum/pretraining_clean/')
+pretraining_metadata = pretraining / 'metadata/'
+manifest = pretraining / 'train.tsv'
+cgn_phrases = pretraining / 'cgn_phrases'
+cgn_phrases_file_list = pretraining / 'cgn_phrases_file_list.txt'
+cgn_speakers = pretraining_metadata / 'cgn_speakers.json'
+
+common_voice_phonemes = pretraining_metadata / 'dutch_cv_phonemes_zs.tsv'
+common_voice_words= pretraining_metadata / 'dutch_cv_words_zs-transcribed.tsv'
