@@ -34,3 +34,5 @@ cgn_speakers = pretraining_metadata / 'cgn_speakers.json'
 
 common_voice_phonemes = pretraining_metadata / 'dutch_cv_phonemes_zs.tsv'
 common_voice_words= pretraining_metadata / 'dutch_cv_words_zs-transcribed.tsv'
+
+cgn_phrases_json = Path('../cgn_phrases.json')
