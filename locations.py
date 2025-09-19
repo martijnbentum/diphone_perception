@@ -35,4 +35,9 @@ cgn_speakers = pretraining_metadata / 'cgn_speakers.json'
 common_voice_phonemes = pretraining_metadata / 'dutch_cv_phonemes_zs.tsv'
 common_voice_words= pretraining_metadata / 'dutch_cv_words_zs-transcribed.tsv'
 
+mls_phonemes = pretraining_metadata / 'dutch_mls_phonemes_zs.tsv'
+mls_words = pretraining_metadata / 'dutch_mls_words_zs.tsv'
+
 cgn_phrases_json = Path('../cgn_phrases.json')
+common_voice_phrases_json = Path('../common_voice_phrases.json')
+mls_phrases_json = Path('../mls_phrases.json')
