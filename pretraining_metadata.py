@@ -3,6 +3,41 @@ import locations
 import cgn_phonemes
 from progressbar import progressbar
 
+def make_or_load_cgn_phrases_json(phrases = None, speakers = None, 
+    overwrite = False):
+    if locations.cgn_phrases_json.exists() and not overwrite:
+        print('loading existing cgn phrases json')
+        with locations.cgn_phrases_json.open('r') as f:
+            outputs = json.load(f)
+        return outputs
+    print('making new cgn phrases json')
+    if speakers is None and phrases is None:
+        speakers = load_cgn_speakers()
+    if phrases is None:
+        phrases = extract_all_cgn_phrases(speakers)
+    outputs, bads, error = clean_cgn_phrases(phrases)
+    with locations.cgn_phrases_json.open('w') as f:
+        json.dump(outputs, f, indent=4)
+    print(f'Wrote {len(outputs)} phrases to {locations.cgn_phrases_json}')
+    print(f'Skipped {len(bads)} empty phrases')
+    print(f'Skipped {len(error)} phrases with unknown phonemes')
+    return outputs 
+
+
+def make_cgn_phrase_name(speaker_id, file_id, start_time, end_time):
+    m = f'{speaker_id}_{file_id}_{start_time:.3f}-{end_time:.3f}'
+    m = m.replace('.','__')
+    m += '.wav'
+    return m
+
+def phrase_to_phrase_name(phrase):
+    speaker_id = phrase['speaker_id']
+    audio_filename = phrase['audio_filename']
+    file_id = audio_filename.split('.')[0].split('/')[-1]
+    start_time = phrase['start_time']
+    end_time = phrase['end_time']
+    return make_cgn_phrase_name(speaker_id, file_id, start_time, end_time)
+
 def load_manifest(manifest_file=None):
     if manifest_file is None:
         manifest_file = locations.manifest
@@ -30,12 +65,13 @@ def extract_all_cgn_phrases(cgn_speakers=None):
             phrases.append(phrase)
     return phrases
 
-def clean_cgn_phrases(phrases):
+def clean_cgn_phrases(phrases, check_manifest= True):
     bads = []
     outputs = []
     error = []
     d = cgn_phonemes.Sampa().simple_sampa_to_simple_ipa
     d[' '] = ' '
+    manifest = load_manifest()
     for phrase in progressbar(phrases):
         sampa = phrase['sampa']
         sampa = sampa.strip('! ').replace('!','').strip(' ')
@@ -47,6 +83,8 @@ def clean_cgn_phrases(phrases):
             error.append(phrase)
             continue
         ipa = ' '.join([d[c] for c in sampa])
+        phrase_filename = phrase_to_phrase_name(phrase)
+        in_manifest = phrase_filename in manifest if check_manifest else None
         output = {'ipa': ipa, 
             'orthographic': phrase['orthographic'],
             'speaker_id': phrase['speaker_id'], 
@@ -55,6 +93,8 @@ def clean_cgn_phrases(phrases):
             'audio_filename': phrase['audio_filename'],
             'corpus': 'cgn',
             'language': phrase['language'],
+            'phrase_filename': phrase_filename,
+            'in_manifest': in_manifest,
         }
         outputs.append(output)
     return outputs, bads, error
