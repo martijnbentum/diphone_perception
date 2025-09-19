@@ -151,7 +151,7 @@ class Sampa:
         
 
 class Ipa:
-    plosives = 'p,t,b,d,k,ɡ'.split(',')
+    plosives = 'p,t,b,d,k,g'.split(',')
     plosives_examples = '[p]ut,[b]ad,[t]ak,[d]ak,[k]at,[g]oal'.split(',')
 
     fricatives = 'f,v,s,z,ʃ,ʒ,x,ɣ,h'.split(',')
@@ -164,10 +164,11 @@ class Ipa:
     sonorants_examples += ',[w]at,[j]as'
     sonorants_examples = sonorants_examples.split(',')
 
-    shortvowels = 'ɪ,ɛ,ɑ,ɔ,ʏ'.split(',')
+
+    shortvowels = 'ɪ,ɛ,ɑ,ɔ,ʉ'.split(',')
     shortvowels_examples = 'l[i]p,l[e]g,l[a]t,b[o]m,p[u]t'.split(',')
 
-    longvowels = 'i,y,e,ø,a,o,u'.split(',')
+    longvowels = 'iː,yː,eː,øː,aː,oː,uː'.split(',')
     longvowels_examples = 'l[ie]p,b[uu]r,l[ee]g,d[eu]k,l[aa]t'
     longvowels_examples += ',b[oo]m,b[oe]k'
     longvowels_examples = longvowels_examples.split(',')
@@ -175,18 +176,18 @@ class Ipa:
     sjwa = ['ə']
     sjwa_examples = ['g[e]lijk']
 
-    diphthongs = 'ɛi,œy,ʌu'.split(',')
+    diphthongs = 'ɛi,œy,ɑu'.split(',')
     diphthongs_examples = 'w[ij]s,h[ui]s,k[ou]d'.split(',')
 
     loan_vowels = 'ɛː,œː,ɔː'.split(',')
     loan_vowels_examples = 'sc[è]ne,fr[eu]le,z[o]ne'.split(',')
 
-    simple_loan_vowels = 'ɛ,ʏ,ɔ'.split(',')
+    simple_loan_vowels = 'ɛ,ʉ,ɔ'.split(',')
 
-    nasal_vowels = 'ɛ̃ː,ɑ̃ː,ɔ̃ː,ʏ'.split(',')
+    nasal_vowels = 'ɛ̃ː,ɑ̃ː,ɔ̃ː,ʉ'.split(',')
     nasal_vowels_examples = 'vacc[in],croiss[ant],c[on]gé,parf[um]'.split(',')
 
-    simple_nasal_vowels = 'ɛ,ɑ,ɔ,ʏ'.split(',')
+    simple_nasal_vowels = 'ɛ,ɑ,ɔ,ʉ'.split(',')
 
     consonants = plosives + fricatives + sonorants
     consonants_examples = []
@@ -284,21 +285,25 @@ class Ipa:
     def ipa_to_simple_ipa_dict_mauser(self):
         d = compose_dicts(self.to_sampa_dict, self.to_simple_ipa_dict)
         d['ui'] = 'œy' # ui is not correct ipa for œy in h[ui]s
-        d['au'] = 'ʌu' # au is not correct ipa for ʌu in k[ou]d
-        d['ɑu'] = 'ʌu' # au is not correct ipa for ʌu in k[ou]d
-        d['œː'] = 'ø' # œː is not correct ipa for ø in b[eu]k
-        d['øː'] = 'ø' # map øː for simplicity to ø in b[eu]k
-        d['aː'] = 'a' # aː for simplicity to a in l[aa]n
-        d['oː'] = 'o' # oː for simplicity to o in b[oo]m
-        d['ɔː'] = 'ɔ' # map 'ɔː' to ɔ for simplicity contr[o]le
-        d['eː'] = 'e' # eː for simplicity to e l[ee]g
-        d['iː'] = 'i' # iː for simplicity to i l[ie]p
-        d['ɛː'] = 'ɛ' # map 'ɛː' to ɛ for simplicity l[e]g sc[è]ne
-        d['uː'] = 'u' # uː is not correct ipa for d[oe]k
-        d['yː'] = 'y' # yː is not correct ipa for b[uu]r
+        d['au'] ='au'# 'ʌu' # au is not correct ipa for ʌu in k[ou]d
+        d['œː'] = 'øː' # œː is not correct ipa for øː in b[eu]k
+        # d['øː'] = 'ø' # map øː for simplicity to ø in b[eu]k
+        # d['aː'] = 'a' # aː for simplicity to a in l[aa]n
+        # d['oː'] = 'o' # oː for simplicity to o in b[oo]m
+        d['ɔː'] = 'ɔ' # map 'ɔː' to ɔ contr[o]le
+        # d['eː'] = 'e' # eː for simplicity to e l[ee]g
+        # d['iː'] = 'i' # iː for simplicity to i l[ie]p
+        d['ɛː'] = 'ɛ' # map 'ɛː' to ɛ l[e]g sc[è]ne
+        # d['uː'] = 'u' # uː is not correct ipa for d[oe]k
+        # d['yː'] = 'y' # yː is not correct ipa for b[uu]r
         d['g'] = 'g' # map ɡ to g (different characters?)
-        d['ʉ'] = 'ʏ' # ʉ is not correct ipa for ʏ in p[u]t
-        #d['ʋ'] = 'ʋ' # ʋ [w]at
+        # d['ʉ'] = 'ʏ' # ʉ is not correct ipa for ʏ in p[u]t
+        #mls:
+        d['w'] = 'ʋ' # ʋ [w]at
+        d['i'] = 'iː' # ʋ [w]at
+        d['ɡ'] = 'g' # ʋ [w]at
+        d['y'] = 'yː' 
+        d['ʏ'] = 'ʉ' # ʉ is not correct ipa for ʏ in p[u]t
         return d 
 
 
