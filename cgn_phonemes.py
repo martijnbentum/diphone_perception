@@ -303,7 +303,8 @@ class Ipa:
         d['i'] = 'iː' # ʋ [w]at
         d['ɡ'] = 'g' # ʋ [w]at
         d['y'] = 'yː' 
-        d['ʏ'] = 'ʉ' # ʉ is not correct ipa for ʏ in p[u]t
+        d['ʏ'] = 'ʉ' # 
+        d['u'] = 'uː' # 
         return d 
 
 
