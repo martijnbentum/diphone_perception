@@ -37,9 +37,23 @@ def make_or_load_common_voice_phrases_json(common_voice_words= None,
     print(f'Wrote {len(outputs)} phrases to {locations.common_voice_phrases_json}')
     return outputs
 
+def make_or_load_mls_phrases_json(mls_words= None, 
+    overwrite = False):
+    if locations.mls_phrases_json.exists() and not overwrite:
+        print('loading existing mls phrases json')
+        with locations.mls_phrases_json.open('r') as f:
+            outputs = json.load(f)
+        return outputs
+    print('making new mls phrases json')
+    outputs = clean_mls_phrases(mls_words)
+    with locations.mls_phrases_json.open('w') as f:
+        json.dump(outputs, f, indent=4)
+    print(f'Wrote {len(outputs)} phrases to {locations.mls_phrases_json}')
+    return outputs
+
 
 def make_cgn_phrase_name(speaker_id, file_id, start_time, end_time):
-    m = f'{speaker_id}_{file_id}_{start_time:.3f}-{end_time:.3f}'
+    m = f'{speaker_id}_{file_id}_{start_time}-{end_time}'
     m = m.replace('.','__')
     m += '.wav'
     return m
@@ -133,6 +147,7 @@ def clean_common_voice_phrases(common_voice_words= None, check_manifest= True):
     manifest = load_manifest()
     outputs = []
     for filename, words in progressbar(cv_phrases.items()):
+        filename = filename.replace('.mp3', '.wav')
         speaker = words[0][5]
         speaker_id, gender, age = _extract_speakerid_gender_age(speaker)
         ipa_phrase, ort_phrase = _common_voice_words_to_ipa_ort_phrase(words, d)
@@ -177,7 +192,7 @@ def _common_voice_words_to_ipa_ort_phrase(words, ipa_dict):
         word_ipa = ' '.join([ipa_dict[x] for x in word_ipa_mauser])
         ipa_phrase.append(word_ipa)
         ort_phrase.append(word[4])
-    return '  '.join(ipa_phrase), ' '.join(ort_phrase)
+    return '   '.join(ipa_phrase), ' '.join(ort_phrase)
 
 def _mls_words_to_ipa_ort_phrase(words, ipa_dict):
     ipa_phrase = []
@@ -187,7 +202,7 @@ def _mls_words_to_ipa_ort_phrase(words, ipa_dict):
         word_ipa = ' '.join([ipa_dict[x] for x in word_ipa_mauser])
         ipa_phrase.append(word_ipa)
         ort_phrase.append(word[5])
-    return '  '.join(ipa_phrase), ' '.join(ort_phrase)
+    return '   '.join(ipa_phrase), ' '.join(ort_phrase)
 
 def _extract_speakerid_gender_age(s):
     if not s: return None, None, None
@@ -218,11 +233,11 @@ def clean_mls_phrases(mls_words= None, check_manifest= True):
     if not mls_words:
         mls_words = load_mls_words()
     d = cgn_phonemes.Ipa().ipa_to_simple_ipa_dict_mauser
-    mls_phrases = _mls_words_to_phrases(common_voice_words)
+    mls_phrases = _mls_words_to_phrases(mls_words)
     manifest = load_manifest()
     outputs = []
     error = []
-    for filename, words in progressbar(cv_phrases.items()):
+    for filename, words in progressbar(mls_phrases.items()):
         if len(words) == 0:
             error.append(filename)
             continue
