@@ -1,5 +1,26 @@
 Descriptive statistics of pretrain materials of the dutch wav2vec 2.0 model
 
+
+## Pretraining Data
+
+- **Audio fragments** used for pretraining range between **2 and 20 seconds** in duration.  
+
+- **Common Voice (CV):** consists of recordings of **read sentences**.  
+
+- **CGN:** audio files are segmented by **speaker turns**.  
+  - Segmentation boundaries are placed at sentence-final punctuation marks (e.g., `.`).  
+  - Multiple phrases are sometimes concatenated to form longer segments.  
+
+- **MLS:** recordings of **read books**, segmented into chunks of approximately **15 seconds**.  
+
+## Metadata
+
+- For each dataset (MLS, CV, and CGN), a **JSON metadata file** has been created.  
+- The file `pretraining_ipas_phrases.txt` contains the **IPA transcription** for each audio file across the three datasets.  
+  - Each line corresponds to one audio file.  
+  - **Words** are separated by three spaces.  
+  - **Phonemes** are separated by a single space.  
+
 Total word count: 7.807.589
 
 Total phone count: 29.404.770
