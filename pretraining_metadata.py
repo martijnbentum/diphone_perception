@@ -3,6 +3,19 @@ import locations
 import cgn_phonemes
 from progressbar import progressbar
 
+def load_pretraining_datasets(exclude_not_in_manifest=True):
+    common_voice = make_or_load_common_voice_phrases_json()
+    mls = make_or_load_mls_phrases_json()
+    cgn = make_or_load_cgn_phrases_json()
+    pretraining_datasets = common_voice + mls + cgn
+    if not exclude_not_in_manifest: return pretraining_datasets
+    o = []
+    for line in pretraining_datasets:
+        if line.get('in_manifest', False):
+            o.append(line)
+    pretraining_datasets = o
+    return pretraining_datasets 
+
 def make_or_load_cgn_phrases_json(phrases = None, speakers = None, 
     overwrite = False):
     if locations.cgn_phrases_json.exists() and not overwrite:
