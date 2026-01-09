@@ -44,6 +44,7 @@ class Participants:
         if labels is None: self.labels = Labels()
         else: self.labels = labels
         self._add_participants()
+        self._add_matrices()
 
     def __repr__(self):
         m = f'(Participants) n: {self.n_participants}'
@@ -57,6 +58,11 @@ class Participants:
         self.n_participants = len(self.participants)
         self.n_trials = sum([p.n_trials for p in self.participants])
         self.n_errors = sum([p.n_errors for p in self.participants])
+
+    def _add_matrices(self):
+        self.matrices = []
+        for participant in self.participants:
+            self.matrices.extend(participant.matrices().matrices)
 
     @property
     def confusion_dict(self):
@@ -328,19 +334,33 @@ def load_matrix(filename = '', diphone_position = 1, gate = 1):
     matrix = np.array(matrix)
     return matrix, row_names, column_names, filename
 
-def _get_row_and_column_names(remove_phonemes = []):
+def _get_row_and_column_names(remove_phonemes = [], keep_phonemes = [],
+    add_other = False):
+    if remove_phonemes and keep_phonemes:
+        raise ValueError('Cannot both remove and keep phonemes')
     _, _row_names, _column_names, _ = load_matrix()
-    _row_names = [pm.to_ipa_org[r] for r in _row_names]
-    _column_names = [pm.to_ipa_org[c] for c in _column_names]
-    row_names = [r for r in _row_names if r not in remove_phonemes]
-    column_names = [c for c in _column_names if c not in remove_phonemes]
-    return row_names, column_names
+    if remove_phonemes:
+        _row_names = [pm.to_ipa_org[r] for r in _row_names]
+        _column_names = [pm.to_ipa_org[c] for c in _column_names]
+        row_names = [r for r in _row_names if r not in remove_phonemes]
+        column_names = [c for c in _column_names if c not in remove_phonemes]
+        return row_names, column_names
+    if keep_phonemes:
+        _row_names = [pm.to_ipa_org[r] for r in _row_names]
+        _column_names = [pm.to_ipa_org[c] for c in _column_names]
+        row_names = [r for r in _row_names if r in keep_phonemes]
+        column_names = [c for c in _column_names if c in keep_phonemes]
+        if add_other:
+            row_names.append('other')
+            column_names.append('other')
+        return row_names, column_names
+
     
 
 class Matrix:
     def __init__(self,diphone_position= 1, gate = 1, filename = '', 
         confusion_dict = None, participant = None, name = None, 
-        remove_phonemes = []):
+        remove_phonemes = [], keep_phonemes = [], add_other = False):
         self.diphone_position = diphone_position
         self.gate = gate
         self.filename = filename
@@ -353,6 +373,8 @@ class Matrix:
             self.pp_id = participant.pp_id
         self.name = name
         self.remove_phonemes = remove_phonemes
+        self.keep_phonemes = keep_phonemes
+        self.add_other = add_other
         self.to_ipa_org = pm.to_ipa_org
         self._add_matrix()
         self._normalise_matrix()
@@ -378,7 +400,8 @@ class Matrix:
             filename = self.filename)
         self.matrix = matrix
         self.row_names, self.column_names = _get_row_and_column_names(
-            remove_phonemes = self.remove_phonemes)
+            remove_phonemes = self.remove_phonemes, 
+            keep_phonemes = self.keep_phonemes, add_other = self.add_other)
         self.filename = filename
         self.n_rows = len(self.row_names)
         self.n_columns = len(self.column_names)
@@ -386,7 +409,8 @@ class Matrix:
 
     def _add_matrix_from_confusion_dict(self):
         self.row_names, self.column_names = _get_row_and_column_names(
-            remove_phonemes = self.remove_phonemes)
+            remove_phonemes = self.remove_phonemes, 
+            keep_phonemes = self.keep_phonemes, add_other = self.add_other)
         self.n_rows = len(self.row_names)
         self.n_columns = len(self.column_names)
         self.matrix = np.zeros((self.n_rows, self.n_columns), dtype = np.int16)
@@ -397,11 +421,12 @@ class Matrix:
                 hyp_index = self.column_names.index(hyp)
                 self.matrix[gt_index, hyp_index] = count
 
-    def remove_phonemes_from_matrix(self, phonemes_to_remove = []):
+    def remove_phonemes_from_matrix(self, phonemes_to_remove = [], 
+        verbose = True):
         if not phonemes_to_remove:
             phonemes_to_remove = find_phonemes_without_response(
                 self.confusion_dict)
-        print(f'Removing phonemes: {phonemes_to_remove}')
+        if verbose:print(f'Removing phonemes: {phonemes_to_remove}')
         confusion_dict = remove_phonemes_from_confusion_dict(
             self.confusion_dict, phonemes_to_remove)
         m = Matrix(diphone_position = self.diphone_position,
@@ -409,6 +434,30 @@ class Matrix:
             name = self.name,remove_phonemes = phonemes_to_remove)
             
         return m, phonemes_to_remove
+
+    def reduce_matrix(self, phonemes_to_remove = [], phonemes_to_keep = [],
+        add_other_class = False, verbose = True):
+        if phonemes_to_remove and add_other_class:
+            m = f'Cannot both remove phonemes and add other class '
+            m += f'(not implemented) use phonemes_to_keep instead'
+            raise notImplementedError(m)
+        if not phonemes_to_remove and not phonemes_to_keep:
+            m = 'Must provide phonemes_to_remove or phonemes_to_keep'
+            raise ValueError(m)
+        if phonemes_to_remove:
+            return self.remove_phonemes_from_matrix(
+                phonemes_to_remove, verbose = verbose)
+        print(f'Keeping phonemes: {phonemes_to_keep}')
+        if add_other_class:
+            m = 'Adding "other" class to confusion dict'
+            m += ' to aggregate removed phonemes'
+        confusion_dict = keep_phonemes_in_confusion_dict(
+            self.confusion_dict, phonemes_to_keep, 
+            add_other_class = add_other_class, verbose = verbose)
+        m = Matrix(diphone_position = self.diphone_position,
+            gate = self.gate, confusion_dict = confusion_dict,
+            name = self.name,remove_phonemes = phonemes_to_remove)
+        return m, phonemes_to_keep
     
         
 
@@ -887,5 +936,31 @@ def remove_phonemes_from_confusion_dict(confusion_dict, phonemes_to_remove = [])
                 continue
             new_responses[hyp] = responses[hyp]
         output[gt] = new_responses
+    return output
+
+def keep_phonemes_in_confusion_dict(confusion_dict, phonemes_to_keep = [],
+    add_other = False, include_other_other = False):
+    if not phonemes_to_keep:
+        raise ValueError('No phonemes to keep set')
+    output = {}
+    other = {'other': 0}
+    for gt in confusion_dict:
+        if gt not in phonemes_to_keep:
+            responses = confusion_dict[gt]
+            for hyp in responses:
+                if hyp in phonemes_to_keep: other[hyp] = responses[hyp]
+                elif include_other_other: other['other'] += responses[hyp]
+            continue
+        responses = confusion_dict[gt]
+        new_responses = {}
+        other_hyp = 0
+        for hyp in responses:
+            if hyp not in phonemes_to_keep:
+                other_hyp += responses[hyp] 
+                continue
+            new_responses[hyp] = responses[hyp]
+        if add_other: new_responses['other'] = other_hyp
+        output[gt] = new_responses
+    if add_other:output['other'] = other
     return output
 
