@@ -1,0 +1,177 @@
+Descriptive statistics of pretrain materials of the dutch wav2vec 2.0 model
+
+
+## Pretraining Data
+
+- **Audio fragments** used for pretraining range between **2 and 20 seconds** in duration.  
+
+- **Common Voice (CV):** consists of recordings of **read sentences**.  
+
+- **CGN:** audio files are segmented by **speaker turns**.  
+  - Segmentation boundaries are placed at sentence-final punctuation marks (e.g., `.`).  
+  - Multiple phrases are sometimes concatenated to form longer segments.  
+
+- **MLS:** recordings of **read books**, segmented into chunks of approximately **15 seconds**.  
+
+## Metadata
+
+- For each dataset (MLS, CV, and CGN), a **JSON metadata file** has been created.  
+- The file `pretraining_ipas_phrases.txt` contains the **IPA transcription** for each audio file across the three datasets.  
+  - Each line corresponds to one audio file.  
+  - **Words** are separated by three spaces.  
+  - **Phonemes** are separated by a single space.  
+
+Total word count: 7.807.589
+
+Total phone count: 29.404.770
+
+| Phone | Count   | Percentage |
+|-------|---------|------------|
+| ə     | 3.495.810 | 11.89      |
+| t     | 2.394.953 | 8.14       |
+| n     | 2.298.460 | 7.82       |
+| r     | 1.774.972 | 6.04       |
+| d     | 1.641.035 | 5.58       |
+| s     | 1.347.776 | 4.58       |
+| ɑ     | 1.322.584 | 4.50       |
+| l     | 1.150.524 | 3.91       |
+| ɛ     | 994.168  | 3.38       |
+| k     | 948.706  | 3.23       |
+| aː    | 908.660  | 3.09       |
+| m     | 904.543  | 3.08       |
+| ɪ     | 819.008  | 2.79       |
+| eː    | 784.256  | 2.67       |
+| x     | 747.663  | 2.54       |
+| ɔ     | 689.309  | 2.34       |
+| iː    | 662.477  | 2.25       |
+| ʋ     | 659.013  | 2.24       |
+| oː    | 632.567  | 2.15       |
+| f     | 505.161  | 1.72       |
+| v     | 479.951  | 1.63       |
+| z     | 475.540  | 1.62       |
+| ɛi    | 470.207  | 1.60       |
+| h     | 444.176  | 1.51       |
+| p     | 442.121  | 1.50       |
+| b     | 438.004  | 1.49       |
+| ɣ     | 379.110  | 1.29       |
+| j     | 350.132  | 1.19       |
+| uː    | 276.362  | 0.94       |
+| ŋ     | 256.353  | 0.87       |
+| ʉ     | 205.721  | 0.70       |
+| yː    | 126.501  | 0.43       |
+| ɑu    | 115.809  | 0.39       |
+| œy    | 112.942  | 0.38       |
+| g     | 59.624   | 0.20       |
+| øː    | 40.596   | 0.14       |
+| ʃ     | 28.965   | 0.10       |
+| ɲ     | 11592   | 0.04       |
+| ʒ     | 9419    | 0.03       |
+
+
+Top 100 words (accounts for 50%)
+Total word count: 7.807.589
+
+| Word       | Count    | Percentage |
+|------------|----------|------------|
+| de         | 285.588  | 3.66       |
+| en         | 207.992  | 2.66       |
+| dat        | 188.457  | 2.41       |
+| een        | 168.239  | 2.15       |
+| van        | 151.625  | 1.94       |
+| ik         | 143.193  | 1.83       |
+| het        | 130.732  | 1.67       |
+| in         | 121.810  | 1.56       |
+| uh         | 115.302  | 1.48       |
+| die        | 110.945  | 1.42       |
+| is         | 110.420  | 1.41       |
+| niet       | 90.143   | 1.15       |
+| maar       | 78.902   | 1.01       |
+| ja         | 77.030   | 0.99       |
+| te         | 76.648   | 0.98       |
+| je         | 76.095   | 0.97       |
+| op         | 73.618   | 0.94       |
+| dan        | 69.458   | 0.89       |
+| 't         | 64.198   | 0.82       |
+| met        | 63.136   | 0.81       |
+| zijn       | 59.149   | 0.76       |
+| ook        | 58.842   | 0.75       |
+| ze         | 51.168   | 0.66       |
+| voor       | 50.242   | 0.64       |
+| was        | 49.885   | 0.64       |
+| als        | 46.633   | 0.60       |
+| hij        | 42.628   | 0.55       |
+| er         | 42.223   | 0.54       |
+| aan        | 42.171   | 0.54       |
+| wel        | 41.487   | 0.53       |
+| wat        | 40.738   | 0.52       |
+| nog        | 38.439   | 0.49       |
+| om         | 38.256   | 0.49       |
+| we         | 35.292   | 0.45       |
+| of         | 35.024   | 0.45       |
+| dus        | 34.291   | 0.44       |
+| zo         | 34.024   | 0.44       |
+| daar       | 32.251   | 0.41       |
+| naar       | 29.289   | 0.37       |
+| bij        | 27.231   | 0.35       |
+| hebben     | 27.013   | 0.35       |
+| heb        | 26.483   | 0.34       |
+| haar       | 26.381   | 0.34       |
+| had        | 26.220   | 0.34       |
+| nu         | 25.897   | 0.33       |
+| zij        | 25.231   | 0.32       |
+| heeft      | 23.675   | 0.30       |
+| al         | 23.497   | 0.30       |
+| over       | 23.087   | 0.30       |
+| moet       | 22.643   | 0.29       |
+| u          | 21.010   | 0.27       |
+| nou        | 20.883   | 0.27       |
+| toch       | 20.705   | 0.27       |
+| uit        | 20.247   | 0.26       |
+| kan        | 19.985   | 0.26       |
+| dit        | 18.925   | 0.24       |
+| door       | 18.907   | 0.24       |
+| meer       | 18.781   | 0.24       |
+| want       | 18.589   | 0.24       |
+| heel       | 18.098   | 0.23       |
+| zich       | 18.069   | 0.23       |
+| den        | 17.991   | 0.23       |
+| 'k         | 17.689   | 0.23       |
+| geen       | 17.482   | 0.22       |
+| zou        | 17.471   | 0.22       |
+| toen       | 16.542   | 0.21       |
+| hè         | 16.394   | 0.21       |
+| mij        | 16.283   | 0.21       |
+| mijn       | 16.234   | 0.21       |
+| gaan       | 15.741   | 0.20       |
+| wij        | 15.724   | 0.20       |
+| veel       | 15.266   | 0.20       |
+| goed       | 14.932   | 0.19       |
+| uhm        | 14.725   | 0.19       |
+| hem        | 14.396   | 0.18       |
+| nee        | 14.251   | 0.18       |
+| hoe        | 14.014   | 0.18       |
+| tot        | 13.857   | 0.18       |
+| doen       | 13.712   | 0.18       |
+| worden     | 13.651   | 0.17       |
+| hier       | 13.597   | 0.17       |
+| waar       | 13.577   | 0.17       |
+| kunnen     | 13.462   | 0.17       |
+| d'r        | 13.218   | 0.17       |
+| weet       | 13.163   | 0.17       |
+| twee       | 12.278   | 0.16       |
+| zal        | 12.258   | 0.16       |
+| ben        | 12.190   | 0.16       |
+| gaat       | 12.083   | 0.15       |
+| deze       | 12.023   | 0.15       |
+| weer       | 11.834   | 0.15       |
+| iets       | 11.826   | 0.15       |
+| moeten     | 11.743   | 0.15       |
+| wordt      | 11.445   | 0.15       |
+| één        | 11.418   | 0.15       |
+| echt       | 11.037   | 0.14       |
+| eigenlijk  | 10.986   | 0.14       |
+| gewoon     | 10.736   | 0.14       |
+| ons        | 10.390   | 0.13       |
+| jaar       | 10.361   | 0.13       |
+| other      | 3.574.489| 45.78      |
+
