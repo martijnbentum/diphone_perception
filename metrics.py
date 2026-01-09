@@ -82,6 +82,18 @@ def confusion_matrix_to_mcc(cm):
     y_true, y_pred = confusion_matrix_to_gt_pred(cm)
     return mcc(y_true, y_pred)
 
+def mcc_from_confusion_dict(confusion):
+    y_true = []
+    y_pred = []
+
+    for true_label, preds in confusion.items():
+        for pred_label, count in preds.items():
+            y_true.extend([true_label] * count)
+            y_pred.extend([pred_label] * count)
+
+    return matthews_corrcoef(y_true, y_pred)
+
+
 def confusion_matrix_accuracy(cm):
     y_true, y_pred = confusion_matrix_to_gt_pred(cm)
     return accuracy(y_true, y_pred)
