@@ -33,8 +33,8 @@ def plot_participants_rsa(participants = None, ci = 0.95, phone1 = None,
     plt.show()
 
 
-def plot_participants_mcc(participants = None, ci = 0.95):
-    phone1, phone2 = gather_mcc_values(participants)
+def plot_participants_mcc(participants = None, ci = 0.95, remove_phonemes = []):
+    phone1, phone2 = gather_mcc_values(participants, remove_phonemes)
     phone1_mean, phone1_ci = matrix_to_mean_and_ci(phone1, ci)
     phone2_mean, phone2_ci = matrix_to_mean_and_ci(phone2, ci)
     l = f' ({participants.n_participants} Participants, CI={ci})'
@@ -59,13 +59,15 @@ def plot_participants_mcc(participants = None, ci = 0.95):
 
 
 
-def gather_mcc_values(participants=None):
+def gather_mcc_values(participants=None, remove_phonemes = []):
     if participants is None:
         participants = data.Participants()
     phone1 = np.zeros((participants.n_participants,6))
     phone2 = np.zeros((participants.n_participants,6))
     for row_index, participant in enumerate(participants.participants):
         for m in participant.matrices().matrices:
+            if remove_phonemes:
+                m, _ = m.remove_phonemes_from_matrix(remove_phonemes)
             col_index = index = m.gate - 1
             if m.diphone_position == 1:
                 phone1[row_index, col_index] = m.mcc
