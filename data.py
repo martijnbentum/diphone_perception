@@ -339,21 +339,18 @@ def _get_row_and_column_names(remove_phonemes = [], keep_phonemes = [],
     if remove_phonemes and keep_phonemes:
         raise ValueError('Cannot both remove and keep phonemes')
     _, _row_names, _column_names, _ = load_matrix()
+    row_names = [pm.to_ipa_org[r] for r in _row_names]
+    column_names = [pm.to_ipa_org[c] for c in _column_names]
     if remove_phonemes:
-        _row_names = [pm.to_ipa_org[r] for r in _row_names]
-        _column_names = [pm.to_ipa_org[c] for c in _column_names]
-        row_names = [r for r in _row_names if r not in remove_phonemes]
-        column_names = [c for c in _column_names if c not in remove_phonemes]
-        return row_names, column_names
+        row_names = [r for r in row_names if r not in remove_phonemes]
+        column_names = [c for c in column_names if c not in remove_phonemes]
     if keep_phonemes:
-        _row_names = [pm.to_ipa_org[r] for r in _row_names]
-        _column_names = [pm.to_ipa_org[c] for c in _column_names]
-        row_names = [r for r in _row_names if r in keep_phonemes]
-        column_names = [c for c in _column_names if c in keep_phonemes]
-        if add_other:
-            row_names.append('other')
-            column_names.append('other')
-        return row_names, column_names
+        row_names = [r for r in row_names if r in keep_phonemes]
+        column_names = [c for c in column_names if c in keep_phonemes]
+    if add_other:
+        row_names.append('other')
+        column_names.append('other')
+    return row_names, column_names
 
     
 
@@ -436,7 +433,7 @@ class Matrix:
         return m, phonemes_to_remove
 
     def reduce_matrix(self, phonemes_to_remove = [], phonemes_to_keep = [],
-        add_other_class = False, verbose = True):
+        add_other = True, add_other_class = False, verbose = True):
         if phonemes_to_remove and add_other_class:
             m = f'Cannot both remove phonemes and add other class '
             m += f'(not implemented) use phonemes_to_keep instead'
@@ -452,11 +449,12 @@ class Matrix:
             m = 'Adding "other" class to confusion dict'
             m += ' to aggregate removed phonemes'
         confusion_dict = keep_phonemes_in_confusion_dict(
-            self.confusion_dict, phonemes_to_keep, 
-            add_other_class = add_other_class, verbose = verbose)
+            self.confusion_dict, phonemes_to_keep, add_other = add_other,
+            add_other_class = add_other_class)
         m = Matrix(diphone_position = self.diphone_position,
             gate = self.gate, confusion_dict = confusion_dict,
-            name = self.name,remove_phonemes = phonemes_to_remove)
+            name = self.name,remove_phonemes = phonemes_to_remove,
+            keep_phonemes = phonemes_to_keep, add_other= add_other)
         return m, phonemes_to_keep
     
         
@@ -939,7 +937,7 @@ def remove_phonemes_from_confusion_dict(confusion_dict, phonemes_to_remove = [])
     return output
 
 def keep_phonemes_in_confusion_dict(confusion_dict, phonemes_to_keep = [],
-    add_other = False, include_other_other = False):
+    add_other = False, add_other_class= False):
     if not phonemes_to_keep:
         raise ValueError('No phonemes to keep set')
     output = {}
@@ -949,7 +947,7 @@ def keep_phonemes_in_confusion_dict(confusion_dict, phonemes_to_keep = [],
             responses = confusion_dict[gt]
             for hyp in responses:
                 if hyp in phonemes_to_keep: other[hyp] = responses[hyp]
-                elif include_other_other: other['other'] += responses[hyp]
+                elif add_other_class: other['other'] += responses[hyp]
             continue
         responses = confusion_dict[gt]
         new_responses = {}
@@ -961,6 +959,7 @@ def keep_phonemes_in_confusion_dict(confusion_dict, phonemes_to_keep = [],
             new_responses[hyp] = responses[hyp]
         if add_other: new_responses['other'] = other_hyp
         output[gt] = new_responses
-    if add_other:output['other'] = other
+    if add_other_class:output['other'] = other
+    else: output['other'] = {}
     return output
 
