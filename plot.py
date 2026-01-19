@@ -33,8 +33,10 @@ def plot_participants_rsa(participants = None, ci = 0.95, phone1 = None,
     plt.show()
 
 
-def plot_participants_mcc(participants = None, ci = 0.95, remove_phonemes = []):
-    phone1, phone2 = gather_mcc_values(participants, remove_phonemes)
+def plot_participants_mcc(participants = None, ci = 0.95, remove_phonemes = [],
+    keep_phonemes = [], subtitle = ''):
+    phone1, phone2 = gather_mcc_values(participants, remove_phonemes,
+        keep_phonemes)
     phone1_mean, phone1_ci = matrix_to_mean_and_ci(phone1, ci)
     phone2_mean, phone2_ci = matrix_to_mean_and_ci(phone2, ci)
     l = f' ({participants.n_participants} Participants, CI={ci})'
@@ -52,14 +54,18 @@ def plot_participants_mcc(participants = None, ci = 0.95, remove_phonemes = []):
     plt.legend()
     plt.xlabel('Diphone Gate')
     plt.ylabel('MCC')
+    if keep_phonemes and not subtitle:
+        subtitle = f'\n (only phonemes: {", ".join(keep_phonemes)})'
     title = f'MCC for gated phone classification of diphones'
+    title += f' {subtitle}' if subtitle else ''
     plt.title(title)
     plt.show()
     
 
 
 
-def gather_mcc_values(participants=None, remove_phonemes = []):
+def gather_mcc_values(participants=None, remove_phonemes = [], 
+    keep_phonemes = []):
     if participants is None:
         participants = data.Participants()
     phone1 = np.zeros((participants.n_participants,6))
@@ -68,6 +74,8 @@ def gather_mcc_values(participants=None, remove_phonemes = []):
         for m in participant.matrices().matrices:
             if remove_phonemes:
                 m, _ = m.remove_phonemes_from_matrix(remove_phonemes)
+            if keep_phonemes:
+                m, _ = m.reduce_matrix(phonemes_to_keep = keep_phonemes)
             col_index = index = m.gate - 1
             if m.diphone_position == 1:
                 phone1[row_index, col_index] = m.mcc
