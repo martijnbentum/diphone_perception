@@ -4,9 +4,13 @@ import pretraining_metadata as pm
 import re
 
 def load_pretraining_datasets(exclude_not_in_manifest = True):
+    '''Load pretraining datasets from pretraining_metadata module.
+    '''
     return pm.load_pretraining_datasets(exclude_not_in_manifest)
 
 def make_ipa_phrases(pretraining_datasets = None, remove_word_boundaries = True):
+    '''Return list of IPA phrases from pretraining datasets.
+    '''
     if not pretraining_datasets: 
         pretraining_datasets = load_pretraining_datasets()
     ipas = []
@@ -17,10 +21,27 @@ def make_ipa_phrases(pretraining_datasets = None, remove_word_boundaries = True)
     return ipas
 
 def phone_frequencies(pretraining_datasets):
+    '''Return a Counter mapping phoneme (IPA symbol) to frequency count.
+    '''
     ipas = make_ipa_phrases(pretraining_datasets, remove_word_boundaries = True)
     ipas = ' '.join(ipas)
     ipas = re.sub(r'\s{2,}', ' ', ipas)
     return Counter(ipas.split(' '))
+
+def bin_equal_width(counter_dict, n_bins):
+    '''bin items into n_bins of approximately equal size.
+    '''
+    length = len(counter_dict)
+    phonemes = [x[0] for x in counter_dict.most_common()]
+    n_items = math.ceil(length / n_bins)
+    binned_phonemes = []
+    for i in range(n_bins):
+        start = i * n_items
+        end = min((i + 1) * n_items, length)
+        binned_phonemes.append(phonemes[start:end])
+    if end < (len(phonemes) - 1):
+        binned_phonemes[-1].extend(phonemes[end:])
+    return binned_phonemes
         
 
 def bin_by_cumulative_mass(counter_dict, n_bins):
