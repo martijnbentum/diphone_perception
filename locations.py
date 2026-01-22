@@ -41,3 +41,5 @@ mls_words = pretraining_metadata / 'dutch_mls_words_zs.tsv'
 cgn_phrases_json = Path('../cgn_phrases.json')
 common_voice_phrases_json = Path('../common_voice_phrases.json')
 mls_phrases_json = Path('../mls_phrases.json')
+
+textgrid_directory = Path('textgrids/')
