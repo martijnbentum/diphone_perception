@@ -533,6 +533,19 @@ def test_phones_label_to_phraser_phone_groups_by_label(tmp_path):
     assert [p.key for p in grouped[e_ipa]] == [e_key]
 
 
+def test_sentence_edge_position(tmp_path):
+    sentence_path, metadata_path, _ = build_three_phone_dataset(tmp_path)
+    phones_obj = metadata.Phones(path=metadata_path, sentence_path=sentence_path)
+    d_phone, e_phone, f_phone = phones_obj.phones
+
+    # d_phone: previous=SOS, next=e -> sentence-first
+    # e_phone: previous=d, next=f -> interior
+    # f_phone: previous=e, next=EOS -> sentence-last
+    assert metadata._sentence_edge_position(d_phone) == 'first'
+    assert metadata._sentence_edge_position(e_phone) == 'interior'
+    assert metadata._sentence_edge_position(f_phone) == 'last'
+
+
 def test_phones_analyze_phraser_failures(tmp_path, capsys):
     sentence_path, metadata_path, e_ipa = build_three_phone_dataset(tmp_path)
     phones_obj = metadata.Phones(path=metadata_path, sentence_path=sentence_path)
@@ -550,10 +563,16 @@ def test_phones_analyze_phraser_failures(tmp_path, capsys):
     assert stats['by_type'] == Counter(
         {'NoCandidateError': 1, 'AmbiguousMatchError': 1})
     assert stats['by_label'] == Counter({e_ipa: 1, 'f': 1})
+    assert stats['by_audio'] == Counter({'fn1': 2})
+    assert stats['by_overlap'] == Counter({False: 2})
+    assert stats['by_comp'] == Counter({'k': 2})
+    # e_phone is interior (prev=d, next=f); f_phone is sentence-last (next=EOS)
+    assert stats['by_sentence_edge'] == Counter({'interior': 1, 'last': 1})
 
     printed = capsys.readouterr().out
     assert 'NoCandidateError' in printed
     assert 'AmbiguousMatchError' in printed
+    assert 'fn1' in printed
 
 
 def test_phones_analyze_phraser_failures_raises_before_save(tmp_path):

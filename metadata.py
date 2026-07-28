@@ -191,6 +191,19 @@ def _phraser_siblings_match(phones, candidate, phone_object):
     return prev_ok and next_ok
 
 
+def _sentence_edge_position(phone):
+    '''classify a phone as first/last/both/interior within its sentence.'''
+    is_first = phone.previous_phoneme_ipa == 'SOS'
+    is_last = phone.next_phoneme_ipa == 'EOS'
+    if is_first and is_last:
+        return 'both'
+    if is_first:
+        return 'first'
+    if is_last:
+        return 'last'
+    return 'interior'
+
+
 class NoCandidateError(ValueError):
     '''raised when no phraser phone falls within the tolerance window.'''
 
@@ -412,10 +425,11 @@ class Phones:
         return self._label_to_phraser_phone
 
     def analyze_phraser_failures(self):
-        '''summarize self.phraser_match_failures: counts by error type
-        (NoCandidateError vs AmbiguousMatchError) and by phoneme label.
-        prints the summary and returns it as a dict. raises if
-        save_phraser_keys has not been run yet.
+        '''summarize self.phraser_match_failures: counts by error type,
+        phoneme label, audio recording, overlap, comp, and position within
+        the sentence (first/last/interior phone). prints the summary and
+        returns it as a dict. raises if save_phraser_keys has not been run
+        yet.
         '''
         if not hasattr(self, 'phraser_match_failures'):
             raise ValueError(
@@ -425,11 +439,20 @@ class Phones:
         total_phones = len(self.phones)
         by_type = Counter(type(error).__name__ for _, error in failures)
         by_label = Counter(phone.phoneme_ipa for phone, _ in failures)
+        by_audio = Counter(phone.audio_filename_id for phone, _ in failures)
+        by_overlap = Counter(phone.overlap for phone, _ in failures)
+        by_comp = Counter(phone.comp for phone, _ in failures)
+        by_sentence_edge = Counter(
+            _sentence_edge_position(phone) for phone, _ in failures)
         stats = {
             'total_failures': len(failures),
             'total_phones': total_phones,
             'by_type': by_type,
             'by_label': by_label,
+            'by_audio': by_audio,
+            'by_overlap': by_overlap,
+            'by_comp': by_comp,
+            'by_sentence_edge': by_sentence_edge,
         }
 
         rate = 100 * stats['total_failures'] / total_phones if total_phones else 0
@@ -443,5 +466,17 @@ class Phones:
         print('by phoneme label:')
         for label, count in by_label.most_common():
             print(f'  {label:<4} {count}')
+        print('by overlap:')
+        for overlap, count in by_overlap.most_common():
+            print(f'  {overlap!s:<6} {count}')
+        print('by comp:')
+        for comp, count in by_comp.most_common():
+            print(f'  {comp:<4} {count}')
+        print('by sentence position:')
+        for position, count in by_sentence_edge.most_common():
+            print(f'  {position:<10} {count}')
+        print(f'top 10 recordings by failure count (of {len(by_audio)}):')
+        for audio_id, count in by_audio.most_common(10):
+            print(f'  {audio_id:<12} {count}')
 
         return stats
