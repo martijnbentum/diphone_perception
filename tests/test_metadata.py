@@ -572,18 +572,20 @@ def test_phones_analyze_phraser_failures(tmp_path, capsys):
     assert stats['by_type'] == Counter(
         {'NoCandidateError': 1, 'AmbiguousMatchError': 1})
     assert stats['by_label'] == Counter({e_ipa: 1, 'f': 1})
-    assert stats['by_audio'] == Counter({'fn1': 2})
     assert stats['by_overlap'] == Counter({False: 2})
     assert stats['by_comp'] == Counter({'k': 2})
     # e_phone is interior (prev=d, next=f); f_phone is sentence-last (next=EOS)
     assert stats['by_sentence_edge'] == Counter({'interior': 1, 'last': 1})
     assert stats['by_closest_label'] == Counter({'x': 1, 'f': 1})
+    assert stats['by_label_closest_label'] == {
+        e_ipa: Counter({'x': 1}),
+        'f': Counter({'f': 1}),
+    }
     assert stats['closest_matches_expected'] == 1
 
     printed = capsys.readouterr().out
     assert 'NoCandidateError' in printed
     assert 'AmbiguousMatchError' in printed
-    assert 'fn1' in printed
 
 
 def test_phones_analyze_phraser_failures_raises_before_save(tmp_path):

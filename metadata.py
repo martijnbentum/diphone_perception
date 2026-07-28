@@ -473,13 +473,14 @@ class Phones:
 
     def analyze_phraser_failures(self):
         '''summarize self.phraser_match_failures: counts by error type,
-        phoneme label, audio recording, overlap, comp, position within the
-        sentence (first/last/interior phone), and the label of the phraser
-        phone closest in time (any label, not just the expected one) -
-        useful to tell "right phone, just outside the tolerance window"
-        from "wrong phone entirely" failures. prints the summary and
-        returns it as a dict. raises if save_phraser_keys has not been run
-        yet.
+        phoneme label, overlap, comp, position within the sentence
+        (first/last/interior phone), and the label of the phraser phone
+        closest in time (any label, not just the expected one) - useful to
+        tell "right phone, just outside the tolerance window" from "wrong
+        phone entirely" failures. also breaks the closest-label counts
+        down per expected label, to spot systematic label confusions.
+        prints the summary and returns it as a dict. raises if
+        save_phraser_keys has not been run yet.
         '''
         if not hasattr(self, 'phraser_match_failures'):
             raise ValueError(
@@ -489,7 +490,6 @@ class Phones:
         total_phones = len(self.phones)
         by_type = Counter(type(error).__name__ for _, error in failures)
         by_label = Counter(phone.phoneme_ipa for phone, _ in failures)
-        by_audio = Counter(phone.audio_filename_id for phone, _ in failures)
         by_overlap = Counter(phone.overlap for phone, _ in failures)
         by_comp = Counter(phone.comp for phone, _ in failures)
         by_sentence_edge = Counter(
@@ -499,6 +499,10 @@ class Phones:
             for phone, _ in progressbar(failures)
         ]
         by_closest_label = Counter(closest_labels)
+        by_label_closest_label = {}
+        for (phone, _), closest in zip(failures, closest_labels):
+            by_label_closest_label.setdefault(
+                phone.phoneme_ipa, Counter())[closest] += 1
         closest_matches_expected = sum(
             phone.phoneme_ipa == closest
             for (phone, _), closest in zip(failures, closest_labels)
@@ -508,11 +512,11 @@ class Phones:
             'total_phones': total_phones,
             'by_type': by_type,
             'by_label': by_label,
-            'by_audio': by_audio,
             'by_overlap': by_overlap,
             'by_comp': by_comp,
             'by_sentence_edge': by_sentence_edge,
             'by_closest_label': by_closest_label,
+            'by_label_closest_label': by_label_closest_label,
             'closest_matches_expected': closest_matches_expected,
         }
 
@@ -543,8 +547,12 @@ class Phones:
         print('by closest-in-time phraser label:')
         for label, count in by_closest_label.most_common(10):
             print(f'  {label!s:<4} {count}')
-        print(f'top 10 recordings by failure count (of {len(by_audio)}):')
-        for audio_id, count in by_audio.most_common(10):
-            print(f'  {audio_id:<12} {count}')
+        print('by label -> closest-in-time label:')
+        for label, _ in by_label.most_common():
+            breakdown = ', '.join(
+                f'{closest!s}={count}'
+                for closest, count in by_label_closest_label[label].most_common(5)
+            )
+            print(f'  {label:<4} {breakdown}')
 
         return stats
