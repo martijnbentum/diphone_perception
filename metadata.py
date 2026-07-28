@@ -1,12 +1,18 @@
 import csv
 from pathlib import Path
 from phone_mapper import cgn
+from phraser import Store
 
 _data_dir = Path(__file__).resolve().parent.parent / 'data'
 metadata_file = _data_dir / 'metadata.csv'
 sentence_file = _data_dir / 'news_books_sentences_zs.tsv'
+cgn_lmdb = Path('/vol/mlusers/mbentum/phraser/data/cgn_lmdb')
 _boundary_tokens = ('SOS', 'EOS')
 _bool = {'True': True, 'False': False}
+
+
+def load_cgn(path=cgn_lmdb):
+    return Store(path=path)
 
 
 def _sampa_to_ipa(sampa):
