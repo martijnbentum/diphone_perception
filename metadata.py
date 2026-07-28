@@ -191,6 +191,14 @@ def _phraser_siblings_match(phones, candidate, phone_object):
     return prev_ok and next_ok
 
 
+class NoCandidateError(ValueError):
+    '''raised when no phraser phone falls within the tolerance window.'''
+
+
+class AmbiguousMatchError(ValueError):
+    '''raised when more than one phraser phone remains after matching.'''
+
+
 def build_audio_index(store):
     '''map audio_filename_id (the filename stem) -> Audio, for every Audio
     in the store. Load once and reuse across many get_phraser_phone calls
@@ -248,7 +256,7 @@ def get_phraser_phone(store, phone_object, tolerance_ms=25, audio_index=None):
     ]
 
     if not candidates:
-        raise ValueError(
+        raise NoCandidateError(
             f'no phraser phone found for {phone_object.audio_filename!r} '
             f'label={phone_object.phoneme_ipa!r} '
             f'start={phone_object.start} end={phone_object.end}'
@@ -263,7 +271,7 @@ def get_phraser_phone(store, phone_object, tolerance_ms=25, audio_index=None):
     if len(refined) == 1:
         return refined[0]
 
-    raise ValueError(
+    raise AmbiguousMatchError(
         f'ambiguous phraser phone match for {phone_object.audio_filename!r} '
         f'label={phone_object.phoneme_ipa!r}: {len(candidates)} candidates '
         f'in window, {len(refined)} after neighbor-label check'
@@ -337,7 +345,10 @@ class Phones:
         keys are stored as fixed 22-byte records, one per phone, in the
         same order as self.phones. a phone that could not be matched gets
         a zero-byte placeholder instead, so later indices still line up
-        with self.phones. returns the list of phones that failed to match.
+        with self.phones. phones that failed to match, along with the
+        error raised for each, are stored on self.phraser_match_failures
+        (a list of (phone, error) pairs) rather than returned - see
+        analyze_phraser_failures().
 
         uses self.audio_index (one bulk load of every Audio) instead of
         looking up the audio per phone, which would otherwise reload every
@@ -345,7 +356,7 @@ class Phones:
         '''
         path = path or self.phraser_key_path
         audio_index = self.audio_index
-        failed = []
+        failures = []
         keys = bytearray()
         for phone in progressbar(self.phones):
             try:
@@ -353,12 +364,12 @@ class Phones:
                     self.store, tolerance_ms=tolerance_ms,
                     audio_index=audio_index)
                 keys += phraser_phone.key
-            except ValueError:
-                failed.append(phone)
+            except ValueError as error:
+                failures.append((phone, error))
                 keys += _phraser_key_placeholder
         with open(path, 'wb') as f:
             f.write(keys)
-        return failed
+        self.phraser_match_failures = failures
 
     def load_phraser_phones(self, path=None):
         '''bulk-load the phraser Phone objects saved by save_phraser_keys.
@@ -399,3 +410,38 @@ class Phones:
             grouped.setdefault(phraser_phone.label, []).append(phraser_phone)
         self._label_to_phraser_phone = grouped
         return self._label_to_phraser_phone
+
+    def analyze_phraser_failures(self):
+        '''summarize self.phraser_match_failures: counts by error type
+        (NoCandidateError vs AmbiguousMatchError) and by phoneme label.
+        prints the summary and returns it as a dict. raises if
+        save_phraser_keys has not been run yet.
+        '''
+        if not hasattr(self, 'phraser_match_failures'):
+            raise ValueError(
+                'no phraser_match_failures - run save_phraser_keys first')
+
+        failures = self.phraser_match_failures
+        total_phones = len(self.phones)
+        by_type = Counter(type(error).__name__ for _, error in failures)
+        by_label = Counter(phone.phoneme_ipa for phone, _ in failures)
+        stats = {
+            'total_failures': len(failures),
+            'total_phones': total_phones,
+            'by_type': by_type,
+            'by_label': by_label,
+        }
+
+        rate = 100 * stats['total_failures'] / total_phones if total_phones else 0
+        print(
+            f"{stats['total_failures']} / {total_phones} phones failed "
+            f"to match ({rate:.1f}%)"
+        )
+        print('by error type:')
+        for name, count in by_type.most_common():
+            print(f'  {name:<20} {count}')
+        print('by phoneme label:')
+        for label, count in by_label.most_common():
+            print(f'  {label:<4} {count}')
+
+        return stats

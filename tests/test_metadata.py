@@ -473,9 +473,12 @@ def test_phones_save_and_load_phraser_keys_roundtrip(tmp_path):
     ])
     phones_obj._store = StubBulkStore(stub_audio)
 
-    failed = phones_obj.save_phraser_keys()
+    phones_obj.save_phraser_keys()
 
-    assert failed == [f_phone]
+    failed_phones = [phone for phone, error in phones_obj.phraser_match_failures]
+    assert failed_phones == [f_phone]
+    assert isinstance(
+        phones_obj.phraser_match_failures[0][1], metadata.NoCandidateError)
     assert key_path.exists()
     assert metadata.load_phraser_keys(key_path) == [d_key, e_key, None]
 
@@ -528,3 +531,33 @@ def test_phones_label_to_phraser_phone_groups_by_label(tmp_path):
     assert set(grouped.keys()) == {'d', e_ipa}
     assert [p.key for p in grouped['d']] == [d_key]
     assert [p.key for p in grouped[e_ipa]] == [e_key]
+
+
+def test_phones_analyze_phraser_failures(tmp_path, capsys):
+    sentence_path, metadata_path, e_ipa = build_three_phone_dataset(tmp_path)
+    phones_obj = metadata.Phones(path=metadata_path, sentence_path=sentence_path)
+    d_phone, e_phone, f_phone = phones_obj.phones
+
+    phones_obj.phraser_match_failures = [
+        (e_phone, metadata.NoCandidateError('no candidate')),
+        (f_phone, metadata.AmbiguousMatchError('ambiguous')),
+    ]
+
+    stats = phones_obj.analyze_phraser_failures()
+
+    assert stats['total_failures'] == 2
+    assert stats['total_phones'] == 3
+    assert stats['by_type'] == Counter(
+        {'NoCandidateError': 1, 'AmbiguousMatchError': 1})
+    assert stats['by_label'] == Counter({e_ipa: 1, 'f': 1})
+
+    printed = capsys.readouterr().out
+    assert 'NoCandidateError' in printed
+    assert 'AmbiguousMatchError' in printed
+
+
+def test_phones_analyze_phraser_failures_raises_before_save(tmp_path):
+    sentence_path, metadata_path, _ = build_three_phone_dataset(tmp_path)
+    phones_obj = metadata.Phones(path=metadata_path, sentence_path=sentence_path)
+    with pytest.raises(ValueError):
+        phones_obj.analyze_phraser_failures()
