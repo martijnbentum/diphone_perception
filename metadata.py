@@ -208,6 +208,19 @@ def build_audio_index(store):
     return index
 
 
+def _audio_phones(audio):
+    '''Audio.phones rebuilds the whole phrase/word/syllable/phone tree on
+    every access (unlike Audio.phrases, it is not cached by phraser) -
+    cache it here so repeated lookups against the same audio don't repeat
+    that walk.
+    '''
+    cached = getattr(audio, '_metadata_phones', None)
+    if cached is None:
+        cached = audio.phones
+        audio._metadata_phones = cached
+    return cached
+
+
 def get_phraser_phone(store, phone_object, tolerance_ms=25, audio_index=None):
     '''find the phraser Phone corresponding to a metadata Phone.
 
@@ -225,11 +238,14 @@ def get_phraser_phone(store, phone_object, tolerance_ms=25, audio_index=None):
     else:
         audio = store.audios.get(
             filename__contains=phone_object.audio_filename_id)
-    candidates = list(audio.phones_query.filter(
-        label=phone_object.phoneme_ipa,
-        start__gt=phone_object.start - tolerance_ms,
-        end__lt=phone_object.end + tolerance_ms,
-    ))
+
+    phones = _audio_phones(audio)
+    candidates = [
+        p for p in phones
+        if p.label == phone_object.phoneme_ipa
+        and p.start > phone_object.start - tolerance_ms
+        and p.end < phone_object.end + tolerance_ms
+    ]
 
     if not candidates:
         raise ValueError(
@@ -240,7 +256,6 @@ def get_phraser_phone(store, phone_object, tolerance_ms=25, audio_index=None):
     if len(candidates) == 1:
         return candidates[0]
 
-    phones = audio.phones
     refined = [
         candidate for candidate in candidates
         if _phraser_siblings_match(phones, candidate, phone_object)

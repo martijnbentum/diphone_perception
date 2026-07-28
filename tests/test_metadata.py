@@ -200,16 +200,6 @@ class StubAudio:
         self.phones = phones
         self.filename = filename
 
-    @property
-    def phones_query(self):
-        return self
-
-    def filter(self, label, start__gt, end__lt):
-        return [
-            p for p in self.phones
-            if p.label == label and p.start > start__gt and p.end < end__lt
-        ]
-
 
 class StubAudioLookup:
     def __init__(self, audio):
