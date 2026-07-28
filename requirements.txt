@@ -1,3 +1,4 @@
 phone_mapper @ git+https://github.com/martijnbentum/phone_mapper
 phraser @ git+https://github.com/martijnbentum/phraser.git
 pytest
+ipython
