@@ -1,3 +1,4 @@
+import bisect
 import csv
 from collections import Counter
 from pathlib import Path
@@ -242,6 +243,34 @@ def _audio_phones(audio):
     return cached
 
 
+def _audio_phones_sorted(audio):
+    '''audio's phones sorted by start time. audio.phones is only ordered
+    within each phrase, not necessarily across phrases (see
+    _phraser_siblings_match), so this sorts explicitly rather than relying
+    on tree-walk order - needed for the bisect search in
+    Phones._closest_phraser_label.
+    '''
+    cached = getattr(audio, '_metadata_phones_sorted', None)
+    if cached is None:
+        cached = sorted(_audio_phones(audio), key=lambda p: p.start)
+        audio._metadata_phones_sorted = cached
+    return cached
+
+
+def _audio_label_index(audio):
+    '''label -> list of phones with that label, for this audio. Built once
+    per audio (cached on it) so matching a phone only scans the phones
+    that already share its label, instead of every phone in the recording.
+    '''
+    cached = getattr(audio, '_metadata_label_index', None)
+    if cached is None:
+        cached = {}
+        for p in _audio_phones(audio):
+            cached.setdefault(p.label, []).append(p)
+        audio._metadata_label_index = cached
+    return cached
+
+
 def get_phraser_phone(store, phone_object, tolerance_ms=25, audio_index=None):
     '''find the phraser Phone corresponding to a metadata Phone.
 
@@ -260,11 +289,10 @@ def get_phraser_phone(store, phone_object, tolerance_ms=25, audio_index=None):
         audio = store.audios.get(
             filename__contains=phone_object.audio_filename_id)
 
-    phones = _audio_phones(audio)
+    same_label = _audio_label_index(audio).get(phone_object.phoneme_ipa, [])
     candidates = [
-        p for p in phones
-        if p.label == phone_object.phoneme_ipa
-        and p.start > phone_object.start - tolerance_ms
+        p for p in same_label
+        if p.start > phone_object.start - tolerance_ms
         and p.end < phone_object.end + tolerance_ms
     ]
 
@@ -277,6 +305,7 @@ def get_phraser_phone(store, phone_object, tolerance_ms=25, audio_index=None):
     if len(candidates) == 1:
         return candidates[0]
 
+    phones = _audio_phones(audio)
     refined = [
         candidate for candidate in candidates
         if _phraser_siblings_match(phones, candidate, phone_object)
@@ -428,12 +457,18 @@ class Phones:
         '''label of the phraser phone closest in time to `phone` (by start
         time) within the same audio, regardless of label. None if that
         audio has no phones at all.
+
+        uses bisect on a start-sorted copy of the audio's phones instead
+        of a full linear scan (min()), since this runs once per failure
+        and a recording can have hundreds to thousands of phones.
         '''
         audio = self.audio_index[phone.audio_filename_id]
-        phones = _audio_phones(audio)
+        phones = _audio_phones_sorted(audio)
         if not phones:
             return None
-        closest = min(phones, key=lambda p: abs(p.start - phone.start))
+        index = bisect.bisect_left(phones, phone.start, key=lambda p: p.start)
+        neighbors = phones[max(index - 1, 0):index + 1]
+        closest = min(neighbors, key=lambda p: abs(p.start - phone.start))
         return closest.label
 
     def analyze_phraser_failures(self):
@@ -460,7 +495,9 @@ class Phones:
         by_sentence_edge = Counter(
             _sentence_edge_position(phone) for phone, _ in failures)
         closest_labels = [
-            self._closest_phraser_label(phone) for phone, _ in failures]
+            self._closest_phraser_label(phone)
+            for phone, _ in progressbar(failures)
+        ]
         by_closest_label = Counter(closest_labels)
         closest_matches_expected = sum(
             phone.phoneme_ipa == closest
