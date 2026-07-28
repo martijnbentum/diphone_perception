@@ -1,14 +1,19 @@
 import csv
+from collections import Counter
 from pathlib import Path
+from progressbar import progressbar
 from phone_mapper import cgn
 from phraser import Store
 
 _data_dir = Path(__file__).resolve().parent.parent / 'data'
 metadata_file = _data_dir / 'metadata.csv'
 sentence_file = _data_dir / 'news_books_sentences_zs.tsv'
+phraser_key_file = _data_dir / 'phraser_phone_keys.bin'
 cgn_lmdb = Path('/vol/mlusers/mbentum/phraser/data/cgn_lmdb')
 _boundary_tokens = ('SOS', 'EOS')
 _bool = {'True': True, 'False': False}
+_phraser_key_len = 22
+_phraser_key_placeholder = b'\x00' * _phraser_key_len
 
 
 def load_cgn(path=cgn_lmdb):
@@ -70,14 +75,16 @@ def load_sentences(path=sentence_file):
     speakers = {}
     with open(path, newline='') as f:
         sentences = [
-            Sentence(row, speakers) for row in csv.DictReader(f, delimiter='\t')
+            Sentence(row, speakers)
+            for row in progressbar(csv.DictReader(f, delimiter='\t'))
         ]
     return sentences, speakers
 
 
 class Phone:
     '''one row from metadata.csv, linked to its Sentence and Speaker'''
-    def __init__(self, row, sentence_by_identifier, speakers):
+    def __init__(self, row, sentence_by_identifier, speakers, parent=None):
+        self.parent = parent
         self.audio_filename = row['audio_filename']
         self.audio_filename_id = self.audio_filename.split('_')[0]
 
@@ -138,8 +145,17 @@ class Phone:
     def end_seconds(self):
         return round(self.end_seconds_from_sentence + self.sentence.start_seconds, 3)
 
-    def phraser_phone(self, store, tolerance_ms=25):
-        return get_phraser_phone(store, self, tolerance_ms=tolerance_ms)
+    def phraser_phone(self, store=None, tolerance_ms=25):
+        if hasattr(self, '_phraser_phone'):
+            return self._phraser_phone
+        if store is None:
+            if self.parent is None:
+                raise ValueError(
+                    'no store given and no parent set on this Phone')
+            store = self.parent.store
+        self._phraser_phone = get_phraser_phone(
+            store, self, tolerance_ms=tolerance_ms)
+        return self._phraser_phone
 
 
 def load_phones(path=metadata_file, sentence_path=sentence_file):
@@ -148,7 +164,7 @@ def load_phones(path=metadata_file, sentence_path=sentence_file):
     with open(path, newline='') as f:
         return [
             Phone(row, sentence_by_identifier, speakers)
-            for row in csv.DictReader(f)
+            for row in progressbar(csv.DictReader(f))
         ]
 
 
@@ -212,3 +228,119 @@ def get_phraser_phone(store, phone_object, tolerance_ms=25):
         f'label={phone_object.phoneme_ipa!r}: {len(candidates)} candidates '
         f'in window, {len(refined)} after neighbor-label check'
     )
+
+
+def load_phraser_keys(path=phraser_key_file):
+    '''load phraser phone keys saved by Phones.save_phraser_keys.
+
+    returns a list aligned with the Phones.phones order used when saving;
+    a phone that could not be matched at save time is None.
+    '''
+    data = Path(path).read_bytes()
+    keys = [
+        data[i:i + _phraser_key_len]
+        for i in range(0, len(data), _phraser_key_len)
+    ]
+    return [None if key == _phraser_key_placeholder else key for key in keys]
+
+
+class Phones:
+    '''all Phone objects linked to a phraser store.'''
+    def __init__(self, store=None, path=metadata_file,
+        sentence_path=sentence_file, phraser_key_path=phraser_key_file):
+        self._store = store
+        self.path = path
+        self.sentence_path = sentence_path
+        self.phraser_key_path = phraser_key_path
+
+    @property
+    def store(self):
+        if self._store is None:
+            self._store = load_cgn()
+        return self._store
+
+    @property
+    def phones(self):
+        if hasattr(self, '_phones'):
+            return self._phones
+        phones = load_phones(self.path, self.sentence_path)
+        for phone in phones:
+            phone.parent = self
+        self._phones = phones
+        return self._phones
+
+    @property
+    def phoneme_counts(self):
+        if hasattr(self, '_phoneme_counts'):
+            return self._phoneme_counts
+        self._phoneme_counts = Counter(
+            phone.phoneme_ipa for phone in self.phones)
+        return self._phoneme_counts
+
+    def print_stats(self):
+        counts = self.phoneme_counts
+        total = sum(counts.values())
+        print(f'{total} phones, {len(counts)} phone types')
+        for phoneme_ipa, count in counts.most_common():
+            print(f'  {phoneme_ipa:<4} {count}')
+
+    def save_phraser_keys(self, path=None, tolerance_ms=25):
+        '''match every phone to phraser and save its key to path.
+
+        keys are stored as fixed 22-byte records, one per phone, in the
+        same order as self.phones. a phone that could not be matched gets
+        a zero-byte placeholder instead, so later indices still line up
+        with self.phones. returns the list of phones that failed to match.
+        '''
+        path = path or self.phraser_key_path
+        failed = []
+        with open(path, 'wb') as f:
+            for phone in progressbar(self.phones):
+                try:
+                    phraser_phone = phone.phraser_phone(
+                        self.store, tolerance_ms=tolerance_ms)
+                    f.write(phraser_phone.key)
+                except ValueError:
+                    failed.append(phone)
+                    f.write(_phraser_key_placeholder)
+        return failed
+
+    def load_phraser_phones(self, path=None):
+        '''bulk-load the phraser Phone objects saved by save_phraser_keys.
+
+        returns a list aligned with self.phones (None where the phone
+        wasn't matched during save_phraser_keys).
+        '''
+        path = path or self.phraser_key_path
+        keys = load_phraser_keys(path)
+        real_keys = [key for key in keys if key is not None]
+        loaded = iter(self.store.load_many(real_keys))
+        return [next(loaded) if key is not None else None for key in keys]
+
+    @property
+    def phraser_phones(self):
+        '''phraser Phone objects aligned with self.phones (None where a
+        phone couldn't be matched). Uses the cached key file at
+        self.phraser_key_path if present, building it on first use.
+        '''
+        if hasattr(self, '_phraser_phones'):
+            return self._phraser_phones
+        if not Path(self.phraser_key_path).exists():
+            self.save_phraser_keys()
+        self._phraser_phones = self.load_phraser_phones()
+        return self._phraser_phones
+
+    @property
+    def label_to_phraser_phone(self):
+        '''dict mapping each phraser phone label to the list of matched
+        phraser phones with that label (unmatched phones are skipped).
+        '''
+        if hasattr(self, '_label_to_phraser_phone'):
+            return self._label_to_phraser_phone
+        grouped = {}
+        for phraser_phone in self.phraser_phones:
+            if phraser_phone is None:
+                continue
+            grouped.setdefault(phraser_phone.label, []).append(phraser_phone)
+        self._label_to_phraser_phone = grouped
+        return self._label_to_phraser_phone
