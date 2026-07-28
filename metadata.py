@@ -145,7 +145,7 @@ class Phone:
     def end_seconds(self):
         return round(self.end_seconds_from_sentence + self.sentence.start_seconds, 3)
 
-    def phraser_phone(self, store=None, tolerance_ms=25):
+    def phraser_phone(self, store=None, tolerance_ms=25, audio_index=None):
         if hasattr(self, '_phraser_phone'):
             return self._phraser_phone
         if store is None:
@@ -154,7 +154,7 @@ class Phone:
                     'no store given and no parent set on this Phone')
             store = self.parent.store
         self._phraser_phone = get_phraser_phone(
-            store, self, tolerance_ms=tolerance_ms)
+            store, self, tolerance_ms=tolerance_ms, audio_index=audio_index)
         return self._phraser_phone
 
 
@@ -191,15 +191,40 @@ def _phraser_siblings_match(phones, candidate, phone_object):
     return prev_ok and next_ok
 
 
-def get_phraser_phone(store, phone_object, tolerance_ms=25):
+def build_audio_index(store):
+    '''map audio_filename_id (the filename stem) -> Audio, for every Audio
+    in the store. Load once and reuse across many get_phraser_phone calls
+    instead of paying store.audios.get()'s full-table scan per call.
+    '''
+    index = {}
+    for audio in store.audios.all():
+        stem = Path(audio.filename).stem
+        if stem in index and index[stem].filename != audio.filename:
+            raise ValueError(
+                f'duplicate audio stem {stem!r}: '
+                f'{index[stem].filename!r} and {audio.filename!r}'
+            )
+        index[stem] = audio
+    return index
+
+
+def get_phraser_phone(store, phone_object, tolerance_ms=25, audio_index=None):
     '''find the phraser Phone corresponding to a metadata Phone.
 
     matches by audio, ipa label, and a start/end tolerance window (forced
     alignment timing may not match exactly between the two pipelines). if
     more than one candidate remains, disambiguates using the labels of the
     neighboring phones in audio.phones.
+
+    audio_index, if given (see build_audio_index), is used instead of
+    store.audios.get() to look up the audio - much faster over many calls,
+    since store.audios.get() reloads every Audio in the store on each call.
     '''
-    audio = store.audios.get(filename__contains=phone_object.audio_filename_id)
+    if audio_index is not None:
+        audio = audio_index[phone_object.audio_filename_id]
+    else:
+        audio = store.audios.get(
+            filename__contains=phone_object.audio_filename_id)
     candidates = list(audio.phones_query.filter(
         label=phone_object.phoneme_ipa,
         start__gt=phone_object.start - tolerance_ms,
@@ -277,6 +302,13 @@ class Phones:
             phone.phoneme_ipa for phone in self.phones)
         return self._phoneme_counts
 
+    @property
+    def audio_index(self):
+        if hasattr(self, '_audio_index'):
+            return self._audio_index
+        self._audio_index = build_audio_index(self.store)
+        return self._audio_index
+
     def print_stats(self):
         counts = self.phoneme_counts
         total = sum(counts.values())
@@ -291,18 +323,26 @@ class Phones:
         same order as self.phones. a phone that could not be matched gets
         a zero-byte placeholder instead, so later indices still line up
         with self.phones. returns the list of phones that failed to match.
+
+        uses self.audio_index (one bulk load of every Audio) instead of
+        looking up the audio per phone, which would otherwise reload every
+        Audio in the store on every single phone.
         '''
         path = path or self.phraser_key_path
+        audio_index = self.audio_index
         failed = []
+        keys = bytearray()
+        for phone in progressbar(self.phones):
+            try:
+                phraser_phone = phone.phraser_phone(
+                    self.store, tolerance_ms=tolerance_ms,
+                    audio_index=audio_index)
+                keys += phraser_phone.key
+            except ValueError:
+                failed.append(phone)
+                keys += _phraser_key_placeholder
         with open(path, 'wb') as f:
-            for phone in progressbar(self.phones):
-                try:
-                    phraser_phone = phone.phraser_phone(
-                        self.store, tolerance_ms=tolerance_ms)
-                    f.write(phraser_phone.key)
-                except ValueError:
-                    failed.append(phone)
-                    f.write(_phraser_key_placeholder)
+            f.write(keys)
         return failed
 
     def load_phraser_phones(self, path=None):

@@ -196,8 +196,9 @@ class StubPhraserPhone:
 
 
 class StubAudio:
-    def __init__(self, phones):
+    def __init__(self, phones, filename='fn1.wav'):
         self.phones = phones
+        self.filename = filename
 
     @property
     def phones_query(self):
@@ -216,6 +217,9 @@ class StubAudioLookup:
 
     def get(self, filename__contains):
         return self._audio
+
+    def all(self):
+        return [self._audio]
 
 
 class StubStore:
@@ -302,7 +306,7 @@ def test_phone_phraser_phone_method_delegates(monkeypatch):
     phone, _, _ = build_linked_phone()
     captured = {}
 
-    def fake_get_phraser_phone(store, phone_object, tolerance_ms=25):
+    def fake_get_phraser_phone(store, phone_object, tolerance_ms=25, audio_index=None):
         captured['store'] = store
         captured['phone_object'] = phone_object
         captured['tolerance_ms'] = tolerance_ms
@@ -322,7 +326,7 @@ def test_phraser_phone_caches_result(monkeypatch):
     phone, _, _ = build_linked_phone()
     calls = {'n': 0}
 
-    def fake_get_phraser_phone(store, phone_object, tolerance_ms=25):
+    def fake_get_phraser_phone(store, phone_object, tolerance_ms=25, audio_index=None):
         calls['n'] += 1
         return f'result-{calls["n"]}'
 
@@ -340,7 +344,7 @@ def test_phraser_phone_uses_parent_store_when_store_none(monkeypatch):
     phone.parent = SimpleNamespace(store='parent-store')
     captured = {}
 
-    def fake_get_phraser_phone(store, phone_object, tolerance_ms=25):
+    def fake_get_phraser_phone(store, phone_object, tolerance_ms=25, audio_index=None):
         captured['store'] = store
         return 'result'
 
