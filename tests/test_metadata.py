@@ -556,6 +556,15 @@ def test_phones_analyze_phraser_failures(tmp_path, capsys):
         (f_phone, metadata.AmbiguousMatchError('ambiguous')),
     ]
 
+    # closest-in-time to e_phone is the mislabeled 'x' phone (off by 5ms);
+    # closest-in-time to f_phone is an exact-position 'f' phone (a match)
+    stub_audio = StubAudio([
+        StubPhraserPhone('d', d_phone.start, d_phone.end),
+        StubPhraserPhone('x', e_phone.start + 5, e_phone.end + 5),
+        StubPhraserPhone('f', f_phone.start, f_phone.end),
+    ])
+    phones_obj._store = StubStore(stub_audio)
+
     stats = phones_obj.analyze_phraser_failures()
 
     assert stats['total_failures'] == 2
@@ -568,6 +577,8 @@ def test_phones_analyze_phraser_failures(tmp_path, capsys):
     assert stats['by_comp'] == Counter({'k': 2})
     # e_phone is interior (prev=d, next=f); f_phone is sentence-last (next=EOS)
     assert stats['by_sentence_edge'] == Counter({'interior': 1, 'last': 1})
+    assert stats['by_closest_label'] == Counter({'x': 1, 'f': 1})
+    assert stats['closest_matches_expected'] == 1
 
     printed = capsys.readouterr().out
     assert 'NoCandidateError' in printed

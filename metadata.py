@@ -424,10 +424,25 @@ class Phones:
         self._label_to_phraser_phone = grouped
         return self._label_to_phraser_phone
 
+    def _closest_phraser_label(self, phone):
+        '''label of the phraser phone closest in time to `phone` (by start
+        time) within the same audio, regardless of label. None if that
+        audio has no phones at all.
+        '''
+        audio = self.audio_index[phone.audio_filename_id]
+        phones = _audio_phones(audio)
+        if not phones:
+            return None
+        closest = min(phones, key=lambda p: abs(p.start - phone.start))
+        return closest.label
+
     def analyze_phraser_failures(self):
         '''summarize self.phraser_match_failures: counts by error type,
-        phoneme label, audio recording, overlap, comp, and position within
-        the sentence (first/last/interior phone). prints the summary and
+        phoneme label, audio recording, overlap, comp, position within the
+        sentence (first/last/interior phone), and the label of the phraser
+        phone closest in time (any label, not just the expected one) -
+        useful to tell "right phone, just outside the tolerance window"
+        from "wrong phone entirely" failures. prints the summary and
         returns it as a dict. raises if save_phraser_keys has not been run
         yet.
         '''
@@ -444,6 +459,13 @@ class Phones:
         by_comp = Counter(phone.comp for phone, _ in failures)
         by_sentence_edge = Counter(
             _sentence_edge_position(phone) for phone, _ in failures)
+        closest_labels = [
+            self._closest_phraser_label(phone) for phone, _ in failures]
+        by_closest_label = Counter(closest_labels)
+        closest_matches_expected = sum(
+            phone.phoneme_ipa == closest
+            for (phone, _), closest in zip(failures, closest_labels)
+        )
         stats = {
             'total_failures': len(failures),
             'total_phones': total_phones,
@@ -453,6 +475,8 @@ class Phones:
             'by_overlap': by_overlap,
             'by_comp': by_comp,
             'by_sentence_edge': by_sentence_edge,
+            'by_closest_label': by_closest_label,
+            'closest_matches_expected': closest_matches_expected,
         }
 
         rate = 100 * stats['total_failures'] / total_phones if total_phones else 0
@@ -475,6 +499,13 @@ class Phones:
         print('by sentence position:')
         for position, count in by_sentence_edge.most_common():
             print(f'  {position:<10} {count}')
+        print(
+            'closest phone in time has the expected label: '
+            f'{closest_matches_expected} / {len(failures)}'
+        )
+        print('by closest-in-time phraser label:')
+        for label, count in by_closest_label.most_common(10):
+            print(f'  {label!s:<4} {count}')
         print(f'top 10 recordings by failure count (of {len(by_audio)}):')
         for audio_id, count in by_audio.most_common(10):
             print(f'  {audio_id:<12} {count}')
