@@ -1,4 +1,5 @@
 import sys
+from collections import Counter
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -187,10 +188,11 @@ def test_load_phones_links_and_shares_speakers(tmp_path):
 # -- get_phraser_phone (stubbed phraser API) -------------------------------
 
 class StubPhraserPhone:
-    def __init__(self, label, start, end):
+    def __init__(self, label, start, end, key=None):
         self.label = label
         self.start = start
         self.end = end
+        self.key = key
 
 
 class StubAudio:
@@ -219,6 +221,16 @@ class StubAudioLookup:
 class StubStore:
     def __init__(self, audio):
         self.audios = StubAudioLookup(audio)
+
+
+class StubBulkStore(StubStore):
+    '''StubStore that also supports load_many, for Phones-level tests.'''
+    def __init__(self, audio):
+        super().__init__(audio)
+        self._by_key = {phone.key: phone for phone in audio.phones}
+
+    def load_many(self, keys):
+        return [self._by_key[key] for key in keys]
 
 
 def make_phone_object(**overrides):
@@ -304,3 +316,221 @@ def test_phone_phraser_phone_method_delegates(monkeypatch):
     assert captured['store'] == 'fake-store'
     assert captured['phone_object'] is phone
     assert captured['tolerance_ms'] == 99
+
+
+def test_phraser_phone_caches_result(monkeypatch):
+    phone, _, _ = build_linked_phone()
+    calls = {'n': 0}
+
+    def fake_get_phraser_phone(store, phone_object, tolerance_ms=25):
+        calls['n'] += 1
+        return f'result-{calls["n"]}'
+
+    monkeypatch.setattr(metadata, 'get_phraser_phone', fake_get_phraser_phone)
+
+    first = phone.phraser_phone('some-store')
+    second = phone.phraser_phone('some-store')
+
+    assert first == second == 'result-1'
+    assert calls['n'] == 1
+
+
+def test_phraser_phone_uses_parent_store_when_store_none(monkeypatch):
+    phone, _, _ = build_linked_phone()
+    phone.parent = SimpleNamespace(store='parent-store')
+    captured = {}
+
+    def fake_get_phraser_phone(store, phone_object, tolerance_ms=25):
+        captured['store'] = store
+        return 'result'
+
+    monkeypatch.setattr(metadata, 'get_phraser_phone', fake_get_phraser_phone)
+
+    phone.phraser_phone()
+
+    assert captured['store'] == 'parent-store'
+
+
+def test_phraser_phone_raises_without_store_or_parent():
+    phone, _, _ = build_linked_phone()
+    assert phone.parent is None
+    with pytest.raises(ValueError):
+        phone.phraser_phone()
+
+
+# -- Phones -----------------------------------------------------------------
+
+def write_dataset(tmp_path, sentence_rows, phone_rows):
+    sentence_path = tmp_path / 'sentences.tsv'
+    metadata_path = tmp_path / 'metadata.csv'
+
+    sentence_columns = (
+        'audio_filename', 'start_time', 'end_time', 'duration', 'text',
+        'identifier', 'speaker_ids', 'comp',
+    )
+    sentence_path.write_text(
+        '\t'.join(sentence_columns) + '\n'
+        + ''.join(
+            '\t'.join(str(row[c]) for c in sentence_columns) + '\n'
+            for row in sentence_rows
+        )
+    )
+
+    phone_columns = (
+        'audio_filename', 'start_time', 'end_time', 'duration', 'phoneme',
+        'previous_phoneme', 'next_phoneme', 'speaker_id', 'overlap', 'comp',
+        'ipa_phoneme',
+    )
+    metadata_path.write_text(
+        ','.join(phone_columns) + '\n'
+        + ''.join(
+            ','.join(str(row[c]) for c in phone_columns) + '\n'
+            for row in phone_rows
+        )
+    )
+
+    return sentence_path, metadata_path
+
+
+def build_three_phone_dataset(tmp_path):
+    '''one sentence with three phones: d, e (long/tense), f.
+
+    only d and f get a stub phraser match built for them in the tests
+    below; e is left to also be matched so exactly one phone (f) can be
+    made to fail, exercising save_phraser_keys' failure handling.
+    '''
+    sentence_row = make_sentence_row(
+        audio_filename='aud1.wav', identifier='fn1_sentence-0.wav',
+        speaker_ids='N01_male_30',
+    )
+    e_ipa = cgn.cgn_to_ipa['e']
+    phone_rows = [
+        make_phone_row(
+            audio_filename='fn1_sentence-0.wav', speaker_id='N01_male_30',
+            phoneme='d', ipa_phoneme='d',
+            previous_phoneme='SOS', next_phoneme='e',
+            start_time='0.500', end_time='0.560', duration='0.060',
+        ),
+        make_phone_row(
+            audio_filename='fn1_sentence-0.wav', speaker_id='N01_male_30',
+            phoneme='e', ipa_phoneme=e_ipa,
+            previous_phoneme='d', next_phoneme='f',
+            start_time='1.000', end_time='1.060', duration='0.060',
+        ),
+        make_phone_row(
+            audio_filename='fn1_sentence-0.wav', speaker_id='N01_male_30',
+            phoneme='f', ipa_phoneme='f',
+            previous_phoneme='e', next_phoneme='EOS',
+            start_time='2.000', end_time='2.060', duration='0.060',
+        ),
+    ]
+    sentence_path, metadata_path = write_dataset(
+        tmp_path, [sentence_row], phone_rows)
+    return sentence_path, metadata_path, e_ipa
+
+
+def test_phones_phones_sets_parent(tmp_path):
+    sentence_path, metadata_path, _ = build_three_phone_dataset(tmp_path)
+    phones_obj = metadata.Phones(path=metadata_path, sentence_path=sentence_path)
+
+    phones = phones_obj.phones
+
+    assert len(phones) == 3
+    assert all(phone.parent is phones_obj for phone in phones)
+
+
+def test_phones_phoneme_counts(tmp_path):
+    sentence_path, metadata_path, e_ipa = build_three_phone_dataset(tmp_path)
+    phones_obj = metadata.Phones(path=metadata_path, sentence_path=sentence_path)
+
+    assert phones_obj.phoneme_counts == Counter({'d': 1, e_ipa: 1, 'f': 1})
+
+
+def test_phones_store_lazy_loads_cgn(monkeypatch):
+    calls = {'n': 0}
+
+    def fake_load_cgn(path=metadata.cgn_lmdb):
+        calls['n'] += 1
+        return 'cgn-store'
+
+    monkeypatch.setattr(metadata, 'load_cgn', fake_load_cgn)
+
+    phones_obj = metadata.Phones()
+    assert calls['n'] == 0
+
+    assert phones_obj.store == 'cgn-store'
+    assert phones_obj.store == 'cgn-store'
+    assert calls['n'] == 1
+
+
+def test_phones_save_and_load_phraser_keys_roundtrip(tmp_path):
+    sentence_path, metadata_path, e_ipa = build_three_phone_dataset(tmp_path)
+    key_path = tmp_path / 'keys.bin'
+    phones_obj = metadata.Phones(
+        path=metadata_path, sentence_path=sentence_path, phraser_key_path=key_path)
+    d_phone, e_phone, f_phone = phones_obj.phones
+
+    d_key = b'\x01' * 22
+    e_key = b'\x02' * 22
+    stub_audio = StubAudio([
+        StubPhraserPhone('d', d_phone.start, d_phone.end, d_key),
+        StubPhraserPhone(e_ipa, e_phone.start, e_phone.end, e_key),
+        # deliberately no stub phone for 'f' -> f_phone must fail to match
+    ])
+    phones_obj._store = StubBulkStore(stub_audio)
+
+    failed = phones_obj.save_phraser_keys()
+
+    assert failed == [f_phone]
+    assert key_path.exists()
+    assert metadata.load_phraser_keys(key_path) == [d_key, e_key, None]
+
+
+def test_phones_phraser_phones_builds_then_reuses_key_file(tmp_path):
+    sentence_path, metadata_path, e_ipa = build_three_phone_dataset(tmp_path)
+    key_path = tmp_path / 'keys.bin'
+    phones_obj = metadata.Phones(
+        path=metadata_path, sentence_path=sentence_path, phraser_key_path=key_path)
+    d_phone, e_phone, f_phone = phones_obj.phones
+
+    d_key = b'\x01' * 22
+    e_key = b'\x02' * 22
+    stub_audio = StubAudio([
+        StubPhraserPhone('d', d_phone.start, d_phone.end, d_key),
+        StubPhraserPhone(e_ipa, e_phone.start, e_phone.end, e_key),
+    ])
+    phones_obj._store = StubBulkStore(stub_audio)
+
+    assert not key_path.exists()
+    matched = phones_obj.phraser_phones
+    assert key_path.exists()
+    assert [p.key if p else None for p in matched] == [d_key, e_key, None]
+
+    # a fresh Phones instance reuses the cached key file directly
+    phones_obj2 = metadata.Phones(
+        store=phones_obj.store, path=metadata_path, sentence_path=sentence_path,
+        phraser_key_path=key_path)
+    matched2 = phones_obj2.phraser_phones
+    assert [p.key if p else None for p in matched2] == [d_key, e_key, None]
+
+
+def test_phones_label_to_phraser_phone_groups_by_label(tmp_path):
+    sentence_path, metadata_path, e_ipa = build_three_phone_dataset(tmp_path)
+    key_path = tmp_path / 'keys.bin'
+    phones_obj = metadata.Phones(
+        path=metadata_path, sentence_path=sentence_path, phraser_key_path=key_path)
+    d_phone, e_phone, f_phone = phones_obj.phones
+
+    d_key = b'\x01' * 22
+    e_key = b'\x02' * 22
+    stub_audio = StubAudio([
+        StubPhraserPhone('d', d_phone.start, d_phone.end, d_key),
+        StubPhraserPhone(e_ipa, e_phone.start, e_phone.end, e_key),
+    ])
+    phones_obj._store = StubBulkStore(stub_audio)
+
+    grouped = phones_obj.label_to_phraser_phone
+
+    assert set(grouped.keys()) == {'d', e_ipa}
+    assert [p.key for p in grouped['d']] == [d_key]
+    assert [p.key for p in grouped[e_ipa]] == [e_key]
