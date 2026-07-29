@@ -100,10 +100,11 @@ def train_binary_probe(
     n_embeds=None,
     n_splits=5,
     random_state=42,
-    save_probes=False,
+    save_probes=True,
     probe_save_dir=default_probe_save_dir,
-    save_predictions=False,
+    save_predictions=True,
     results_dir=default_results_dir,
+    overwrite=False,
     verbose=True,
 ):
     '''Train/test a binary (target-phoneme-vs-other) logistic regression
@@ -122,14 +123,63 @@ def train_binary_probe(
                        None (default) uses every available target-phoneme
                        phone rather than an arbitrary cap.
     save_probes:       dump each fold's fitted probe under probe_save_dir
+                       (default True)
     save_predictions:  dump each fold's per-example predictions under
-                       results_dir
+                       results_dir (default True) - this is also what lets
+                       an already-trained fold's accuracy be recovered
+                       without retraining, see overwrite below
+    overwrite:         if False (default) and a fold's probe AND predictions
+                       file both already exist on disk, that fold is loaded
+                       instead of retrained (its accuracy is read back from
+                       the saved predictions file). A fold with only one of
+                       the two files present (an inconsistent leftover) is
+                       always retrained, and both files are regenerated
+                       together, so a saved probe and its reported accuracy
+                       never drift apart. If save_probes or save_predictions
+                       is False, or overwrite is True, every fold is always
+                       (re)trained. Fold assignments are deterministic
+                       (same phones + n_embeds + random_state), so mixing
+                       loaded and freshly-trained folds in one call is safe
+                       - no gaps in the returned accuracies.
 
     Returns a dict with per-fold accuracies, their mean/std, the fitted
-    probes, and how many sampled phones had no stored embedding.
+    probes, how many sampled phones had no stored embedding, and whether
+    every fold was loaded from disk without training anything ('skipped').
     '''
     if store is None:
         store = echoframe.Store(str(store_root))
+
+    check_existing = save_probes and save_predictions and not overwrite
+    fold_paths = [
+        (_probe_path(probe_save_dir, model_name, target_phoneme, layer, i),
+            _predictions_path(results_dir, model_name, target_phoneme, layer, i))
+        for i in range(n_splits)
+    ]
+
+    def _fold_complete(fold_idx):
+        probe_path, pred_path = fold_paths[fold_idx]
+        return probe_path.exists() and pred_path.exists()
+
+    if check_existing and all(_fold_complete(i) for i in range(n_splits)):
+        if verbose:
+            print(f'{target_phoneme} layer {layer}: all {n_splits} folds '
+                f'already trained under {probe_save_dir} - skipping '
+                '(pass overwrite=True to retrain)')
+        probes = [joblib.load(probe_path) for probe_path, _ in fold_paths]
+        accuracies = [
+            _read_accuracy(pred_path) for _, pred_path in fold_paths]
+        mean_acc, std_acc = float(np.mean(accuracies)), float(np.std(accuracies))
+        return {
+            'target_phoneme': target_phoneme,
+            'layer': layer,
+            'accuracies': accuracies,
+            'mean_accuracy': mean_acc,
+            'std_accuracy': std_acc,
+            'probes': probes,
+            'n_samples': None,
+            'n_missing': None,
+            'skipped': True,
+        }
 
     selected = _select_phones(
         phones, target_phoneme, n_embeds, seed=random_state)
@@ -142,27 +192,34 @@ def train_binary_probe(
 
     kf = StratifiedKFold(
         n_splits=n_splits, shuffle=True, random_state=random_state)
-    accuracies, probes, fold_predictions = [], [], []
+    accuracies, probes = [], []
 
     for fold_idx, (train_idx, test_idx) in enumerate(kf.split(X, y)):
-        probe = LogisticRegression(solver='liblinear', max_iter=1000)
-        probe.fit(X[train_idx], y[train_idx])
-        y_pred = probe.predict(X[test_idx])
-        acc = accuracy_score(y[test_idx], y_pred)
+        probe_path, pred_path = fold_paths[fold_idx]
+
+        if check_existing and _fold_complete(fold_idx):
+            probe = joblib.load(probe_path)
+            acc = _read_accuracy(pred_path)
+            if verbose:
+                print(f'fold {fold_idx + 1}: already trained '
+                    f'(accuracy={acc:.4f}), skipping')
+        else:
+            probe = LogisticRegression(solver='liblinear', max_iter=1000)
+            probe.fit(X[train_idx], y[train_idx])
+            y_pred = probe.predict(X[test_idx])
+            acc = accuracy_score(y[test_idx], y_pred)
+            predictions = list(
+                zip(true_labels[test_idx], y[test_idx], y_pred))
+
+            if verbose:
+                print(f'fold {fold_idx + 1}: accuracy={acc:.4f}')
+            if save_probes:
+                _save_probe(probe, probe_path)
+            if save_predictions:
+                _save_predictions(predictions, pred_path)
 
         accuracies.append(acc)
         probes.append(probe)
-        fold_predictions.append(
-            list(zip(true_labels[test_idx], y[test_idx], y_pred)))
-
-        if verbose:
-            print(f'fold {fold_idx + 1}: accuracy={acc:.4f}')
-        if save_probes:
-            _save_probe(probe, probe_save_dir, model_name, target_phoneme,
-                layer, fold_idx)
-        if save_predictions:
-            _save_predictions(fold_predictions[-1], results_dir, model_name,
-                target_phoneme, layer, fold_idx)
 
     mean_acc, std_acc = float(np.mean(accuracies)), float(np.std(accuracies))
     if verbose:
@@ -178,24 +235,39 @@ def train_binary_probe(
         'probes': probes,
         'n_samples': len(X),
         'n_missing': len(missing),
+        'skipped': False,
     }
 
 
-def _save_probe(probe, probe_save_dir, model_name, target_phoneme, layer,
-    fold_idx):
+def _probe_path(probe_save_dir, model_name, target_phoneme, layer, fold_idx):
     probe_dir = Path(probe_save_dir) / model_name / target_phoneme
-    probe_dir.mkdir(parents=True, exist_ok=True)
-    path = probe_dir / f'layer{layer:02d}_fold{fold_idx + 1:02d}.joblib'
+    return probe_dir / f'layer{layer:02d}_fold{fold_idx + 1:02d}.joblib'
+
+
+def _predictions_path(results_dir, model_name, target_phoneme, layer,
+    fold_idx):
+    pred_dir = Path(results_dir) / model_name / target_phoneme
+    return pred_dir / f'layer{layer:02d}_fold{fold_idx + 1:02d}_predictions.txt'
+
+
+def _save_probe(probe, path):
+    path.parent.mkdir(parents=True, exist_ok=True)
     joblib.dump(probe, path)
 
 
-def _save_predictions(predictions, results_dir, model_name, target_phoneme,
-    layer, fold_idx):
-    pred_dir = Path(results_dir) / model_name / target_phoneme
-    pred_dir.mkdir(parents=True, exist_ok=True)
-    path = pred_dir / f'layer{layer:02d}_fold{fold_idx + 1:02d}_predictions.txt'
+def _save_predictions(predictions, path):
+    path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, 'w') as f:
         f.write('true_phoneme\tbinary_true\tbinary_pred\tcorrect\n')
         for true_full, true_bin, pred_bin in predictions:
             correct = int(true_bin == pred_bin)
             f.write(f'{true_full}\t{true_bin}\t{pred_bin}\t{correct}\n')
+
+
+def _read_accuracy(pred_path):
+    '''Recompute a fold's accuracy from its saved predictions file.'''
+    with open(pred_path) as f:
+        next(f)  # header
+        correct = [int(line.rstrip('\n').split('\t')[3]) for line in f
+            if line.strip()]
+    return sum(correct) / len(correct)

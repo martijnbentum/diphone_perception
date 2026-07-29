@@ -250,11 +250,31 @@ replacements.
 
 `model_name`, `layer`, and `collar` must match what
 `extract_phone_embeddings` wrote for the embeddings to be found.
-`save_probes`/`save_predictions` (both default `False`) optionally dump
-each fold's fitted probe / per-example predictions under `probe_save_dir`
-(`data/phone_probes`) / `results_dir` (`data/probe_results`); the returned
-dict already carries the fitted probes and accuracies in memory, so saving
-is opt-in rather than automatic.
+`save_probes`/`save_predictions` (both default `True`) dump each fold's
+fitted probe / per-example predictions under `probe_save_dir`
+(`data/phone_probes`) / `results_dir` (`data/probe_results`).
+
+Skip / overwrite / gap-filling: before (re)training a fold, its probe and
+predictions files are checked for on disk. A fold is only treated as
+"already done" if **both** files are present (an orphaned single file - a
+probe with no matching predictions, or vice versa - is not trusted, and
+that fold is retrained, regenerating both files together so they can never
+belong to different runs). If every fold for a (`model_name`,
+`target_phoneme`, `layer`) combination is already complete, the whole call
+is skipped - embeddings aren't even loaded - and the saved probes and
+accuracies (read back from the predictions files) are returned as-is. Pass
+`overwrite=True` to force every fold to (re)train regardless of what's on
+disk. Because `StratifiedKFold(shuffle=True, random_state=random_state)`
+produces the same fold splits every time for the same data, a partially
+complete set (e.g. fold 3 saved, the rest missing) safely retrains only the
+missing folds and reuses the saved one - `result['accuracies']` comes back
+complete either way, never with gaps. This check only runs when both
+`save_probes` and `save_predictions` are `True` and `overwrite` is `False`;
+otherwise every fold always (re)trains.
+
+The returned dict's `probes`/`accuracies` are always in memory regardless
+of the save settings; `result['skipped']` is `True` only when the whole
+call was served from disk without loading any embeddings.
 
 d) Import convention
 

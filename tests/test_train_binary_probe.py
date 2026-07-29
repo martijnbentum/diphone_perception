@@ -2,11 +2,22 @@ import sys
 from collections import Counter
 from pathlib import Path
 
+import joblib
 import numpy as np
 import pytest
+from sklearn.linear_model import LogisticRegression
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from probing import train_binary_probe as tbp
+
+
+class _Marker:
+    '''Distinguishable stand-in for a saved probe, so a test can tell
+    whether a fold's probe was loaded from disk (has .tag) or freshly
+    trained (a real LogisticRegression, no .tag attribute).
+    '''
+    def __init__(self, tag):
+        self.tag = tag
 
 
 # -- fakes -------------------------------------------------------------
@@ -175,7 +186,8 @@ def test_train_binary_probe_end_to_end():
 
     result = tbp.train_binary_probe(
         phones, 'p', store=store, model_name='model-a', layer=9, collar=500,
-        n_embeds=30, n_splits=5, random_state=42, verbose=False)
+        n_embeds=30, n_splits=5, random_state=42, verbose=False,
+        save_probes=False, save_predictions=False)
 
     assert result['target_phoneme'] == 'p'
     assert result['layer'] == 9
@@ -184,6 +196,7 @@ def test_train_binary_probe_end_to_end():
     assert len(result['accuracies']) == 5
     assert len(result['probes']) == 5
     assert result['mean_accuracy'] > 0.9  # clusters are well separated
+    assert result['skipped'] is False
 
 
 def test_train_binary_probe_opens_store_when_none_given(tmp_path, monkeypatch):
@@ -200,7 +213,8 @@ def test_train_binary_probe_opens_store_when_none_given(tmp_path, monkeypatch):
 
     result = tbp.train_binary_probe(
         phones, 'p', model_name='model-a', layer=9, collar=500,
-        store_root=tmp_path / 'store', n_embeds=30, verbose=False)
+        store_root=tmp_path / 'store', n_embeds=30, verbose=False,
+        save_probes=False, save_predictions=False)
 
     assert store_roots == [str(tmp_path / 'store')]
     assert result['n_samples'] == 60
@@ -227,3 +241,127 @@ def test_train_binary_probe_saves_probes_and_predictions(tmp_path):
 
     header = pred_files[0].read_text().splitlines()[0]
     assert header == 'true_phoneme\tbinary_true\tbinary_pred\tcorrect'
+
+
+# -- skip / overwrite / gap-filling behavior --------------------------------
+
+def test_train_binary_probe_skips_when_all_folds_already_saved(tmp_path):
+    rng = np.random.default_rng(0)
+    phones, store = _make_separable_dataset(
+        rng, n_target=30, n_other_each=15, other_labels=['a', 't'])
+    probe_dir, results_dir = tmp_path / 'probes', tmp_path / 'results'
+
+    first = tbp.train_binary_probe(
+        phones, 'p', store=store, model_name='model-a', layer=9, collar=500,
+        n_embeds=30, n_splits=5, random_state=42, verbose=False,
+        probe_save_dir=probe_dir, results_dir=results_dir)
+    assert first['skipped'] is False
+    calls_after_first = len(store.phraser_keys_to_embeddings_calls)
+    assert calls_after_first == 1
+
+    second = tbp.train_binary_probe(
+        phones, 'p', store=store, model_name='model-a', layer=9, collar=500,
+        n_embeds=30, n_splits=5, random_state=42, verbose=False,
+        probe_save_dir=probe_dir, results_dir=results_dir)
+
+    assert second['skipped'] is True
+    assert second['n_samples'] is None
+    assert second['n_missing'] is None
+    # embeddings were never reloaded - proves the fast path skipped loading
+    assert len(store.phraser_keys_to_embeddings_calls) == calls_after_first
+    assert second['accuracies'] == pytest.approx(first['accuracies'])
+    assert second['mean_accuracy'] == pytest.approx(first['mean_accuracy'])
+    assert all(isinstance(p, LogisticRegression) for p in second['probes'])
+
+
+def test_train_binary_probe_overwrite_forces_retrain(tmp_path):
+    rng = np.random.default_rng(0)
+    phones, store = _make_separable_dataset(
+        rng, n_target=30, n_other_each=15, other_labels=['a', 't'])
+    probe_dir, results_dir = tmp_path / 'probes', tmp_path / 'results'
+
+    tbp.train_binary_probe(
+        phones, 'p', store=store, model_name='model-a', layer=9, collar=500,
+        n_embeds=30, n_splits=5, random_state=42, verbose=False,
+        probe_save_dir=probe_dir, results_dir=results_dir)
+    calls_after_first = len(store.phraser_keys_to_embeddings_calls)
+
+    second = tbp.train_binary_probe(
+        phones, 'p', store=store, model_name='model-a', layer=9, collar=500,
+        n_embeds=30, n_splits=5, random_state=42, verbose=False,
+        probe_save_dir=probe_dir, results_dir=results_dir, overwrite=True)
+
+    assert second['skipped'] is False
+    # overwrite bypasses the skip check, so embeddings get reloaded
+    assert len(store.phraser_keys_to_embeddings_calls) == calls_after_first + 1
+
+
+def test_train_binary_probe_fills_gaps_for_partially_saved_folds(tmp_path):
+    rng = np.random.default_rng(0)
+    phones, store = _make_separable_dataset(
+        rng, n_target=30, n_other_each=15, other_labels=['a', 't'])
+    probe_dir, results_dir = tmp_path / 'probes', tmp_path / 'results'
+
+    # pre-seed only fold 0 with a stub probe + a predictions file whose
+    # accuracy (1.0, from 2 rows) could not have come from a real fold on
+    # this dataset - so we can tell whether it was reused or retrained
+    probe_path = tbp._probe_path(probe_dir, 'model-a', 'p', 9, 0)
+    pred_path = tbp._predictions_path(results_dir, 'model-a', 'p', 9, 0)
+    probe_path.parent.mkdir(parents=True, exist_ok=True)
+    joblib.dump(_Marker('fold0-stub'), probe_path)
+    pred_path.parent.mkdir(parents=True, exist_ok=True)
+    pred_path.write_text(
+        'true_phoneme\tbinary_true\tbinary_pred\tcorrect\n'
+        'p\ttarget\ttarget\t1\n'
+        'p\ttarget\ttarget\t1\n')
+
+    result = tbp.train_binary_probe(
+        phones, 'p', store=store, model_name='model-a', layer=9, collar=500,
+        n_embeds=30, n_splits=5, random_state=42, verbose=False,
+        probe_save_dir=probe_dir, results_dir=results_dir)
+
+    assert result['skipped'] is False
+    assert result['accuracies'][0] == 1.0  # loaded from the seeded file
+    assert result['probes'][0].tag == 'fold0-stub'  # reused, not retrained
+    for probe in result['probes'][1:]:
+        assert isinstance(probe, LogisticRegression)  # freshly trained
+    # the other 4 folds got written to disk this run
+    for fold_idx in range(1, 5):
+        assert tbp._probe_path(
+            probe_dir, 'model-a', 'p', 9, fold_idx).exists()
+        assert tbp._predictions_path(
+            results_dir, 'model-a', 'p', 9, fold_idx).exists()
+
+
+def test_train_binary_probe_retrains_fold_with_orphaned_probe_file(tmp_path):
+    rng = np.random.default_rng(0)
+    phones, store = _make_separable_dataset(
+        rng, n_target=30, n_other_each=15, other_labels=['a', 't'])
+    probe_dir, results_dir = tmp_path / 'probes', tmp_path / 'results'
+
+    # fold 0 has a leftover probe file but no matching predictions file -
+    # an inconsistent pair that must not be trusted
+    probe_path = tbp._probe_path(probe_dir, 'model-a', 'p', 9, 0)
+    probe_path.parent.mkdir(parents=True, exist_ok=True)
+    joblib.dump(_Marker('orphan'), probe_path)
+
+    result = tbp.train_binary_probe(
+        phones, 'p', store=store, model_name='model-a', layer=9, collar=500,
+        n_embeds=30, n_splits=5, random_state=42, verbose=False,
+        probe_save_dir=probe_dir, results_dir=results_dir)
+
+    assert isinstance(result['probes'][0], LogisticRegression)  # not the orphan
+    pred_path = tbp._predictions_path(results_dir, 'model-a', 'p', 9, 0)
+    assert pred_path.exists()  # predictions for fold 0 now written too
+
+
+def test_read_accuracy_matches_saved_fraction(tmp_path):
+    path = tmp_path / 'predictions.txt'
+    path.write_text(
+        'true_phoneme\tbinary_true\tbinary_pred\tcorrect\n'
+        'p\ttarget\ttarget\t1\n'
+        'a\tother\ttarget\t0\n'
+        'p\ttarget\ttarget\t1\n'
+        't\tother\tother\t1\n')
+
+    assert tbp._read_accuracy(path) == pytest.approx(0.75)
