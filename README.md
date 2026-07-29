@@ -216,7 +216,47 @@ each sentence through the model once and sliced every phone out of that one
 pass). Not addressed yet - flagged for awareness if extraction throughput
 becomes a problem at scale.
 
-c) Import convention
+c) train_binary_probe.py
+
+One function, `train_binary_probe(phones, target_phoneme, ...)`, that trains
+and evaluates a binary (target-phoneme-vs-other) logistic regression probe
+on middle-frame embeddings read back from an echoframe store (written by
+extract_phone_embeddings above), with 5-fold
+`StratifiedKFold(shuffle=True, random_state=42)`.
+
+	from probing.metadata import Phones
+	from probing.train_binary_probe import train_binary_probe
+
+	phones = Phones()
+	result = train_binary_probe(phones, target_phoneme='p')
+	result['mean_accuracy'], result['std_accuracy']
+
+Sampling (`_select_phones`): the target phoneme gets `n_embeds` phones
+(default `None` - every available target-phoneme phone, not an arbitrary
+cap); every other phoneme class gets `n_embeds // (number of other phoneme
+classes)`, so the two binary classes ("target" vs "other") stay balanced
+overall. Sampling is deterministic (seeded by `random_state`). If any class
+doesn't have enough phones to fill its quota, this raises `ValueError`
+naming the class and the shortfall, rather than silently training on less
+data than requested.
+
+Loading (`_load_middle_frame_vectors`): embeddings for the sampled phones
+are batch-loaded in one call (`store.phraser_keys_to_embeddings`, grouped
+by shard) rather than one call per phone, then reduced to each phone's
+middle frame via echoframe's own `Embedding.middle_frame_segment(...)`.
+Phones with no stored embedding (e.g. extraction hasn't been run on them
+yet) are dropped and counted (`result['n_missing']`), not backfilled with
+replacements.
+
+`model_name`, `layer`, and `collar` must match what
+`extract_phone_embeddings` wrote for the embeddings to be found.
+`save_probes`/`save_predictions` (both default `False`) optionally dump
+each fold's fitted probe / per-example predictions under `probe_save_dir`
+(`data/phone_probes`) / `results_dir` (`data/probe_results`); the returned
+dict already carries the fitted probes and accuracies in memory, so saving
+is opt-in rather than automatic.
+
+d) Import convention
 
 `probing/` has no `__init__.py` - it's a Python 3 namespace package. From
 ipython launched at the repo root (`repo/`), `from probing.metadata import
