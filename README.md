@@ -128,3 +128,98 @@ d2) Response files - confusion matrices: phon1_conf_matrix_gate1.dat
 	   in a diphone: phon1
 	2. gate: 1
 
+
+--------------------------------------------------------------
+
+5. CODE: probing/
+
+Links CGN phone-level metadata to a `phraser` LMDB store, and computes
+wav2vec2 hidden-state embeddings for those phones into an `echoframe` store.
+Not to be confused with `probing_scripts/`, an older, separate set of
+standalone extraction/probing scripts left as-is.
+
+a) metadata.py
+
+Parses `data/metadata.csv` (phone rows) and `data/news_books_sentences_zs.tsv`
+(sentence rows) into linked Speaker / Sentence / Phone objects, and matches
+every Phone to its corresponding phone segment in a `phraser` LMDB store
+(`cgn_lmdb`, default `/vol/mlusers/mbentum/phraser/data/cgn_awd_lmdb`).
+
+	from probing.metadata import Phones
+
+	phones = Phones()
+	phones.print_stats()          # phone counts by IPA label
+
+	phones.phraser_phones         # list of matched phraser Phone objects,
+	                               # aligned with phones.phones - RAISES if
+	                               # any phone failed to match (see below)
+
+Matching is cached to `data/phraser_phone_keys.bin` via
+`Phones.save_phraser_keys()` (built automatically on first access to
+`phraser_phones` if the cache file doesn't exist yet). Match failures can be
+inspected with `phones.analyze_phraser_failures()` after
+`save_phraser_keys()`.
+
+`phones.phraser_phones` raises `ValueError` if any phone is unmatched, rather
+than silently returning a list with holes - downstream consumers (the
+embedding extraction below) rely on every phone having a phraser phone.
+
+`_data_dir` (and everything derived from it - `metadata_file`,
+`sentence_file`, `phraser_key_file`) resolves to a `data/` directory that is
+a sibling of the repo, not inside it (`.../diphone/data`, not
+`.../diphone/repo/data`). This is a pre-existing convention, not something
+introduced by moving this file into `probing/` - just something to remember
+if this file moves again, since the parent-count in `_data_dir` needs to
+match its nesting depth under the repo.
+
+b) extract_embeddings.py
+
+One function, `extract_phone_embeddings(phones, ...)`, that computes and
+stores wav2vec2 hidden-state embeddings for every phone in a Phones instance
+into an `echoframe.Store`, via a vanilla (unmodified)
+`echoframe.batch_segment_features.compute_embeddings_batch` call - every
+frame overlapping each phone's own span is stored, for each requested layer.
+
+	from probing.metadata import Phones
+	from probing.extract_embeddings import extract_phone_embeddings
+
+	phones = Phones()
+	store = extract_phone_embeddings(phones)   # default model, layers=[9], collar=500ms
+
+Defaults:
+
+- model_name='wav2vec2_nl1_checkpoint-200000', resolved against
+  `data/model_paths.json` and registered in the echoframe store on first use
+  (idempotent - safe to call repeatedly).
+- layers=[9] - pass a list of hidden-state layer indices to store more than
+  one, e.g. layers=[9, 10, 11].
+- collar=500 (ms) - audio context padded around each phone before running
+  the model. Only widens the model's input window; does not change what
+  gets stored (only frames overlapping the phone's own span are kept).
+- store_root defaults to `data/echoframe_store`, opened lazily if no
+  store= is passed in.
+- phraser_source_id='cgn-awd' - label the phones' phraser store is
+  registered under in the echoframe store.
+- batch_size=32 - compute_embeddings_batch only auto-computes a batch size
+  when gpu=True; left at None with gpu=False it loads every segment's audio
+  into a single batch before running anything. The default here avoids that
+  for large phone sets.
+
+Known limitation: no audio-file deduplication. compute_embeddings_batch
+loads and runs the model on each phone independently - it does not group
+phones by source audio file or reuse hidden states across phones from the
+same sentence. With a 500ms collar, phones spoken close together end up
+with heavily overlapping context windows that are recomputed from scratch
+for each phone. Compute cost therefore scales with phone count, not
+sentence count (unlike the old probing_scripts/extract_embeds.py, which ran
+each sentence through the model once and sliced every phone out of that one
+pass). Not addressed yet - flagged for awareness if extraction throughput
+becomes a problem at scale.
+
+c) Import convention
+
+`probing/` has no `__init__.py` - it's a Python 3 namespace package. From
+ipython launched at the repo root (`repo/`), `from probing.metadata import
+Phones` and `from probing.extract_embeddings import extract_phone_embeddings`
+work as-is, since ipython puts the current directory on sys.path.
+

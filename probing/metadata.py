@@ -6,11 +6,14 @@ from progressbar import progressbar
 from phone_mapper import cgn
 from phraser import Store
 
-_data_dir = Path(__file__).resolve().parent.parent / 'data'
+# this file lives at repo/probing/metadata.py; the data dir is a sibling of
+# repo/, not inside it, so this needs three parents (probing -> repo -> the
+# directory containing repo) to land back on it.
+_data_dir = Path(__file__).resolve().parent.parent.parent / 'data'
 metadata_file = _data_dir / 'metadata.csv'
 sentence_file = _data_dir / 'news_books_sentences_zs.tsv'
 phraser_key_file = _data_dir / 'phraser_phone_keys.bin'
-cgn_lmdb = Path('/vol/mlusers/mbentum/phraser/data/cgn_lmdb')
+cgn_lmdb = Path('/vol/mlusers/mbentum/phraser/data/cgn_awd_lmdb')
 _boundary_tokens = ('SOS', 'EOS')
 _bool = {'True': True, 'False': False}
 _phraser_key_len = 22
@@ -427,15 +430,29 @@ class Phones:
 
     @property
     def phraser_phones(self):
-        '''phraser Phone objects aligned with self.phones (None where a
-        phone couldn't be matched). Uses the cached key file at
-        self.phraser_key_path if present, building it on first use.
+        '''phraser Phone objects aligned with self.phones. Uses the cached
+        key file at self.phraser_key_path if present, building it on first
+        use.
+
+        Raises ValueError if any phone failed to match - callers (e.g. the
+        echoframe embedding step) rely on every phone having a phraser
+        phone, so a hole here should surface loudly rather than silently
+        drop phones. Run save_phraser_keys() then analyze_phraser_failures()
+        to diagnose.
         '''
         if hasattr(self, '_phraser_phones'):
             return self._phraser_phones
         if not Path(self.phraser_key_path).exists():
             self.save_phraser_keys()
-        self._phraser_phones = self.load_phraser_phones()
+        phraser_phones = self.load_phraser_phones()
+        missing = sum(1 for p in phraser_phones if p is None)
+        if missing:
+            raise ValueError(
+                f'{missing} / {len(phraser_phones)} phones have no matched '
+                'phraser phone - run save_phraser_keys() and '
+                'analyze_phraser_failures() to diagnose'
+            )
+        self._phraser_phones = phraser_phones
         return self._phraser_phones
 
     @property

@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pytest
 from phone_mapper import cgn
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'probing'))
 import metadata
 
 
@@ -483,6 +483,27 @@ def test_phones_save_and_load_phraser_keys_roundtrip(tmp_path):
     assert metadata.load_phraser_keys(key_path) == [d_key, e_key, None]
 
 
+def test_phones_phraser_phones_raises_when_incomplete(tmp_path):
+    sentence_path, metadata_path, e_ipa = build_three_phone_dataset(tmp_path)
+    key_path = tmp_path / 'keys.bin'
+    phones_obj = metadata.Phones(
+        path=metadata_path, sentence_path=sentence_path, phraser_key_path=key_path)
+    d_phone, e_phone, f_phone = phones_obj.phones
+
+    stub_audio = StubAudio([
+        StubPhraserPhone('d', d_phone.start, d_phone.end, b'\x01' * 22),
+        StubPhraserPhone(e_ipa, e_phone.start, e_phone.end, b'\x02' * 22),
+        # deliberately no stub phone for 'f' -> phraser_phones must raise
+    ])
+    phones_obj._store = StubBulkStore(stub_audio)
+
+    assert not key_path.exists()
+    with pytest.raises(ValueError, match='1 / 3'):
+        phones_obj.phraser_phones
+    # save_phraser_keys still ran (and wrote the key file) before the check
+    assert key_path.exists()
+
+
 def test_phones_phraser_phones_builds_then_reuses_key_file(tmp_path):
     sentence_path, metadata_path, e_ipa = build_three_phone_dataset(tmp_path)
     key_path = tmp_path / 'keys.bin'
@@ -492,23 +513,25 @@ def test_phones_phraser_phones_builds_then_reuses_key_file(tmp_path):
 
     d_key = b'\x01' * 22
     e_key = b'\x02' * 22
+    f_key = b'\x03' * 22
     stub_audio = StubAudio([
         StubPhraserPhone('d', d_phone.start, d_phone.end, d_key),
         StubPhraserPhone(e_ipa, e_phone.start, e_phone.end, e_key),
+        StubPhraserPhone('f', f_phone.start, f_phone.end, f_key),
     ])
     phones_obj._store = StubBulkStore(stub_audio)
 
     assert not key_path.exists()
     matched = phones_obj.phraser_phones
     assert key_path.exists()
-    assert [p.key if p else None for p in matched] == [d_key, e_key, None]
+    assert [p.key for p in matched] == [d_key, e_key, f_key]
 
     # a fresh Phones instance reuses the cached key file directly
     phones_obj2 = metadata.Phones(
         store=phones_obj.store, path=metadata_path, sentence_path=sentence_path,
         phraser_key_path=key_path)
     matched2 = phones_obj2.phraser_phones
-    assert [p.key if p else None for p in matched2] == [d_key, e_key, None]
+    assert [p.key for p in matched2] == [d_key, e_key, f_key]
 
 
 def test_phones_label_to_phraser_phone_groups_by_label(tmp_path):
@@ -520,17 +543,20 @@ def test_phones_label_to_phraser_phone_groups_by_label(tmp_path):
 
     d_key = b'\x01' * 22
     e_key = b'\x02' * 22
+    f_key = b'\x03' * 22
     stub_audio = StubAudio([
         StubPhraserPhone('d', d_phone.start, d_phone.end, d_key),
         StubPhraserPhone(e_ipa, e_phone.start, e_phone.end, e_key),
+        StubPhraserPhone('f', f_phone.start, f_phone.end, f_key),
     ])
     phones_obj._store = StubBulkStore(stub_audio)
 
     grouped = phones_obj.label_to_phraser_phone
 
-    assert set(grouped.keys()) == {'d', e_ipa}
+    assert set(grouped.keys()) == {'d', e_ipa, 'f'}
     assert [p.key for p in grouped['d']] == [d_key]
     assert [p.key for p in grouped[e_ipa]] == [e_key]
+    assert [p.key for p in grouped['f']] == [f_key]
 
 
 def test_sentence_edge_position(tmp_path):
