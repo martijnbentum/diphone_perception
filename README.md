@@ -217,22 +217,28 @@ each sentence through the model once and sliced every phone out of that one
 pass). Not addressed yet - flagged for awareness if extraction throughput
 becomes a problem at scale.
 
-c) train_binary_probe.py
+c) train_binary_embedding_probe.py
 
-One function, `train_binary_probe(phones, target_phoneme, ...)`, that trains
-and evaluates a binary (target-phoneme-vs-other) logistic regression probe
-on middle-frame embeddings read back from an echoframe store (written by
-extract_phone_embeddings above), with 5-fold
+`train_binary_embedding_probe(phones, target_phoneme, ...)` trains and
+evaluates a binary (target-phoneme-vs-other) logistic regression probe on
+middle-frame embeddings read back from an echoframe store (written by
+`extract_phone_embeddings` above), with 5-fold
 `StratifiedKFold(shuffle=True, random_state=42)`.
 
 	from probing.metadata import Phones
-	from probing.train_binary_probe import train_binary_probe
+	from probing.train_binary_embedding_probe import train_binary_embedding_probe
 
 	phones = Phones()
-	result = train_binary_probe(phones, target_phoneme='p')
+	result = train_binary_embedding_probe(phones, target_phoneme='p')
 	result['mean_accuracy'], result['std_accuracy']
 
-Sampling (`_select_phones`): the target phoneme gets `n_embeds` phones
+To train one binary embedding probe run for every Phraser phone label:
+
+	from probing.train_binary_embedding_probe import train_binary_embedding_probes
+
+	results = train_binary_embedding_probes(phones, layer=9)
+
+Sampling: the target phoneme gets `n_embeds` phones
 (default `None` - every available target-phoneme phone, not an arbitrary
 cap); every other phoneme class gets `n_embeds // (number of other phoneme
 classes)`, so the two binary classes ("target" vs "other") stay balanced
@@ -275,7 +281,64 @@ call was served from disk without loading embedding payloads. `run_id`
 identifies the manifest, while `cache_status` is `hit`, `partial`, `miss`,
 `refresh`, or `disabled`.
 
-d) Import convention
+Probe training raises if multiple metadata phones have the same Phraser key.
+It does not deduplicate them, because deciding which metadata row is correct
+belongs upstream.
+
+d) train_binary_mfcc_probe.py
+
+`train_binary_mfcc_probe(phones, target_phoneme, ...)` provides the same
+sampling, cross-validation, saving, and cache behavior for stored phone
+MFCCs. Its default store is `data/echoframe_mfcc_store`
+(`/vol/mlusers/mbentum/diphone/data/echoframe_mfcc_store` in the cluster
+checkout). The primary/default feature is the center frame of the current
+39-dimensional MFCC representation: 13 static coefficients, 13 deltas, and
+13 delta-deltas.
+
+	from probing.train_binary_mfcc_probe import train_binary_mfcc_probe
+
+	result = train_binary_mfcc_probe(phones, target_phoneme='p')
+
+The MFCC equivalent for every label is:
+
+	from probing.train_binary_mfcc_probe import train_binary_mfcc_probes
+
+	results = train_binary_mfcc_probes(phones)
+
+Both plural trainers take their default target list from
+`phones.label_to_phraser_phone`. Before opening the feature store, they
+require every label in that mapping to contain exactly the same number of
+items. They open one Echoframe store for the complete sweep, reuse the
+single-target cache behavior, and report target progress with elapsed time
+and ETA. Pass `target_phonemes=[...]` to train only a selected subset; the
+full Phraser label inventory must still be balanced.
+
+Both trainers accept `standardize=False` by default. Set `standardize=True`
+to fit a `StandardScaler` on each training fold and apply it to that fold's
+test data before logistic regression. Scaling is per feature dimension; no
+test-fold statistics leak into training.
+
+Before choosing that flag, run the independent scale diagnostic on a subset:
+
+	from probing.probe_utils import inspect_feature_scale
+
+	report = inspect_feature_scale(phones, sample_size=1000)
+	report['embedding']['recommend_standardize']
+	report['mfcc']['recommend_standardize']
+
+It loads paired center frames from both stores and reports the per-dimension
+standard deviations, their spread, zero-variance dimensions, and a heuristic
+recommendation. It does not train a probe or change either training pipeline.
+The recommendation threshold can be changed with `std_ratio_threshold`.
+
+e) Shared probe utilities
+
+`probe_utils.py` contains the representation-independent sampling,
+cross-validation, fold-local scaling, cache, persistence, and scale-inspection
+code. Representation-specific key construction and feature loading stay in
+their two trainer modules.
+
+f) Import convention
 
 `probing/` has no `__init__.py` - it's a Python 3 namespace package. From
 ipython launched at the repo root (`repo/`), `from probing.metadata import
