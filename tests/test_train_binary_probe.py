@@ -52,6 +52,15 @@ class FakeEmbeddings:
         self.embeddings = embeddings
 
 
+class FakeMetadata:
+    def __init__(self, echoframe_key, vector):
+        self.echoframe_key = echoframe_key
+        self.created_at = '2026-01-01T00:00:00+00:00'
+        self.dataset_path = f'embeddings/{echoframe_key[2]}'
+        self.shape = vector.shape
+        self.shard_id = 0
+
+
 class FakeStore:
     def __init__(self, vectors_by_key):
         self.vectors_by_key = vectors_by_key
@@ -67,6 +76,21 @@ class FakeStore:
             for key in phraser_keys if key in self.vectors_by_key
         ]
         return FakeEmbeddings(embeddings)
+
+    def make_echoframe_key(
+        self, output_type, model_name, phraser_key, layer, collar,
+    ):
+        return output_type, model_name, phraser_key, layer, collar
+
+    def load_many_metadata(self, echoframe_keys, keep_missing=False):
+        metadatas = []
+        for key in echoframe_keys:
+            vector = self.vectors_by_key.get(key[2])
+            metadata = (
+                FakeMetadata(key, vector) if vector is not None else None)
+            if metadata is not None or keep_missing:
+                metadatas.append(metadata)
+        return metadatas
 
 
 # -- _select_phones ------------------------------------------------------
@@ -179,6 +203,14 @@ def _make_separable_dataset(rng, n_target, n_other_each, other_labels, dim=4):
     return phones, store
 
 
+def _fold_paths(probe_dir, results_dir, result, fold_idx):
+    probe_run = tbp._run_directory(
+        probe_dir, 'model-a', 'p', 9, result['collar'], result['run_id'])
+    predictions_run = tbp._run_directory(
+        results_dir, 'model-a', 'p', 9, result['collar'], result['run_id'])
+    return tbp._fold_paths(probe_run, predictions_run, fold_idx)
+
+
 def test_train_binary_probe_end_to_end():
     rng = np.random.default_rng(0)
     phones, store = _make_separable_dataset(
@@ -197,6 +229,30 @@ def test_train_binary_probe_end_to_end():
     assert len(result['probes']) == 5
     assert result['mean_accuracy'] > 0.9  # clusters are well separated
     assert result['skipped'] is False
+    assert result['cache_status'] == 'disabled'
+
+
+def test_train_binary_probe_passes_default_collar_to_echoframe():
+    rng = np.random.default_rng(0)
+    phones, store = _make_separable_dataset(
+        rng, n_target=30, n_other_each=15, other_labels=['a', 't'])
+
+    result = tbp.train_binary_probe(
+        phones, 'p', store=store, model_name='model-a', layer=9,
+        n_embeds=30, verbose=False, save_probes=False,
+        save_predictions=False)
+
+    assert store.phraser_keys_to_embeddings_calls[0]['collar'] == 2000
+    assert result['collar'] == 2000
+
+
+def test_train_binary_probe_rejects_too_few_splits():
+    rng = np.random.default_rng(0)
+    phones, store = _make_separable_dataset(
+        rng, n_target=30, n_other_each=15, other_labels=['a', 't'])
+
+    with pytest.raises(ValueError, match='at least 2'):
+        tbp.train_binary_probe(phones, 'p', store=store, n_splits=0)
 
 
 def test_train_binary_probe_opens_store_when_none_given(tmp_path, monkeypatch):
@@ -234,13 +290,16 @@ def test_train_binary_probe_saves_probes_and_predictions(tmp_path):
         save_probes=True, probe_save_dir=probe_dir,
         save_predictions=True, results_dir=results_dir)
 
-    probe_files = sorted((probe_dir / 'model-a' / 'p').glob('*.joblib'))
-    pred_files = sorted((results_dir / 'model-a' / 'p').glob('*.txt'))
+    probe_files = sorted((probe_dir / 'model-a' / 'p').rglob('*.joblib'))
+    pred_files = sorted((results_dir / 'model-a' / 'p').rglob('*.tsv'))
     assert len(probe_files) == 5
     assert len(pred_files) == 5
 
     header = pred_files[0].read_text().splitlines()[0]
     assert header == 'true_phoneme\tbinary_true\tbinary_pred\tcorrect'
+    assert len(list(probe_dir.rglob('*_complete.json'))) == 5
+    assert len(list(probe_dir.rglob('run.json'))) == 1
+    assert len(list(results_dir.rglob('run.json'))) == 1
 
 
 # -- skip / overwrite / gap-filling behavior --------------------------------
@@ -256,6 +315,7 @@ def test_train_binary_probe_skips_when_all_folds_already_saved(tmp_path):
         n_embeds=30, n_splits=5, random_state=42, verbose=False,
         probe_save_dir=probe_dir, results_dir=results_dir)
     assert first['skipped'] is False
+    assert first['cache_status'] == 'miss'
     calls_after_first = len(store.phraser_keys_to_embeddings_calls)
     assert calls_after_first == 1
 
@@ -265,6 +325,8 @@ def test_train_binary_probe_skips_when_all_folds_already_saved(tmp_path):
         probe_save_dir=probe_dir, results_dir=results_dir)
 
     assert second['skipped'] is True
+    assert second['cache_status'] == 'hit'
+    assert second['run_id'] == first['run_id']
     assert second['n_samples'] is None
     assert second['n_missing'] is None
     # embeddings were never reloaded - proves the fast path skipped loading
@@ -292,6 +354,7 @@ def test_train_binary_probe_overwrite_forces_retrain(tmp_path):
         probe_save_dir=probe_dir, results_dir=results_dir, overwrite=True)
 
     assert second['skipped'] is False
+    assert second['cache_status'] == 'refresh'
     # overwrite bypasses the skip check, so embeddings get reloaded
     assert len(store.phraser_keys_to_embeddings_calls) == calls_after_first + 1
 
@@ -302,18 +365,22 @@ def test_train_binary_probe_fills_gaps_for_partially_saved_folds(tmp_path):
         rng, n_target=30, n_other_each=15, other_labels=['a', 't'])
     probe_dir, results_dir = tmp_path / 'probes', tmp_path / 'results'
 
-    # pre-seed only fold 0 with a stub probe + a predictions file whose
-    # accuracy (1.0, from 2 rows) could not have come from a real fold on
-    # this dataset - so we can tell whether it was reused or retrained
-    probe_path = tbp._probe_path(probe_dir, 'model-a', 'p', 9, 0)
-    pred_path = tbp._predictions_path(results_dir, 'model-a', 'p', 9, 0)
-    probe_path.parent.mkdir(parents=True, exist_ok=True)
+    first = tbp.train_binary_probe(
+        phones, 'p', store=store, model_name='model-a', layer=9, collar=500,
+        n_embeds=30, n_splits=5, random_state=42, verbose=False,
+        probe_save_dir=probe_dir, results_dir=results_dir)
+
+    # Make fold 0 distinguishable, while preserving its valid completion
+    # marker, then remove the other four folds to create a partial run.
+    probe_path, _, marker_path = _fold_paths(
+        probe_dir, results_dir, first, 0)
     joblib.dump(_Marker('fold0-stub'), probe_path)
-    pred_path.parent.mkdir(parents=True, exist_ok=True)
-    pred_path.write_text(
-        'true_phoneme\tbinary_true\tbinary_pred\tcorrect\n'
-        'p\ttarget\ttarget\t1\n'
-        'p\ttarget\ttarget\t1\n')
+    marker = tbp._read_json(marker_path)
+    marker['probe_sha256'] = tbp._sha256_file(probe_path)
+    tbp._write_json(marker_path, marker)
+    for fold_idx in range(1, 5):
+        for path in _fold_paths(probe_dir, results_dir, first, fold_idx):
+            path.unlink()
 
     result = tbp.train_binary_probe(
         phones, 'p', store=store, model_name='model-a', layer=9, collar=500,
@@ -321,16 +388,14 @@ def test_train_binary_probe_fills_gaps_for_partially_saved_folds(tmp_path):
         probe_save_dir=probe_dir, results_dir=results_dir)
 
     assert result['skipped'] is False
-    assert result['accuracies'][0] == 1.0  # loaded from the seeded file
+    assert result['cache_status'] == 'partial'
     assert result['probes'][0].tag == 'fold0-stub'  # reused, not retrained
     for probe in result['probes'][1:]:
         assert isinstance(probe, LogisticRegression)  # freshly trained
     # the other 4 folds got written to disk this run
     for fold_idx in range(1, 5):
-        assert tbp._probe_path(
-            probe_dir, 'model-a', 'p', 9, fold_idx).exists()
-        assert tbp._predictions_path(
-            results_dir, 'model-a', 'p', 9, fold_idx).exists()
+        assert all(path.exists() for path in _fold_paths(
+            probe_dir, results_dir, first, fold_idx))
 
 
 def test_train_binary_probe_retrains_fold_with_orphaned_probe_file(tmp_path):
@@ -339,11 +404,18 @@ def test_train_binary_probe_retrains_fold_with_orphaned_probe_file(tmp_path):
         rng, n_target=30, n_other_each=15, other_labels=['a', 't'])
     probe_dir, results_dir = tmp_path / 'probes', tmp_path / 'results'
 
-    # fold 0 has a leftover probe file but no matching predictions file -
-    # an inconsistent pair that must not be trusted
-    probe_path = tbp._probe_path(probe_dir, 'model-a', 'p', 9, 0)
-    probe_path.parent.mkdir(parents=True, exist_ok=True)
+    first = tbp.train_binary_probe(
+        phones, 'p', store=store, model_name='model-a', layer=9, collar=500,
+        n_embeds=30, n_splits=5, random_state=42, verbose=False,
+        probe_save_dir=probe_dir, results_dir=results_dir)
+
+    # Fold 0 has a leftover probe but neither predictions nor a completion
+    # marker, so it must be retrained while the other folds remain reusable.
+    probe_path, pred_path, marker_path = _fold_paths(
+        probe_dir, results_dir, first, 0)
     joblib.dump(_Marker('orphan'), probe_path)
+    pred_path.unlink()
+    marker_path.unlink()
 
     result = tbp.train_binary_probe(
         phones, 'p', store=store, model_name='model-a', layer=9, collar=500,
@@ -351,17 +423,139 @@ def test_train_binary_probe_retrains_fold_with_orphaned_probe_file(tmp_path):
         probe_save_dir=probe_dir, results_dir=results_dir)
 
     assert isinstance(result['probes'][0], LogisticRegression)  # not the orphan
-    pred_path = tbp._predictions_path(results_dir, 'model-a', 'p', 9, 0)
-    assert pred_path.exists()  # predictions for fold 0 now written too
+    assert result['cache_status'] == 'partial'
+    assert pred_path.exists()
+    assert marker_path.exists()
 
 
-def test_read_accuracy_matches_saved_fraction(tmp_path):
-    path = tmp_path / 'predictions.txt'
-    path.write_text(
-        'true_phoneme\tbinary_true\tbinary_pred\tcorrect\n'
-        'p\ttarget\ttarget\t1\n'
-        'a\tother\ttarget\t0\n'
-        'p\ttarget\ttarget\t1\n'
-        't\tother\tother\t1\n')
+def test_train_binary_probe_retrains_fold_with_bad_checksum(tmp_path):
+    rng = np.random.default_rng(0)
+    phones, store = _make_separable_dataset(
+        rng, n_target=30, n_other_each=15, other_labels=['a', 't'])
+    probe_dir, results_dir = tmp_path / 'probes', tmp_path / 'results'
 
-    assert tbp._read_accuracy(path) == pytest.approx(0.75)
+    first = tbp.train_binary_probe(
+        phones, 'p', store=store, model_name='model-a', layer=9, collar=500,
+        n_embeds=30, n_splits=5, random_state=42, verbose=False,
+        probe_save_dir=probe_dir, results_dir=results_dir)
+    _, pred_path, marker_path = _fold_paths(
+        probe_dir, results_dir, first, 0)
+    pred_path.write_text(pred_path.read_text() + 'corrupt\n')
+
+    result = tbp.train_binary_probe(
+        phones, 'p', store=store, model_name='model-a', layer=9, collar=500,
+        n_embeds=30, n_splits=5, random_state=42, verbose=False,
+        probe_save_dir=probe_dir, results_dir=results_dir)
+
+    assert result['cache_status'] == 'partial'
+    assert tbp._load_cached_fold(
+        _fold_paths(probe_dir, results_dir, result, 0),
+        result['run_id'], 0) is not None
+    marker = tbp._read_json(marker_path)
+    assert marker['predictions_sha256'] == tbp._sha256_file(pred_path)
+
+
+def test_failed_overwrite_invalidates_completion_marker(tmp_path, monkeypatch):
+    rng = np.random.default_rng(0)
+    phones, store = _make_separable_dataset(
+        rng, n_target=30, n_other_each=15, other_labels=['a', 't'])
+    probe_dir, results_dir = tmp_path / 'probes', tmp_path / 'results'
+    first = tbp.train_binary_probe(
+        phones, 'p', store=store, model_name='model-a', layer=9, collar=500,
+        n_embeds=30, verbose=False, probe_save_dir=probe_dir,
+        results_dir=results_dir)
+    paths = _fold_paths(probe_dir, results_dir, first, 0)
+
+    def fail_to_save(*args):
+        raise RuntimeError('interrupted prediction write')
+
+    monkeypatch.setattr(tbp, '_save_predictions', fail_to_save)
+    with pytest.raises(RuntimeError, match='interrupted'):
+        tbp.train_binary_probe(
+            phones, 'p', store=store, model_name='model-a', layer=9,
+            collar=500, n_embeds=30, verbose=False,
+            probe_save_dir=probe_dir, results_dir=results_dir, overwrite=True)
+
+    assert not paths[2].exists()
+    assert tbp._load_cached_fold(paths, first['run_id'], 0) is None
+
+
+def test_train_binary_probe_does_not_reuse_a_different_collar(tmp_path):
+    rng = np.random.default_rng(0)
+    phones, store = _make_separable_dataset(
+        rng, n_target=30, n_other_each=15, other_labels=['a', 't'])
+    probe_dir, results_dir = tmp_path / 'probes', tmp_path / 'results'
+
+    first = tbp.train_binary_probe(
+        phones, 'p', store=store, model_name='model-a', layer=9, collar=500,
+        n_embeds=30, verbose=False, probe_save_dir=probe_dir,
+        results_dir=results_dir)
+    second = tbp.train_binary_probe(
+        phones, 'p', store=store, model_name='model-a', layer=9, collar=2000,
+        n_embeds=30, verbose=False, probe_save_dir=probe_dir,
+        results_dir=results_dir)
+
+    assert second['run_id'] != first['run_id']
+    assert second['cache_status'] == 'miss'
+    assert second['skipped'] is False
+    assert len(store.phraser_keys_to_embeddings_calls) == 2
+
+
+def test_train_binary_probe_run_id_tracks_embedding_availability(tmp_path):
+    rng = np.random.default_rng(0)
+    phones, store = _make_separable_dataset(
+        rng, n_target=30, n_other_each=15, other_labels=['a', 't'])
+    restored_vector = store.vectors_by_key.pop(0)
+    probe_dir, results_dir = tmp_path / 'probes', tmp_path / 'results'
+    arguments = {
+        'store': store,
+        'model_name': 'model-a',
+        'layer': 9,
+        'collar': 500,
+        'n_embeds': 30,
+        'verbose': False,
+        'probe_save_dir': probe_dir,
+        'results_dir': results_dir,
+    }
+
+    first = tbp.train_binary_probe(phones, 'p', **arguments)
+    store.vectors_by_key[0] = restored_vector
+    second = tbp.train_binary_probe(phones, 'p', **arguments)
+
+    assert first['n_missing'] == 1
+    assert second['n_missing'] == 0
+    assert second['run_id'] != first['run_id']
+    assert second['cache_status'] == 'miss'
+
+
+@pytest.mark.parametrize(
+    'changed',
+    [
+        {'n_embeds': 20},
+        {'n_splits': 3},
+        {'random_state': 7},
+    ],
+)
+def test_train_binary_probe_run_id_covers_training_settings(tmp_path, changed):
+    rng = np.random.default_rng(0)
+    phones, store = _make_separable_dataset(
+        rng, n_target=30, n_other_each=15, other_labels=['a', 't'])
+    probe_dir, results_dir = tmp_path / 'probes', tmp_path / 'results'
+    arguments = {
+        'store': store,
+        'model_name': 'model-a',
+        'layer': 9,
+        'collar': 500,
+        'n_embeds': 30,
+        'n_splits': 5,
+        'random_state': 42,
+        'verbose': False,
+        'probe_save_dir': probe_dir,
+        'results_dir': results_dir,
+    }
+
+    first = tbp.train_binary_probe(phones, 'p', **arguments)
+    second = tbp.train_binary_probe(phones, 'p', **(arguments | changed))
+
+    assert second['run_id'] != first['run_id']
+    assert second['cache_status'] == 'miss'

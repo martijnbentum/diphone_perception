@@ -42,7 +42,7 @@ def extract_phone_embeddings(
     phones,
     model_name=default_model_name,
     layers=[9],
-    collar=500,
+    collar=2000,
     store=None,
     store_root=default_store_root,
     model_paths_file=default_model_paths_file,

@@ -173,6 +173,7 @@ def test_extract_phone_embeddings_uses_default_layers_and_model(
     (segments, layers, model_name, store_arg), kwargs = calls[0]
     assert layers == [9]
     assert model_name == extract_embeddings.default_model_name
+    assert kwargs['collar'] == 2000
 
 
 def test_extract_phone_embeddings_opens_store_when_none_given(

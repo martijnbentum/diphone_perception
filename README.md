@@ -184,7 +184,7 @@ frame overlapping each phone's own span is stored, for each requested layer.
 	from probing.extract_embeddings import extract_phone_embeddings
 
 	phones = Phones()
-	store = extract_phone_embeddings(phones)   # default model, layers=[9], collar=500ms
+	store = extract_phone_embeddings(phones)   # default model/layer, collar=2000ms
 
 Defaults:
 
@@ -193,9 +193,10 @@ Defaults:
   (idempotent - safe to call repeatedly).
 - layers=[9] - pass a list of hidden-state layer indices to store more than
   one, e.g. layers=[9, 10, 11].
-- collar=500 (ms) - audio context padded around each phone before running
-  the model. Only widens the model's input window; does not change what
-  gets stored (only frames overlapping the phone's own span are kept).
+- collar=2000 (ms) - up to 2 seconds of audio context on each side of the
+  phone before running the model. Only widens the model's input window; it
+  does not change which frames are stored (only frames overlapping the
+  phone's own span are kept).
 - store_root defaults to `data/echoframe_store`, opened lazily if no
   store= is passed in.
 - phraser_source_id='cgn-awd' - label the phones' phraser store is
@@ -208,7 +209,7 @@ Defaults:
 Known limitation: no audio-file deduplication. compute_embeddings_batch
 loads and runs the model on each phone independently - it does not group
 phones by source audio file or reuse hidden states across phones from the
-same sentence. With a 500ms collar, phones spoken close together end up
+same sentence. With a 2000ms collar, phones spoken close together end up
 with heavily overlapping context windows that are recomputed from scratch
 for each phone. Compute cost therefore scales with phone count, not
 sentence count (unlike the old probing_scripts/extract_embeds.py, which ran
@@ -255,26 +256,24 @@ fitted probe / per-example predictions under `probe_save_dir`
 (`data/phone_probes`) / `results_dir` (`data/probe_results`).
 
 Skip / overwrite / gap-filling: before (re)training a fold, its probe and
-predictions files are checked for on disk. A fold is only treated as
-"already done" if **both** files are present (an orphaned single file - a
-probe with no matching predictions, or vice versa - is not trusted, and
-that fold is retrained, regenerating both files together so they can never
-belong to different runs). If every fold for a (`model_name`,
-`target_phoneme`, `layer`) combination is already complete, the whole call
-is skipped - embeddings aren't even loaded - and the saved probes and
-accuracies (read back from the predictions files) are returned as-is. Pass
-`overwrite=True` to force every fold to (re)train regardless of what's on
-disk. Because `StratifiedKFold(shuffle=True, random_state=random_state)`
-produces the same fold splits every time for the same data, a partially
-complete set (e.g. fold 3 saved, the rest missing) safely retrains only the
-missing folds and reuses the saved one - `result['accuracies']` comes back
-complete either way, never with gaps. This check only runs when both
-`save_probes` and `save_predictions` are `True` and `overwrite` is `False`;
-otherwise every fold always (re)trains.
+predictions are looked up under a hashed run manifest. Its identity includes
+the model, target, layer, collar, sampling and split settings, selected phone
+keys and labels, available echoframe metadata, and classifier settings. A
+500ms run therefore cannot satisfy a 2000ms request, and changing the data
+or training settings creates a separate run.
+
+Each fold is reusable only when its completion marker exists and the probe
+and predictions checksums match. Artifacts are replaced atomically and the
+marker is written last, so an interrupted write is retrained rather than
+trusted. A partially complete run reuses valid folds and fills its gaps.
+Pass `overwrite=True` to retrain every fold. Reuse only runs when both save
+flags are `True`; otherwise every fold trains normally.
 
 The returned dict's `probes`/`accuracies` are always in memory regardless
 of the save settings; `result['skipped']` is `True` only when the whole
-call was served from disk without loading any embeddings.
+call was served from disk without loading embedding payloads. `run_id`
+identifies the manifest, while `cache_status` is `hit`, `partial`, `miss`,
+`refresh`, or `disabled`.
 
 d) Import convention
 
@@ -282,4 +281,3 @@ d) Import convention
 ipython launched at the repo root (`repo/`), `from probing.metadata import
 Phones` and `from probing.extract_embeddings import extract_phone_embeddings`
 work as-is, since ipython puts the current directory on sys.path.
-
