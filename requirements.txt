@@ -4,3 +4,8 @@ progressbar2
 pytest
 ipython
 echoframe @ git+https://git@github.com/martijnbentum/echoframe.git
+numpy
+pandas
+scipy
+scikit-learn
+praat-parselmouth

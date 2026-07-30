@@ -1,0 +1,13 @@
+{
+  "name": "van_nierop_1973_female",
+  "relative_path": "literature/van_nierop_1973_female.csv",
+  "reference": "Van Nierop, D. J. P. J., Pols, L. C. W., & Plomp, R. (1973). Frequency analysis of Dutch vowels from 25 female speakers. Acustica, 29, 110-118.",
+  "url": "https://www.fon.hum.uva.nl/praat/manual/Van_Nierop_et_al___1973_.html",
+  "page_range": "110-118",
+  "source_page": null,
+  "table_number": null,
+  "record_level": "speaker_vowel",
+  "notes": "Female rows extracted from Praat command \"Create formant table (Pols & Van Nierop 1973)\".",
+  "schema_version": 1,
+  "sha256": "9ba947df4f76de62dd1cca95f83e3014340137bd00c71f7c9d9033ea6a92647f"
+}

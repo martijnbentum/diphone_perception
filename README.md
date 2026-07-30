@@ -344,3 +344,59 @@ f) Import convention
 ipython launched at the repo root (`repo/`), `from probing.metadata import
 Phones` and `from probing.extract_embeddings import extract_phone_embeddings`
 work as-is, since ipython puts the current directory on sys.path.
+
+--------------------------------------------------------------
+
+6. SYNTHETIC ACOUSTIC PROBES
+
+`synthetic_acoustic_probes/` contains model-independent signal generators,
+acoustic checks, and representation-structure metrics based on Choi and Yeo
+(2022). It includes the paper's pure-tone, temporal, bias,
+sinusoidal-component formant, and amplitude grids, plus a Praat source-filter
+monophthong generator.
+
+    from synthetic_acoustic_probes import (
+        praat_vowel_stimulus,
+        sinusoidal_component_formant_stimuli,
+        structure_report,
+    )
+
+    paper_stimuli = sinusoidal_component_formant_stimuli()
+    vowel = praat_vowel_stimulus(f0_hz=120, f1_hz=500, f2_hz=1500)
+
+`vowel_formant_reference/` exposes separate Dutch literature tables and local
+selected-phone measurements. No loader pools sources.
+
+    from vowel_formant_reference import (
+        adank_2004_formants,
+        pols_1973_formants,
+        van_nierop_1973_formants,
+        weenink_1985_formants,
+    )
+
+    pols = pols_1973_formants()
+    female = van_nierop_1973_formants()
+    adult_anchors = weenink_1985_formants()
+    northern = adank_2004_formants(
+        population='Northern Standard Dutch',
+    )
+
+The checked-in literature artifacts and citation sidecars live under
+`vowel_formant_reference/formants/`. The default gender anchors contain F0 and
+F1--F3 for 12 full Dutch monophthongs from Weenink's adult groups; no
+literature table supplies schwa. See `vowel_formant_reference/literature.md`
+for references, URLs, source pages, and table numbers. Local phone extraction
+requires access to the configured Phraser/CGN audio store:
+
+    from probing.metadata import Phones
+    from vowel_formant_reference import (
+        measure_selected_phones,
+        write_selected_phone_measurements,
+    )
+
+    tokens = measure_selected_phones(Phones())
+    paths = write_selected_phone_measurements(tokens)
+
+Only monophthongs are selected. Full vowels require primary stress, schwa is
+handled from unstressed tokens, and group anchors use the median of
+per-speaker medians.

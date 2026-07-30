@@ -1,0 +1,13 @@
+{
+  "name": "pols_1973_male",
+  "relative_path": "literature/pols_1973_male.csv",
+  "reference": "Pols, L. C. W., Tromp, H. R. C., & Plomp, R. (1973). Frequency analysis of Dutch vowels from 50 male speakers. Journal of the Acoustical Society of America, 53, 1093-1101.",
+  "url": "https://www.fon.hum.uva.nl/praat/manual/Pols_et_al___1973_.html",
+  "page_range": "1093-1101",
+  "source_page": null,
+  "table_number": null,
+  "record_level": "speaker_vowel",
+  "notes": "Male rows extracted from Praat command \"Create formant table (Pols & Van Nierop 1973)\".",
+  "schema_version": 1,
+  "sha256": "197943768763cccf409bc5a265b8191a87c583e4e538dcf6a08dc9447b2b1f2f"
+}

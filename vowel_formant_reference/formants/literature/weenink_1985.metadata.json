@@ -1,0 +1,13 @@
+{
+  "name": "weenink_1985",
+  "relative_path": "literature/weenink_1985.csv",
+  "reference": "Weenink, D. J. M. (1985). Formant analysis of Dutch vowels from 10 children. Proceedings of the Institute of Phonetic Sciences of the University of Amsterdam, 9, 45-52.",
+  "url": "https://www.fon.hum.uva.nl/praat/manual/Weenink__1985_.html",
+  "page_range": "45-52",
+  "source_page": null,
+  "table_number": null,
+  "record_level": "speaker_vowel",
+  "notes": "Created by Praat command \"Create formant table (Weenink 1985)\".",
+  "schema_version": 1,
+  "sha256": "63b5d56e8da535a89215f8f665ae4c2a78321429a4e9772ead10a18879b5539c"
+}
