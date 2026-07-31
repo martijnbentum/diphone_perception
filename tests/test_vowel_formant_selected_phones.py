@@ -4,6 +4,7 @@ from pathlib import Path
 import sys
 from types import ModuleType, SimpleNamespace
 
+import vowel_formant_reference.selected_phones as selected_phone_module
 from synthetic_acoustic_probes.formants import praat_vowel_stimulus
 from vowel_formant_reference.aggregation import (
     aggregate_gender_measurements,
@@ -149,6 +150,36 @@ def test_written_phone_tables_load_without_pandas(tmp_path):
     assert isinstance(tokens[0]['f1_hz'], float)
     assert anchors[0]['ipa'] == 'ɑ'
     assert anchors[0]['n_speakers'] == 1
+
+
+def test_measurement_progress_bar_receives_every_selected_phone(
+    tmp_path,
+    monkeypatch,
+):
+    phones = [
+        FakePhone('ɑ', 'male', b'one', b'speaker'),
+        FakePhone('ə', 'female', b'two', b'speaker'),
+    ]
+    progress_items = []
+
+    def fake_progressbar(items):
+        progress_items.extend(items)
+        return items
+
+    monkeypatch.setattr(
+        selected_phone_module,
+        'progressbar',
+        fake_progressbar,
+    )
+
+    measure_and_write_phone_formants(
+        phones,
+        data_root=tmp_path,
+        audio_loader=_audio_loader,
+        n_bootstrap=10,
+    )
+
+    assert progress_items == phones
 
 
 def test_audio_loader_uses_phraser_phone_second_properties(monkeypatch):

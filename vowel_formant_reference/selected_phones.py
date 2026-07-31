@@ -11,6 +11,7 @@ from pathlib import Path
 import platform
 
 import numpy as np
+from progressbar import progressbar
 
 from .aggregation import MEASUREMENT_COLUMNS, aggregate_gender_measurements
 from .formant_tables import DEFAULT_DATA_ROOT, write_manifest
@@ -86,7 +87,7 @@ def measure_and_write_phone_formants(
     audio_loader = audio_loader or _load_phone_audio
     measured = [
         (phone, _measure_phone(phone, audio_loader, settings))
-        for phone in selected
+        for phone in progressbar(selected)
     ]
     gender_formants = _aggregate_gender_formants(
         measured,
