@@ -2,7 +2,7 @@
   "schema_version": 1,
   "generated_by": "vowel_formant_reference.formant_tables.write_manifest",
   "software_versions": {
-    "python": "3.14.4",
+    "python": "3.12.12",
     "numpy": "2.4.6",
     "parselmouth": "0.4.7",
     "praat": "6.1.38"
@@ -63,6 +63,34 @@
       "schema_version": 1,
       "path": "literature/adank_2004_table_1_monophthongs.csv",
       "sha256": "8354a9f68a0cf8b9247741325b6097c2af92cec564809a8457ad8853d0d0ae09"
+    },
+    {
+      "name": "phone_formants",
+      "relative_path": "selected_phones/phone_formants.csv",
+      "reference": "Local selected-phone corpus measurements.",
+      "url": null,
+      "page_range": null,
+      "source_page": null,
+      "table_number": null,
+      "record_level": "token",
+      "notes": "Praat measurements from the stable central portion of selected monophthongs. Includes successful and rejected tokens.",
+      "schema_version": 1,
+      "path": "selected_phones/phone_formants.csv",
+      "sha256": "47233aa2866c51849117f9a3c59e84e4b73448ca5587b3a9167db1a88a12fe0e"
+    },
+    {
+      "name": "gender_formants",
+      "relative_path": "selected_phones/gender_formants.csv",
+      "reference": "Local selected-phone corpus, speaker-balanced summaries.",
+      "url": null,
+      "page_range": null,
+      "source_page": null,
+      "table_number": null,
+      "record_level": "group_summary",
+      "notes": "Median of per-speaker medians with speaker-bootstrap intervals.",
+      "schema_version": 1,
+      "path": "selected_phones/gender_formants.csv",
+      "sha256": "8c9a840bde04d8c3829495ac4ef44f022a239b92c4f14dfdc051c6905c0d257c"
     }
   ]
 }

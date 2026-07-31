@@ -1,0 +1,13 @@
+{
+  "name": "selected_phone_genders",
+  "relative_path": "selected_phones/gender_summaries.csv",
+  "reference": "Local selected-phone corpus, speaker-balanced summaries.",
+  "url": null,
+  "page_range": null,
+  "source_page": null,
+  "table_number": null,
+  "record_level": "group_summary",
+  "notes": "Median of per-speaker medians with speaker-bootstrap intervals.",
+  "schema_version": 1,
+  "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+}
