@@ -83,9 +83,9 @@ logic.
 
 Store the formant artifacts in
 `vowel_formant_reference/formants/`. Preserve small literature tables,
-manifests, and summarized anchor tables as CSV/JSON. Store large token-level
-local measurements in Parquet if available, and keep them out of version
-control if their size becomes material. Each table has citation metadata
+summarized anchors, and local token measurements as CSV, and keep large local
+files out of version control if their size becomes material. Store structured
+metadata and manifests as JSON. Each table has citation metadata
 containing its full reference, URL, page range, page and table number where
 available, record level, schema version, and notes. `manifest.json`
 additionally records the generating command, configuration, software versions,
@@ -197,9 +197,13 @@ fully measure pitch perception, speech formants, or perceptual loudness.
   than approximating all female formants with one multiplier.
 - Estimate a second anchor set from the repository's selected phone corpus:
   - select IPA-labelled monophthongs only;
-  - retain the metadata gender category and age;
-  - resolve the linked Phraser phone and source audio;
-  - retain stress and duration as conditioning/quality-control variables;
+  - consume Phraser Phone objects directly rather than copying the metadata
+    phone table;
+  - obtain gender from `phraser_phone.speaker.gender()`;
+  - use `phraser_phone.start_seconds` and `end_seconds` for audio selection;
+  - store only the Phraser phone key, measurement gender, and acoustic result
+    in the token artifact;
+  - do not inspect stress for full vowels or schwa;
   - estimate F0 and F1-F3 with Praat;
   - summarize a stable central portion of each phone;
   - use sex/gender-appropriate formant ceilings as configurable defaults;
@@ -222,9 +226,12 @@ fully measure pitch perception, speech formants, or perceptual loudness.
 - Include `/eː, øː, oː/` as phonological monophthongs. Use only their stable
   central measurements in this milestone and document that some Netherlandic
   speakers realize them dynamically; do not add trajectory measurements.
-- For the first local monophthong anchors, use primary-stressed full vowels
-  and estimate schwa separately from unstressed tokens.
+- Include every non-overlapping observed monophthong regardless of stress.
 - Use the median of per-speaker medians as the primary group center.
+- Measure, aggregate, and persist local formants in one public function. Print
+  the selected-vowel count dictionary and every output path.
+- Write `phone_formants.csv`, `phone_formants_metadata.json`, and
+  `gender_formants.csv`; do not persist an intermediate speaker table.
 - Make writing artifacts explicit. Write versioned data only under
   `vowel_formant_reference/formants/`, never during import.
 
@@ -252,11 +259,13 @@ fully measure pitch perception, speech formants, or perceptual loudness.
 - Speaker-first aggregation gives equal speaker weight despite unequal token
   counts.
 - Bootstrap summaries are deterministic for a fixed seed.
-- Output round-trips through CSV/JSON without losing units or provenance.
+- CSV output round-trips through the explicit column schema without losing
+  units or provenance.
 - The manifest identifies every artifact and its exact measurement
   configuration.
-- A fake selected-phone dataset tests gender, stress, duration, and rejection
-  stratification without requiring the cluster audio store.
+- Fake Phraser phones test gender, second-based timing, overlap exclusion, and
+  rejection handling without requiring the cluster audio store. Their stress
+  property fails if inspected.
 
 ## Feature 2b: acoustic verification and improved formants
 
@@ -441,8 +450,8 @@ current implementation.
 ## Recommended implementation order
 
 1. Add `praat-parselmouth` and implement the published Dutch table loaders.
-2. Implement the agreed primary-stress, separate-schwa, and median-of-speaker-
-   medians policies.
+2. Implement the agreed Phraser-native selection and median-of-speaker-medians
+   policies without stress filtering.
 3. Implement selected-phone measurement, quality control, speaker-balanced
    aggregation, and versioned anchor-table output.
 4. Implement `Stimulus`, the paper-reproduction synthesis functions, and their

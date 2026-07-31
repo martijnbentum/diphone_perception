@@ -1,6 +1,8 @@
-from types import SimpleNamespace
-
-import pandas as pd
+import csv
+import json
+from pathlib import Path
+import sys
+from types import ModuleType, SimpleNamespace
 
 from synthetic_acoustic_probes.formants import praat_vowel_stimulus
 from vowel_formant_reference.aggregation import (
@@ -9,31 +11,46 @@ from vowel_formant_reference.aggregation import (
 )
 from vowel_formant_reference.formant_tables import load_formant_table
 from vowel_formant_reference.selected_phones import (
+    PhoneFormantMeasurement,
+    _load_phone_audio,
     is_monophthong,
-    measure_selected_phones,
-    select_monophthong_rows,
-    write_selected_phone_measurements,
+    measure_and_write_phone_formants,
 )
 
 
-def _phone(label, gender, speaker_id, overlap=False):
-    return SimpleNamespace(
-        phoneme_ipa=label,
-        overlap=overlap,
-        audio_filename=f'{speaker_id}.wav',
-        speaker_id=speaker_id,
-        speaker=SimpleNamespace(gender=gender, age=35),
-        duration_seconds=0.2,
-        start_seconds=0.0,
-        end_seconds=0.2,
-    )
+class FakeSpeaker:
+    def __init__(self, gender):
+        self._gender = gender
+
+    def gender(self):
+        return self._gender
 
 
-def _segment(stress):
-    return SimpleNamespace(stress=stress, duration=200)
+class FakePhone:
+    def __init__(
+        self,
+        label,
+        gender,
+        key,
+        speaker_id,
+        overlap=False,
+    ):
+        self.label = label
+        self.speaker = FakeSpeaker(gender)
+        self.key = key
+        self.speaker_id = speaker_id
+        self.overlap = overlap
+        self.start = 999999
+        self.end = 999999
+        self.start_seconds = 0.0
+        self.end_seconds = 0.2
+
+    @property
+    def stress(self):
+        raise AssertionError('phone stress must not be inspected')
 
 
-def _audio_loader(_segment):
+def _audio_loader(_phone):
     stimulus = praat_vowel_stimulus(
         f0_hz=120,
         f1_hz=500,
@@ -43,45 +60,137 @@ def _audio_loader(_segment):
     return stimulus.waveform, stimulus.sample_rate
 
 
-def test_monophthong_selection_includes_long_mid_vowels_not_diphthongs():
+def _read_csv(path):
+    with path.open(newline='', encoding='utf-8') as stream:
+        return list(csv.DictReader(stream))
+
+
+def test_monophthong_inventory_includes_schwa_and_long_mid_vowels():
     for label in ('eː', 'øː', 'oː', 'ə', 'ɑ'):
         assert is_monophthong(label)
     for label in ('ɛi', 'œy', 'ɑu', 't'):
         assert not is_monophthong(label)
 
-    data = pd.DataFrame({
-        'ipa_phoneme': ['eː', 'ɛi', 'ɑ', 't', 'oː'],
-        'overlap': ['False', 'False', 'True', 'False', 'False'],
-    })
-    selected = select_monophthong_rows(data)
-    assert selected['ipa_phoneme'].tolist() == ['eː', 'oː']
 
-
-def test_selected_phone_measurement_applies_stress_policy_and_keeps_failures():
+def test_one_call_uses_phraser_phones_and_writes_flat_csv_files(
+    tmp_path,
+    capsys,
+):
     phones = [
-        _phone('eː', 'male', 'm1'),
-        _phone('ə', 'female', 'f1'),
-        _phone('ɛi', 'male', 'm1'),
-        _phone('ɑ', 'male', 'm1'),
+        FakePhone('eː', 'male', b'phone-one', b'speaker-one'),
+        FakePhone('ə', 'female', b'phone-two', b'speaker-two'),
+        FakePhone('ɛi', 'male', b'diphthong', b'speaker-one'),
+        FakePhone(
+            'ɑ', 'male', b'overlap', b'speaker-one', overlap=True
+        ),
     ]
-    segments = [
-        _segment('primary'),
-        _segment('unstressed'),
-        _segment('primary'),
-        _segment('unstressed'),
-    ]
-    data = measure_selected_phones(
+
+    paths = measure_and_write_phone_formants(
         phones,
-        segments,
+        data_root=tmp_path,
         audio_loader=_audio_loader,
+        n_bootstrap=20,
+        seed=4,
     )
-    assert data['ipa'].tolist() == ['eː', 'ə', 'ɑ']
-    assert data['success'].tolist() == [True, True, False]
-    assert 'requires primary stress' in data.iloc[-1]['rejection_reason']
+
+    assert paths['phone_formants'].name == 'phone_formants.csv'
+    assert paths['phone_formants_metadata'].name == (
+        'phone_formants_metadata.json'
+    )
+    assert paths['gender_formants'].name == 'gender_formants.csv'
+    assert all(path.exists() for path in paths.values())
+
+    output = capsys.readouterr().out
+    assert "Selected vowels: {'eː': 1, 'ə': 1}" in output
+    for path in paths.values():
+        assert str(path.resolve()) in output
+
+    phone_rows = _read_csv(paths['phone_formants'])
+    assert len(phone_rows) == 2
+    assert {row['gender'] for row in phone_rows} == {'male', 'female'}
+    assert {row['phone_key'] for row in phone_rows} == {
+        b'phone-one'.hex(),
+        b'phone-two'.hex(),
+    }
+    duplicated_metadata = {
+        'ipa', 'speaker_id', 'audio_filename', 'start_seconds',
+        'end_seconds', 'duration_seconds', 'stress', 'age',
+    }
+    assert duplicated_metadata.isdisjoint(phone_rows[0])
+
+    metadata = json.loads(paths['phone_formants_metadata'].read_text())
+    assert metadata['selection']['check_stress'] is False
+    assert metadata['selection']['exclude_overlap'] is True
+    assert metadata['selection']['selected_vowel_counts'] == {
+        'eː': 1,
+        'ə': 1,
+    }
+
+    anchors = _read_csv(paths['gender_formants'])
+    assert {(row['gender'], row['ipa']) for row in anchors} == {
+        ('male', 'eː'),
+        ('female', 'ə'),
+    }
+
+
+def test_written_phone_tables_load_without_pandas(tmp_path):
+    phones = [FakePhone('ɑ', 'male', b'phone', b'speaker')]
+    measure_and_write_phone_formants(
+        phones,
+        data_root=tmp_path,
+        audio_loader=_audio_loader,
+        n_bootstrap=10,
+    )
+
+    tokens = load_formant_table('phone_formants', data_root=tmp_path).data
+    anchors = load_formant_table('gender_formants', data_root=tmp_path).data
+    assert tokens[0]['phone_key'] == b'phone'.hex()
+    assert tokens[0]['success'] is True
+    assert isinstance(tokens[0]['f1_hz'], float)
+    assert anchors[0]['ipa'] == 'ɑ'
+    assert anchors[0]['n_speakers'] == 1
+
+
+def test_audio_loader_uses_phraser_phone_second_properties(monkeypatch):
+    calls = []
+
+    def load_audio_samples(filename, start_sample, stop_sample):
+        calls.append((filename, start_sample, stop_sample))
+        return [0.1] * (stop_sample - start_sample), 16_000
+
+    package = ModuleType('phraser')
+    audio_module = ModuleType('phraser.audio')
+    audio_module.load_audio_samples = load_audio_samples
+    package.audio = audio_module
+    monkeypatch.setitem(sys.modules, 'phraser', package)
+    monkeypatch.setitem(sys.modules, 'phraser.audio', audio_module)
+
+    phone = FakePhone('ɑ', 'male', b'phone', b'speaker')
+    phone.start_seconds = 0.125
+    phone.end_seconds = 0.375
+    phone.audio = SimpleNamespace(filename='recording.wav', sample_rate=16_000)
+
+    waveform, sample_rate = _load_phone_audio(phone)
+
+    assert calls == [(Path('recording.wav'), 2000, 6000)]
+    assert len(waveform) == 4000
+    assert sample_rate == 16_000
+
+
+def test_phone_measurement_contains_gender_as_analysis_provenance():
+    measurement = PhoneFormantMeasurement(
+        phone_key=b'phone',
+        gender='female',
+        success=False,
+        rejection_reason='test',
+    )
+
+    assert measurement.gender == 'female'
+    assert measurement.to_csv_record()['phone_key'] == b'phone'.hex()
 
 
 def test_speaker_first_aggregation_equalizes_unequal_token_counts():
-    tokens = pd.DataFrame([
+    tokens = [
         *[
             {
                 'speaker_id': 'many',
@@ -103,55 +212,41 @@ def test_speaker_first_aggregation_equalizes_unequal_token_counts():
             'f3_hz': 2900,
             'success': True,
         },
-    ])
+    ]
     speakers = aggregate_speaker_measurements(tokens)
-    assert len(speakers) == 2
     genders = aggregate_gender_measurements(
-        speakers, n_bootstrap=100, seed=9
+        speakers,
+        n_bootstrap=100,
+        seed=9,
     )
-    assert genders.iloc[0]['f1_hz'] == 700
-    assert genders.iloc[0]['n_speakers'] == 2
-    assert genders.iloc[0]['n_tokens'] == 102
+
+    assert len(speakers) == 2
+    assert genders[0]['f1_hz'] == 700
+    assert genders[0]['n_speakers'] == 2
+    assert genders[0]['n_tokens'] == 102
 
 
 def test_bootstrap_is_deterministic():
-    speakers = pd.DataFrame({
-        'speaker_id': ['a', 'b', 'c'],
-        'gender': ['male'] * 3,
-        'ipa': ['ɑ'] * 3,
-        'f1_hz': [500, 600, 700],
-        'n_tokens': [1, 1, 1],
-    })
+    speakers = [
+        {
+            'speaker_id': speaker_id,
+            'gender': 'male',
+            'ipa': 'ɑ',
+            'f1_hz': f1_hz,
+            'n_tokens': 1,
+        }
+        for speaker_id, f1_hz in zip(('a', 'b', 'c'), (500, 600, 700))
+    ]
+
     left = aggregate_gender_measurements(
-        speakers, n_bootstrap=100, seed=4
+        speakers,
+        n_bootstrap=100,
+        seed=4,
     )
     right = aggregate_gender_measurements(
-        speakers, n_bootstrap=100, seed=4
+        speakers,
+        n_bootstrap=100,
+        seed=4,
     )
-    pd.testing.assert_frame_equal(left, right)
 
-
-def test_selected_tables_round_trip_separately(tmp_path):
-    tokens = pd.DataFrame({
-        'speaker_id': ['a', 'b'],
-        'gender': ['male', 'male'],
-        'ipa': ['ɑ', 'ɑ'],
-        'f0_hz': [110, 120],
-        'f1_hz': [500, 600],
-        'f2_hz': [1500, 1600],
-        'f3_hz': [2500, 2600],
-        'success': [True, True],
-    })
-    paths = write_selected_phone_measurements(
-        tokens,
-        data_root=tmp_path,
-        n_bootstrap=20,
-        seed=2,
-    )
-    assert paths['tokens'] != paths['speakers'] != paths['genders']
-    loaded = load_formant_table(
-        'selected_phone_genders',
-        data_root=tmp_path,
-    )
-    assert loaded.source.record_level == 'group_summary'
-    assert loaded.data.iloc[0]['n_speakers'] == 2
+    assert left == right

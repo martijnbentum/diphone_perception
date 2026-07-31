@@ -399,18 +399,18 @@ The checked-in literature artifacts and citation sidecars live under
 `vowel_formant_reference/formants/`. The default gender anchors contain F0 and
 F1--F3 for 12 full Dutch monophthongs from Weenink's adult groups; no
 literature table supplies schwa. See `vowel_formant_reference/literature.md`
-for references, URLs, source pages, and table numbers. Local phone extraction
-requires access to the configured Phraser/CGN audio store:
+for references, URLs, source pages, and table numbers. Tabular artifacts are
+CSV files with JSON metadata, and loader results expose their rows as
+`list[dict]`. Local phone extraction requires access to the configured
+Phraser/CGN audio store:
 
     from probing.metadata import Phones
-    from vowel_formant_reference import (
-        measure_selected_phones,
-        write_selected_phone_measurements,
-    )
+    from vowel_formant_reference import measure_and_write_phone_formants
 
-    tokens = measure_selected_phones(Phones())
-    paths = write_selected_phone_measurements(tokens)
+    phones = Phones()
+    measure_and_write_phone_formants(phones.phraser_phones)
 
-Only monophthongs are selected. Full vowels require primary stress, schwa is
-handled from unstressed tokens, and group anchors use the median of
-per-speaker medians.
+Only non-overlapping monophthongs are selected; stress is not inspected. The
+function prints selected-vowel counts and written paths. Token rows retain only
+the Phraser phone key, measurement gender, and acoustic results; group anchors
+use the median of per-speaker medians.

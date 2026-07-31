@@ -4,7 +4,6 @@
   "software_versions": {
     "python": "3.14.4",
     "numpy": "2.4.6",
-    "pandas": "3.0.5",
     "parselmouth": "0.4.7",
     "praat": "6.1.38"
   },

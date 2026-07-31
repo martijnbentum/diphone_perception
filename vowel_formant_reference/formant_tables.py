@@ -4,6 +4,8 @@ The public loader never pools sources. A table can be requested in its native
 schema, a standardized schema, or as a within-source summary.
 '''
 
+from collections.abc import Mapping
+import csv
 from dataclasses import asdict, dataclass
 import hashlib
 import json
@@ -11,7 +13,6 @@ from pathlib import Path
 import platform
 
 import numpy as np
-import pandas as pd
 
 
 DEFAULT_DATA_ROOT = Path(__file__).resolve().parent / 'formants'
@@ -54,7 +55,7 @@ class FormantTable:
     '''One formant table together with source metadata.'''
 
     source: FormantSource
-    data: pd.DataFrame
+    data: list[dict]
     view: str
 
     @property
@@ -141,9 +142,9 @@ _SOURCES = {
             'N=20 per sex/region cell. Dynamic Table II is out of scope.'
         ),
     ),
-    'selected_phone_tokens': FormantSource(
-        name='selected_phone_tokens',
-        relative_path='selected_phones/token_measurements.csv',
+    'phone_formants': FormantSource(
+        name='phone_formants',
+        relative_path='selected_phones/phone_formants.csv',
         reference='Local selected-phone corpus measurements.',
         url=None,
         page_range=None,
@@ -155,20 +156,9 @@ _SOURCES = {
             'monophthongs. Includes successful and rejected tokens.'
         ),
     ),
-    'selected_phone_speakers': FormantSource(
-        name='selected_phone_speakers',
-        relative_path='selected_phones/speaker_summaries.csv',
-        reference='Local selected-phone corpus, per-speaker summaries.',
-        url=None,
-        page_range=None,
-        source_page=None,
-        table_number=None,
-        record_level='speaker_vowel_summary',
-        notes='Median token measurement for each speaker and monophthong.',
-    ),
-    'selected_phone_genders': FormantSource(
-        name='selected_phone_genders',
-        relative_path='selected_phones/gender_summaries.csv',
+    'gender_formants': FormantSource(
+        name='gender_formants',
+        relative_path='selected_phones/gender_formants.csv',
         reference='Local selected-phone corpus, speaker-balanced summaries.',
         url=None,
         page_range=None,
@@ -316,25 +306,31 @@ def literature_gender_formants(
             f'{choices}'
         )
     table = load_formant_table(name, view='summary', data_root=data_root)
-    data = table.data.loc[
-        table.data['speaker_type'].isin({'man', 'woman'})
-        & table.data['gender'].isin({'male', 'female'})
-    ].copy()
+    data = [
+        row.copy() for row in table.data
+        if row['speaker_type'] in {'man', 'woman'}
+        and row['gender'] in {'male', 'female'}
+    ]
     if population is not None:
-        available = sorted(data['population'].dropna().unique())
-        data = data.loc[data['population'] == population].copy()
-        if data.empty:
+        available = sorted({
+            row['population'] for row in data
+            if row['population'] is not None
+        })
+        data = [
+            row for row in data
+            if row['population'] == population
+        ]
+        if not data:
             choices = ', '.join(available)
             raise ValueError(
                 f'population {population!r} is not available for {name!r}; '
                 f'choose from {choices}'
             )
-    if data.empty:
+    if not data:
         raise ValueError(f'{name!r} contains no adult male/female summaries')
     expected = set(LITERATURE_MONOPHTHONGS)
-    group_columns = ['population', 'gender']
-    for group, rows in data.groupby(group_columns, dropna=False):
-        observed = set(rows['ipa'])
+    for group, rows in _group_records(data, ('population', 'gender')).items():
+        observed = {row['ipa'] for row in rows}
         if observed != expected:
             missing = ', '.join(sorted(expected - observed))
             extra = ', '.join(sorted(observed - expected))
@@ -345,11 +341,12 @@ def literature_gender_formants(
     vowel_order = {
         ipa: index for index, ipa in enumerate(LITERATURE_MONOPHTHONGS)
     }
-    data['_vowel_order'] = data['ipa'].map(vowel_order)
-    data = (
-        data.sort_values(['population', 'gender', '_vowel_order'])
-        .drop(columns='_vowel_order')
-        .reset_index(drop=True)
+    data.sort(
+        key=lambda row: (
+            row['population'],
+            row['gender'],
+            vowel_order[row['ipa']],
+        )
     )
     return FormantTable(
         source=table.source,
@@ -406,7 +403,7 @@ def write_formant_table(name, data, data_root=None):
     path = source.path(data_root)
     path.parent.mkdir(parents=True, exist_ok=True)
     _write_table(path, data)
-    metadata_path = path.with_suffix('.metadata.json')
+    metadata_path = path.with_name(f'{path.stem}_metadata.json')
     metadata = asdict(source)
     metadata['sha256'] = _file_sha256(path)
     metadata_path.write_text(
@@ -457,12 +454,12 @@ def build_literature_tables(data_root=None):
     )
     write_formant_table(
         'pols_1973_male',
-        combined.loc[combined['Sex'] == 'm'].reset_index(drop=True),
+        [row for row in combined if row['Sex'] == 'm'],
         data_root,
     )
     write_formant_table(
         'van_nierop_1973_female',
-        combined.loc[combined['Sex'] == 'f'].reset_index(drop=True),
+        [row for row in combined if row['Sex'] == 'f'],
         data_root,
     )
     write_formant_table(
@@ -479,22 +476,41 @@ def build_literature_tables(data_root=None):
 
 
 def _read_table(path):
-    if path.suffix == '.parquet':
-        return pd.read_parquet(path)
-    if path.suffix == '.csv':
-        return pd.read_csv(path)
-    raise ValueError(f'unsupported formant table format: {path.suffix}')
+    if path.suffix != '.csv':
+        raise ValueError(f'unsupported formant table format: {path.suffix}')
+    with path.open(newline='', encoding='utf-8') as stream:
+        return [
+            {
+                column: _csv_value(column, value)
+                for column, value in row.items()
+            }
+            for row in csv.DictReader(stream)
+        ]
 
 
 def _write_table(path, data):
-    if not isinstance(data, pd.DataFrame):
-        data = pd.DataFrame(data)
-    if path.suffix == '.parquet':
-        data.to_parquet(path, index=False)
-    elif path.suffix == '.csv':
-        data.to_csv(path, index=False)
-    else:
+    if path.suffix != '.csv':
         raise ValueError(f'unsupported formant table format: {path.suffix}')
+    records = _records(data)
+    if not records:
+        raise ValueError('cannot infer CSV columns from an empty table')
+    columns = list(dict.fromkeys(
+        column for row in records for column in row
+    ))
+    with path.open('w', newline='', encoding='utf-8') as stream:
+        writer = csv.DictWriter(
+            stream,
+            fieldnames=columns,
+            lineterminator='\n',
+        )
+        writer.writeheader()
+        writer.writerows([
+            {
+                column: _csv_cell(row.get(column))
+                for column in columns
+            }
+            for row in records
+        ])
 
 
 def _praat_table(command):
@@ -519,13 +535,13 @@ def _praat_table(command):
         }
         for row in range(1, n_rows + 1)
     ]
-    data = pd.DataFrame(rows)
     numeric = {
         'Speaker', 'F0', 'F1', 'F2', 'F3', 'L1', 'L2', 'L3'
     }
-    for column in numeric.intersection(data.columns):
-        data[column] = pd.to_numeric(data[column])
-    return data
+    for row in rows:
+        for column in numeric.intersection(row):
+            row[column] = _number(row[column])
+    return rows
 
 
 def _standardize(source, data):
@@ -539,140 +555,159 @@ def _standardize(source, data):
     elif source.name == 'adank_2004_table_1_monophthongs':
         standardized = _standardize_adank(source, data)
     else:
-        standardized = data.copy()
-        standardized['source'] = source.name
-        standardized['record_level'] = source.record_level
-    for column in _STANDARD_COLUMNS:
-        if column not in standardized:
-            standardized[column] = np.nan
-    return standardized[_STANDARD_COLUMNS].copy()
+        standardized = [
+            {
+                **row,
+                'source': source.name,
+                'record_level': source.record_level,
+            }
+            for row in data
+        ]
+    return [
+        {
+            column: row.get(column)
+            for column in _STANDARD_COLUMNS
+        }
+        for row in standardized
+    ]
 
 
 def _standardize_pols_van_nierop(source, data):
-    output = pd.DataFrame({
-        'source': source.name,
-        'dataset': 'Pols and Van Nierop 1973 Praat table',
-        'record_level': source.record_level,
-        'population': 'Dutch adults',
-        'speaker_id': data['Speaker'].astype(str),
-        'speaker_type': data['Sex'].map({'m': 'man', 'f': 'woman'}),
-        'gender': data['Sex'].map({'m': 'male', 'f': 'female'}),
-        'vowel_label': data['Vowel'],
-        'source_ipa': data['IPA'],
-        'ipa': data['IPA'].map(_PRAAT_IPA_TO_PROJECT),
-        'f1_hz': data['F1'],
-        'f2_hz': data['F2'],
-        'f3_hz': data['F3'],
-        'l1_db': data['L1'],
-        'l2_db': data['L2'],
-        'l3_db': data['L3'],
-        'n_speakers': 1,
-        'n_tokens': 1,
-        'aggregation': 'single production',
-        'success': True,
-        'provenance': source.reference,
-    })
-    return output
+    return [
+        {
+            'source': source.name,
+            'dataset': 'Pols and Van Nierop 1973 Praat table',
+            'record_level': source.record_level,
+            'population': 'Dutch adults',
+            'speaker_id': _identifier(row['Speaker']),
+            'speaker_type': {'m': 'man', 'f': 'woman'}[row['Sex']],
+            'gender': {'m': 'male', 'f': 'female'}[row['Sex']],
+            'vowel_label': row['Vowel'],
+            'source_ipa': row['IPA'],
+            'ipa': _PRAAT_IPA_TO_PROJECT[row['IPA']],
+            'f1_hz': row['F1'],
+            'f2_hz': row['F2'],
+            'f3_hz': row['F3'],
+            'l1_db': row['L1'],
+            'l2_db': row['L2'],
+            'l3_db': row['L3'],
+            'n_speakers': 1,
+            'n_tokens': 1,
+            'aggregation': 'single production',
+            'success': True,
+            'provenance': source.reference,
+        }
+        for row in data
+    ]
 
 
 def _standardize_weenink(source, data):
-    output = pd.DataFrame({
-        'source': source.name,
-        'dataset': 'Weenink 1985 Praat table',
-        'record_level': source.record_level,
-        'population': data['Type'].map({
-            'm': 'Dutch adult',
-            'w': 'Dutch adult',
-            'c': 'Dutch child',
-        }),
-        'speaker_id': data['Speaker'].astype(str),
-        'speaker_type': data['Type'].map({
-            'm': 'man',
-            'w': 'woman',
-            'c': 'child',
-        }),
-        'gender': data['Sex'].map({'m': 'male', 'f': 'female'}),
-        'vowel_label': data['Vowel'],
-        'source_ipa': data['IPA'],
-        'ipa': data['IPA'].map(_PRAAT_IPA_TO_PROJECT),
-        'f0_hz': data['F0'],
-        'f1_hz': data['F1'],
-        'f2_hz': data['F2'],
-        'f3_hz': data['F3'],
-        'n_speakers': 1,
-        'n_tokens': 1,
-        'aggregation': 'single production',
-        'success': True,
-        'provenance': source.reference,
-    })
-    return output
+    populations = {
+        'm': 'Dutch adult',
+        'w': 'Dutch adult',
+        'c': 'Dutch child',
+    }
+    speaker_types = {'m': 'man', 'w': 'woman', 'c': 'child'}
+    return [
+        {
+            'source': source.name,
+            'dataset': 'Weenink 1985 Praat table',
+            'record_level': source.record_level,
+            'population': populations[row['Type']],
+            'speaker_id': _identifier(row['Speaker']),
+            'speaker_type': speaker_types[row['Type']],
+            'gender': {'m': 'male', 'f': 'female'}[row['Sex']],
+            'vowel_label': row['Vowel'],
+            'source_ipa': row['IPA'],
+            'ipa': _PRAAT_IPA_TO_PROJECT[row['IPA']],
+            'f0_hz': row['F0'],
+            'f1_hz': row['F1'],
+            'f2_hz': row['F2'],
+            'f3_hz': row['F3'],
+            'n_speakers': 1,
+            'n_tokens': 1,
+            'aggregation': 'single production',
+            'success': True,
+            'provenance': source.reference,
+        }
+        for row in data
+    ]
 
 
 def _standardize_adank(source, data):
-    output = pd.DataFrame({
-        'source': source.name,
-        'dataset': 'Adank et al. 2004 Table I',
-        'record_level': source.record_level,
-        'population': data['Region'].map({
-            'NSD': 'Northern Standard Dutch',
-            'SSD': 'Southern Standard Dutch',
-        }),
-        'speaker_type': data['Sex'].map({'M': 'man', 'F': 'woman'}),
-        'gender': data['Sex'].map({'M': 'male', 'F': 'female'}),
-        'vowel_label': data['IPA'],
-        'source_ipa': data['IPA'],
-        'ipa': data['IPA'].map(_ADANK_IPA_TO_PROJECT),
-        'f0_hz': data['F0'],
-        'f1_hz': data['F1'],
-        'f2_hz': data['F2'],
-        'f3_hz': data['F3'],
-        'duration_seconds': data['Duration_ms'] / 1000,
-        'n_speakers': data['N'],
-        'n_tokens': data['N'] * 2,
-        'aggregation': 'published group mean',
-        'success': True,
-        'provenance': source.reference,
-    })
-    return output
+    populations = {
+        'NSD': 'Northern Standard Dutch',
+        'SSD': 'Southern Standard Dutch',
+    }
+    return [
+        {
+            'source': source.name,
+            'dataset': 'Adank et al. 2004 Table I',
+            'record_level': source.record_level,
+            'population': populations[row['Region']],
+            'speaker_type': {'M': 'man', 'F': 'woman'}[row['Sex']],
+            'gender': {'M': 'male', 'F': 'female'}[row['Sex']],
+            'vowel_label': row['IPA'],
+            'source_ipa': row['IPA'],
+            'ipa': _ADANK_IPA_TO_PROJECT[row['IPA']],
+            'f0_hz': row['F0'],
+            'f1_hz': row['F1'],
+            'f2_hz': row['F2'],
+            'f3_hz': row['F3'],
+            'duration_seconds': row['Duration_ms'] / 1000,
+            'n_speakers': row['N'],
+            'n_tokens': row['N'] * 2,
+            'aggregation': 'published group mean',
+            'success': True,
+            'provenance': source.reference,
+        }
+        for row in data
+    ]
 
 
 def _within_source_summary(source, data):
     if source.record_level == 'group_summary':
-        return data.copy()
-    successful = data.loc[data['success'].fillna(True).astype(bool)].copy()
-    if successful.empty:
-        return successful
-    group_columns = [
-        'source', 'dataset', 'population', 'speaker_type', 'gender', 'ipa'
+        return [row.copy() for row in data]
+    successful = [
+        row for row in data
+        if _boolean(row.get('success'), default=True)
     ]
+    if not successful:
+        return successful
+    group_columns = (
+        'source', 'dataset', 'population', 'speaker_type', 'gender', 'ipa'
+    )
     value_columns = [
         column for column in (
             'f0_hz', 'f1_hz', 'f2_hz', 'f3_hz',
             'l1_db', 'l2_db', 'l3_db',
         )
-        if successful[column].notna().any()
+        if any(_is_number(row.get(column)) for row in successful)
     ]
-    summary = (
-        successful.groupby(group_columns, dropna=False)[value_columns]
-        .median()
-        .reset_index()
-    )
-    counts = (
-        successful.groupby(group_columns, dropna=False)
-        .agg(
-            n_speakers=('speaker_id', 'nunique'),
-            n_tokens=('ipa', 'size'),
-        )
-        .reset_index()
-    )
-    summary = summary.merge(counts, on=group_columns)
-    summary['record_level'] = 'within_source_group_summary'
-    summary['aggregation'] = 'median across speaker observations'
-    summary['provenance'] = source.reference
-    for column in _STANDARD_COLUMNS:
-        if column not in summary:
-            summary[column] = np.nan
-    return summary[_STANDARD_COLUMNS]
+    summary = []
+    for key, rows in _group_records(successful, group_columns).items():
+        row = dict(zip(group_columns, key))
+        for column in value_columns:
+            values = [
+                item[column] for item in rows
+                if _is_number(item.get(column))
+            ]
+            row[column] = float(np.median(values))
+        row.update({
+            'n_speakers': len({
+                item['speaker_id'] for item in rows
+                if item.get('speaker_id') is not None
+            }),
+            'n_tokens': len(rows),
+            'record_level': 'within_source_group_summary',
+            'aggregation': 'median across speaker observations',
+            'provenance': source.reference,
+        })
+        summary.append({
+            column: row.get(column)
+            for column in _STANDARD_COLUMNS
+        })
+    return summary
 
 
 def _adank_table_1():
@@ -734,7 +769,118 @@ def _adank_table_1():
             for name, series in measurements.items():
                 row[name] = series[index]
             rows.append(row)
-    return pd.DataFrame(rows)
+    return rows
+
+
+def _records(data):
+    if isinstance(data, Mapping):
+        columns = list(data)
+        values = [list(data[column]) for column in columns]
+        lengths = {len(column) for column in values}
+        if len(lengths) > 1:
+            raise ValueError('column values have different lengths')
+        return [
+            dict(zip(columns, row))
+            for row in zip(*values)
+        ]
+    try:
+        return [dict(row) for row in data]
+    except (TypeError, ValueError) as error:
+        raise TypeError('formant data must contain mapping records') from error
+
+
+def _group_records(records, columns):
+    groups = {}
+    for row in records:
+        key = tuple(row.get(column) for column in columns)
+        groups.setdefault(key, []).append(row)
+    return groups
+
+
+def _json_value(value):
+    if isinstance(value, Mapping):
+        return {
+            str(key): _json_value(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, (list, tuple)):
+        return [_json_value(item) for item in value]
+    if isinstance(value, np.generic):
+        return _json_value(value.item())
+    if isinstance(value, float) and not np.isfinite(value):
+        return None
+    return value
+
+
+_CSV_INTEGER_COLUMNS = {
+    'Speaker', 'N', 'Duration_ms', 'n_speakers', 'n_tokens',
+    'bootstrap_seed', 'bootstrap_replicates',
+}
+
+_CSV_FLOAT_COLUMNS = {
+    'F0', 'F1', 'F2', 'F3', 'L1', 'L2', 'L3',
+    'f0_hz', 'f1_hz', 'f2_hz', 'f3_hz',
+    'b1_hz', 'b2_hz', 'b3_hz',
+    'duration_seconds', 'confidence',
+    'f0_hz_ci_low', 'f0_hz_ci_high',
+    'f1_hz_ci_low', 'f1_hz_ci_high',
+    'f2_hz_ci_low', 'f2_hz_ci_high',
+    'f3_hz_ci_low', 'f3_hz_ci_high',
+    'b1_hz_ci_low', 'b1_hz_ci_high',
+    'b2_hz_ci_low', 'b2_hz_ci_high',
+    'b3_hz_ci_low', 'b3_hz_ci_high',
+}
+
+
+def _csv_value(column, value):
+    if value in {None, ''}:
+        return None
+    if column == 'success':
+        return _boolean(value)
+    if column in _CSV_INTEGER_COLUMNS:
+        return int(float(value))
+    if column in _CSV_FLOAT_COLUMNS:
+        return float(value)
+    return value
+
+
+def _csv_cell(value):
+    if value is None:
+        return ''
+    if isinstance(value, (bool, np.bool_)):
+        return 'true' if value else 'false'
+    if isinstance(value, np.generic):
+        value = value.item()
+    if isinstance(value, float) and not np.isfinite(value):
+        return ''
+    return value
+
+
+def _number(value):
+    number = float(value)
+    return int(number) if number.is_integer() else number
+
+
+def _identifier(value):
+    if isinstance(value, float) and value.is_integer():
+        value = int(value)
+    return str(value)
+
+
+def _is_number(value):
+    return (
+        isinstance(value, (int, float, np.number))
+        and not isinstance(value, (bool, np.bool_))
+        and np.isfinite(value)
+    )
+
+
+def _boolean(value, default=False):
+    if value is None:
+        return default
+    if isinstance(value, str):
+        return value.strip().lower() in {'true', '1', 'yes'}
+    return bool(value)
 
 
 def _file_sha256(path):
@@ -749,7 +895,6 @@ def _software_versions():
     versions = {
         'python': platform.python_version(),
         'numpy': np.__version__,
-        'pandas': pd.__version__,
     }
     try:
         import parselmouth

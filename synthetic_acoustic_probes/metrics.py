@@ -1,7 +1,6 @@
 '''Quantitative structure scores computed in representation space.'''
 
 import numpy as np
-import pandas as pd
 from scipy.spatial.distance import cdist, pdist
 from scipy.stats import spearmanr
 from sklearn.linear_model import Ridge
@@ -131,24 +130,19 @@ def conditional_axis_monotonicity(
         index for index in range(coordinate_values.shape[1])
         if index != axis_index
     ]
-    frame = pd.DataFrame(
-        coordinate_values,
-        columns=names,
-    )
-    frame['_row'] = np.arange(len(frame))
+    if not np.all(np.isfinite(coordinate_values)):
+        raise ValueError('coordinates contain non-finite values')
     if other_indices:
-        groups = frame.groupby(
-            [names[index] for index in other_indices],
-            dropna=False,
-            sort=True,
-        )
+        groups = {}
+        for row, values in enumerate(coordinate_values):
+            key = tuple(values[index] for index in other_indices)
+            groups.setdefault(key, []).append(row)
     else:
-        groups = [((), frame)]
+        groups = {(): list(range(len(coordinate_values)))}
     scores = []
-    for key, group in groups:
-        if len(group) < 3:
+    for key, rows in groups.items():
+        if len(rows) < 3:
             continue
-        rows = group['_row'].to_numpy(dtype=int)
         target = coordinate_values[rows, axis_index][:, None]
         target_distances = pdist(target, metric='euclidean')
         representation_distances = pdist(
@@ -163,7 +157,7 @@ def conditional_axis_monotonicity(
         ).statistic
         scores.append({
             'condition': _serializable_condition(key),
-            'n_samples': len(group),
+            'n_samples': len(rows),
             'spearman': float(score),
         })
     if not scores:
@@ -305,14 +299,7 @@ def _coordinates(values, n_samples, spans):
 
 
 def _named_targets(values, names):
-    if isinstance(values, pd.DataFrame):
-        frame = values
-        target_values = frame.to_numpy(dtype=float)
-        inferred_names = [str(column) for column in frame.columns]
-    elif isinstance(values, pd.Series):
-        target_values = values.to_numpy(dtype=float)[:, None]
-        inferred_names = [str(values.name or 'target')]
-    elif isinstance(values, dict):
+    if isinstance(values, dict):
         inferred_names = list(values)
         target_values = np.column_stack([
             np.asarray(values[name], dtype=float)

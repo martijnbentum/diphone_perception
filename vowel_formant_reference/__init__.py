@@ -26,10 +26,9 @@ from .measurement import (
 )
 from .selected_phones import (
     MONOPHTHONGS,
+    PhoneFormantMeasurement,
     is_monophthong,
-    measure_selected_phones,
-    select_monophthong_rows,
-    write_selected_phone_measurements,
+    measure_and_write_phone_formants,
 )
 
 __all__ = [
@@ -39,6 +38,7 @@ __all__ = [
     'LITERATURE_MONOPHTHONGS',
     'MeasurementSettings',
     'MONOPHTHONGS',
+    'PhoneFormantMeasurement',
     'adank_2004_formants',
     'aggregate_gender_measurements',
     'aggregate_speaker_measurements',
@@ -49,11 +49,9 @@ __all__ = [
     'literature_gender_formants',
     'load_formant_table',
     'measure_formants',
-    'measure_selected_phones',
+    'measure_and_write_phone_formants',
     'pols_1973_formants',
     'registered_formant_tables',
-    'select_monophthong_rows',
     'van_nierop_1973_formants',
     'weenink_1985_formants',
-    'write_selected_phone_measurements',
 ]
