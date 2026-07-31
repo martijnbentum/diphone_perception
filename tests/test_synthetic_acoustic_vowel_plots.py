@@ -1,3 +1,5 @@
+import inspect
+
 import matplotlib
 
 matplotlib.use('Agg')
@@ -60,6 +62,12 @@ def test_gender_panels_include_all_sources_available_for_each_gender():
     assert [_point_count(axis) for axis in axes] == [59, 59]
     assert [len(axis.texts) for axis in axes] == [59, 59]
     assert [len(axis.collections) for axis in axes] == [5, 5]
+    for axis in axes:
+        legend_labels = [
+            text.get_text() for text in axis.get_legend().get_texts()
+        ]
+        assert 'CGN selected vowels' in legend_labels
+        assert 'CGN selected phones' not in legend_labels
 
 
 def test_source_and_gender_flags_select_data_without_filling_missing_groups():
@@ -94,6 +102,21 @@ def test_plot_can_save_and_return_the_same_figure(tmp_path):
     assert figure.axes == list(axes)
 
 
+def test_empty_output_path_is_default_and_does_not_save(tmp_path, monkeypatch):
+    parameter = inspect.signature(
+        plot_vowel_formant_space
+    ).parameters['output_path']
+    assert parameter.default == ''
+    monkeypatch.chdir(tmp_path)
+
+    plot_vowel_formant_space(
+        panel_by='gender',
+        output_path='',
+    )
+
+    assert not list(tmp_path.iterdir())
+
+
 @pytest.mark.parametrize(
     ('panel_by', 'data_panel_count'),
     (('source', 6), ('gender', 2)),
@@ -110,10 +133,9 @@ def test_examples_flag_appends_aligned_vowel_word_panel(
     assert len(axes) == data_panel_count + 1
     assert figure.axes == list(axes)
     example_axis = axes[-1]
-    assert example_axis.get_title() == 'Vowel examples'
+    assert example_axis.get_title() == ''
     assert not example_axis.axison
     assert [text.get_text() for text in example_axis.texts] == [
-        'Vowel', 'Example',
         'ɪ', 'pit',
         'ɛ', 'pet',
         'ɑ', 'pat',
@@ -128,6 +150,14 @@ def test_examples_flag_appends_aligned_vowel_word_panel(
         'uː', 'boek',
         'ə', 'de',
     ]
+    assert {
+        text.get_position()[0]
+        for text in example_axis.texts[::2]
+    } == {0.04}
+    assert {
+        text.get_position()[0]
+        for text in example_axis.texts[1::2]
+    } == {0.17}
 
 
 def test_examples_flag_must_be_boolean():

@@ -93,7 +93,7 @@ def plot_vowel_formant_space(
     source_ids=DEFAULT_VOWEL_PLOT_SOURCE_IDS,
     genders=DEFAULT_VOWEL_PLOT_GENDERS,
     data_root=None,
-    output_path=None,
+    output_path='',
     add_examples=False,
     figsize=None,
     dpi=300,
@@ -143,7 +143,7 @@ def plot_vowel_formant_space(
     figure.suptitle('Dutch vowel formant space')
     figure.tight_layout()
 
-    if output_path is not None:
+    if output_path:
         output_path = Path(output_path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
         figure.savefig(output_path, dpi=dpi, bbox_inches='tight')
@@ -254,7 +254,7 @@ def _plot_gender_panels(axes, genders, source_ids, rows, pyplot):
             _plot_series(
                 axis,
                 selected,
-                label=_PLOT_SOURCES[source_id].title,
+                label=_source_legend_label(source_id),
                 color=source_colors[source_id],
                 marker=_GENDER_MARKERS[gender],
             )
@@ -286,27 +286,18 @@ def _plot_series(axis, rows, label, color, marker):
         )
 
 
+def _source_legend_label(source_id):
+    if source_id == 'cgn_selected_phones':
+        return 'CGN selected vowels'
+    return _PLOT_SOURCES[source_id].title
+
+
 def _plot_examples_panel(axis):
-    axis.set_title('Vowel examples')
     axis.set_axis_off()
-    axis.text(
-        0.22,
-        0.94,
-        'Vowel',
-        weight='bold',
-        transform=axis.transAxes,
-    )
-    axis.text(
-        0.52,
-        0.94,
-        'Example',
-        weight='bold',
-        transform=axis.transAxes,
-    )
-    row_positions = np.linspace(0.87, 0.08, len(_VOWEL_EXAMPLES))
+    row_positions = np.linspace(0.92, 0.08, len(_VOWEL_EXAMPLES))
     for (ipa, word), position in zip(_VOWEL_EXAMPLES, row_positions):
-        axis.text(0.22, position, ipa, transform=axis.transAxes)
-        axis.text(0.52, position, word, transform=axis.transAxes)
+        axis.text(0.04, position, ipa, transform=axis.transAxes)
+        axis.text(0.17, position, word, transform=axis.transAxes)
 
 
 def _format_vowel_axes(axes, rows):
