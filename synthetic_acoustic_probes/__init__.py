@@ -31,8 +31,14 @@ from .stimuli import (
     sum_of_sinusoids,
     temporal_burst_stimuli,
 )
+from .vowel_materials import (
+    DEFAULT_SOURCE_IDS,
+    vowel_anchor_stimuli,
+    write_vowel_anchor_materials,
+)
 
 __all__ = [
+    'DEFAULT_SOURCE_IDS',
     'Stimulus',
     'WaveformMeasurements',
     'accumulated_adjacent_cosine_scale',
@@ -56,4 +62,6 @@ __all__ = [
     'sum_of_sinusoids',
     'structure_report',
     'temporal_burst_stimuli',
+    'vowel_anchor_stimuli',
+    'write_vowel_anchor_materials',
 ]
