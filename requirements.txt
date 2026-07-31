@@ -3,6 +3,7 @@ phraser @ git+https://github.com/martijnbentum/phraser.git
 progressbar2
 pytest
 ipython
+matplotlib
 echoframe @ git+https://git@github.com/martijnbentum/echoframe.git
 numpy
 scipy

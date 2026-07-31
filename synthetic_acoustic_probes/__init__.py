@@ -36,9 +36,16 @@ from .vowel_materials import (
     vowel_anchor_stimuli,
     write_vowel_anchor_materials,
 )
+from .vowel_plots import (
+    DEFAULT_VOWEL_PLOT_GENDERS,
+    DEFAULT_VOWEL_PLOT_SOURCE_IDS,
+    plot_vowel_formant_space,
+)
 
 __all__ = [
     'DEFAULT_SOURCE_IDS',
+    'DEFAULT_VOWEL_PLOT_GENDERS',
+    'DEFAULT_VOWEL_PLOT_SOURCE_IDS',
     'Stimulus',
     'WaveformMeasurements',
     'accumulated_adjacent_cosine_scale',
@@ -55,6 +62,7 @@ __all__ = [
     'measure_waveform',
     'pairwise_geometry_spearman',
     'paper_code_amplitudes',
+    'plot_vowel_formant_space',
     'praat_formant_stimuli',
     'praat_vowel_stimulus',
     'pure_tone_stimuli',
