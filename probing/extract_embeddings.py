@@ -1,5 +1,7 @@
+import gc
 import json
 from pathlib import Path
+from urllib.parse import quote
 
 import echoframe
 from echoframe.batch_segment_features import compute_embeddings_batch
@@ -8,6 +10,7 @@ from probing.metadata import _data_dir
 
 default_model_paths_file = _data_dir / 'model_paths.json'
 default_store_root = _data_dir / 'echoframe_store'
+default_model_stores_root = _data_dir / 'echoframe_model_stores'
 default_model_name = 'wav2vec2_nl1_checkpoint-200000'
 default_phraser_source_id = 'cgn-awd'
 
@@ -36,6 +39,29 @@ def _ensure_model_registered(store, model_name, model_paths_file):
         language=entry.get('language'),
         size=entry.get('size'),
     )
+
+
+def model_store_path(model_name, stores_root=default_model_stores_root):
+    '''Return the dedicated Echoframe store path for one model.'''
+    if not isinstance(model_name, str) or not model_name.strip():
+        raise ValueError('model_name must be a non-empty string')
+    directory_name = quote(model_name, safe='._-')
+    return Path(stores_root) / directory_name
+
+
+def open_model_store(
+    model_name,
+    stores_root=default_model_stores_root,
+    model_paths_file=default_model_paths_file,
+    max_shard_size_bytes=100_000_000,
+):
+    '''Open or create and register the dedicated store for one model.'''
+    store = echoframe.Store(
+        str(model_store_path(model_name, stores_root)),
+        max_shard_size_bytes=max_shard_size_bytes,
+    )
+    _ensure_model_registered(store, model_name, model_paths_file)
+    return store
 
 
 def extract_phone_embeddings(
@@ -91,3 +117,72 @@ def extract_phone_embeddings(
         verbose=verbose,
     )
     return store
+
+
+def _release_cuda_memory():
+    '''Release unreferenced CUDA allocations after unloading a model.'''
+    import torch
+
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+
+def extract_phone_embeddings_for_models(
+    phones,
+    model_names,
+    layers=[9],
+    collar=2000,
+    store_root=default_model_stores_root,
+    model_paths_file=default_model_paths_file,
+    phraser_source_id=default_phraser_source_id,
+    gpu=False,
+    batch_size=32,
+    tags=None,
+    verbose=True,
+):
+    '''Compute phone embeddings in a dedicated store for every model.
+
+    Accepts the extraction options from `extract_phone_embeddings`, replacing
+    `model_name` with `model_names` and managing each model's store. Stores are
+    opened below `store_root`, then the cached model is unloaded and the store
+    is closed after each extraction. When `gpu` is true, unreferenced CUDA
+    allocations are also released before the next model is loaded.
+
+    Returns a dictionary mapping each model name to its store path.
+    '''
+    if isinstance(model_names, str):
+        raise TypeError('model_names must be an iterable, not a string')
+
+    store_paths = {}
+    for model_name in model_names:
+        store = open_model_store(
+            model_name,
+            stores_root=store_root,
+            model_paths_file=model_paths_file,
+        )
+        try:
+            extract_phone_embeddings(
+                phones,
+                model_name=model_name,
+                layers=layers,
+                collar=collar,
+                store=store,
+                model_paths_file=model_paths_file,
+                phraser_source_id=phraser_source_id,
+                gpu=gpu,
+                batch_size=batch_size,
+                tags=tags,
+                verbose=verbose,
+            )
+            store_paths[model_name] = model_store_path(model_name, store_root)
+        finally:
+            try:
+                store.remove_cached_model()
+            finally:
+                try:
+                    store.close()
+                finally:
+                    if gpu:
+                        _release_cuda_memory()
+    return store_paths

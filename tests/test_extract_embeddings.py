@@ -49,6 +49,8 @@ class FakeStore:
         self._registered = dict(registered or {})
         self.register_model_calls = []
         self.attach_phraser_store_calls = []
+        self.remove_cached_model_calls = 0
+        self.close_calls = 0
 
     def load_model_metadata(self, model_name):
         return self._registered.get(model_name)
@@ -62,6 +64,12 @@ class FakeStore:
 
     def attach_phraser_store(self, source_id, phraser_store):
         self.attach_phraser_store_calls.append((source_id, phraser_store))
+
+    def remove_cached_model(self):
+        self.remove_cached_model_calls += 1
+
+    def close(self):
+        self.close_calls += 1
 
 
 def test_ensure_model_registered_skips_when_already_registered(tmp_path):
@@ -93,6 +101,52 @@ def test_ensure_model_registered_passes_huggingface_id(tmp_path):
     assert store.register_model_calls == [dict(
         model_name='model-b', local_path=None,
         huggingface_id='facebook/wav2vec2-base', language=None, size=None)]
+
+
+# -- per-model stores --------------------------------------------------------
+
+def test_model_store_path_uses_model_name(tmp_path):
+    result = extract_embeddings.model_store_path('model-a', tmp_path)
+
+    assert result == tmp_path / 'model-a'
+
+
+def test_model_store_path_escapes_path_separators(tmp_path):
+    result = extract_embeddings.model_store_path('owner/model', tmp_path)
+
+    assert result == tmp_path / 'owner%2Fmodel'
+
+
+@pytest.mark.parametrize('model_name', ['', '   ', None, 42])
+def test_model_store_path_rejects_invalid_model_name(tmp_path, model_name):
+    with pytest.raises(ValueError, match='non-empty string'):
+        extract_embeddings.model_store_path(model_name, tmp_path)
+
+
+def test_open_model_store_opens_and_registers_dedicated_store(
+    tmp_path, monkeypatch):
+    path = write_model_paths(tmp_path, MODEL_PATHS)
+    opened = []
+
+    def fake_store_constructor(root, max_shard_size_bytes):
+        store = FakeStore()
+        opened.append((root, max_shard_size_bytes, store))
+        return store
+
+    monkeypatch.setattr(extract_embeddings.echoframe, 'Store',
+        fake_store_constructor)
+
+    result = extract_embeddings.open_model_store(
+        'model-a', stores_root=tmp_path / 'stores', model_paths_file=path,
+        max_shard_size_bytes=1234)
+
+    root, max_shard_size_bytes, store = opened[0]
+    assert result is store
+    assert root == str(tmp_path / 'stores' / 'model-a')
+    assert max_shard_size_bytes == 1234
+    assert store.register_model_calls == [dict(
+        model_name='model-a', local_path='/models/a', huggingface_id=None,
+        language='Dutch', size='base')]
 
 
 # -- extract_phone_embeddings ------------------------------------------------
@@ -198,3 +252,102 @@ def test_extract_phone_embeddings_opens_store_when_none_given(
 
     assert result is opened_store
     assert store_roots == [str(tmp_path / 'store')]
+
+
+# -- extract_phone_embeddings_for_models ------------------------------------
+
+def test_extract_phone_embeddings_for_models_opens_extracts_and_closes(
+    tmp_path, monkeypatch):
+    stores = {name: FakeStore() for name in ('model-a', 'model-b')}
+    open_calls = []
+    extract_calls = []
+    cuda_release_calls = []
+
+    def fake_open_model_store(
+        model_name, stores_root, model_paths_file):
+        open_calls.append((model_name, stores_root, model_paths_file))
+        return stores[model_name]
+
+    def fake_extract_phone_embeddings(phones, **kwargs):
+        extract_calls.append((phones, kwargs))
+
+    monkeypatch.setattr(extract_embeddings, 'open_model_store',
+        fake_open_model_store)
+    monkeypatch.setattr(extract_embeddings, 'extract_phone_embeddings',
+        fake_extract_phone_embeddings)
+    monkeypatch.setattr(extract_embeddings, '_release_cuda_memory',
+        lambda: cuda_release_calls.append(True))
+
+    path = tmp_path / 'model_paths.json'
+    phones = object()
+    result = extract_embeddings.extract_phone_embeddings_for_models(
+        phones,
+        ['model-a', 'model-b'],
+        layers=[8, 9],
+        collar=500,
+        store_root=tmp_path / 'stores',
+        model_paths_file=path,
+        phraser_source_id='phones',
+        gpu=True,
+        batch_size=16,
+        tags=['experiment'],
+        verbose=False,
+    )
+
+    assert open_calls == [
+        ('model-a', tmp_path / 'stores', path),
+        ('model-b', tmp_path / 'stores', path),
+    ]
+    assert [call[1] for call in extract_calls] == [
+        dict(
+            model_name='model-a', layers=[8, 9], collar=500,
+            store=stores['model-a'], model_paths_file=path,
+            phraser_source_id='phones', gpu=True, batch_size=16,
+            tags=['experiment'], verbose=False,
+        ),
+        dict(
+            model_name='model-b', layers=[8, 9], collar=500,
+            store=stores['model-b'], model_paths_file=path,
+            phraser_source_id='phones', gpu=True, batch_size=16,
+            tags=['experiment'], verbose=False,
+        ),
+    ]
+    assert all(store.remove_cached_model_calls == 1
+        for store in stores.values())
+    assert all(store.close_calls == 1 for store in stores.values())
+    assert cuda_release_calls == [True, True]
+    assert result == {
+        'model-a': tmp_path / 'stores' / 'model-a',
+        'model-b': tmp_path / 'stores' / 'model-b',
+    }
+
+
+def test_extract_phone_embeddings_for_models_cleans_up_after_failure(
+    tmp_path, monkeypatch):
+    store = FakeStore()
+    cuda_release_calls = []
+
+    monkeypatch.setattr(extract_embeddings, 'open_model_store',
+        lambda *args, **kwargs: store)
+
+    def fail_extraction(*args, **kwargs):
+        raise RuntimeError('extraction failed')
+
+    monkeypatch.setattr(extract_embeddings, 'extract_phone_embeddings',
+        fail_extraction)
+    monkeypatch.setattr(extract_embeddings, '_release_cuda_memory',
+        lambda: cuda_release_calls.append(True))
+
+    with pytest.raises(RuntimeError, match='extraction failed'):
+        extract_embeddings.extract_phone_embeddings_for_models(
+            object(), ['model-a'], store_root=tmp_path, gpu=True)
+
+    assert store.remove_cached_model_calls == 1
+    assert store.close_calls == 1
+    assert cuda_release_calls == [True]
+
+
+def test_extract_phone_embeddings_for_models_rejects_string_model_names():
+    with pytest.raises(TypeError, match='iterable, not a string'):
+        extract_embeddings.extract_phone_embeddings_for_models(
+            object(), 'model-a')

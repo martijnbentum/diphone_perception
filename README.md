@@ -217,6 +217,20 @@ each sentence through the model once and sliced every phone out of that one
 pass). Not addressed yet - flagged for awareness if extraction throughput
 becomes a problem at scale.
 
+For extracting many training checkpoints,
+`extract_phone_embeddings_for_models(...)` opens or creates one store per
+registered model under `data/echoframe_model_stores`. Each model is removed
+from the store cache and CUDA memory before the next model is loaded:
+
+	from probing.extract_embeddings import (
+	    extract_phone_embeddings_for_models, model_store_path)
+
+	store_paths = extract_phone_embeddings_for_models(
+	    phones, checkpoint_model_names, layers=[9], gpu=True)
+
+Probe functions can open the matching checkpoint store by passing
+`store_root=model_store_path(model_name)`.
+
 c) train_binary_embedding_probe.py
 
 `train_binary_embedding_probe(phones, target_phoneme, ...)` trains and
