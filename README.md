@@ -304,12 +304,13 @@ report = move_embeddings_based_on_phraser_keys(
     flemish_keys, dutch_model_store, new_flemish_model_store)
 ```
 
-The move first checks that every model-specific destination below
-`data/echoframe_model_flemish_stores/` is new. It copies and exactly verifies
-every matching hidden-state payload before deleting source metadata, then
-compacts only affected Dutch shards. Fully Flemish shards are removed; mixed
-shards are rewritten with their remaining Dutch embeddings. Per-store
-progress and a final aggregate report are printed and returned.
+The sweep skips and reports model-specific destinations that already exist
+below `data/echoframe_model_flemish_stores/`. For every new destination, it
+copies and exactly verifies each matching hidden-state payload before deleting
+source metadata, then compacts only affected Dutch shards. Fully Flemish
+shards are removed; mixed shards are rewritten with their remaining Dutch
+embeddings. Per-store progress and a final aggregate report are printed and
+returned. The lower-level one-store function still requires a new destination.
 
 c) train_binary_embedding_probe.py
 

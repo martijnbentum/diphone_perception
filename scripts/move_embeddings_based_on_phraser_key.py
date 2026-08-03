@@ -479,16 +479,24 @@ def _preflight_destinations(source_paths, flemish_root):
     destination_paths = [destination for _, destination in pairs]
     if len(set(destination_paths)) != len(destination_paths):
         raise ValueError('multiple source stores map to one destination path')
-    existing = [
-        path for path in destination_paths
-        if path.exists() or path.is_symlink()
-    ]
-    if existing:
-        details = '\n'.join(f'  {path}' for path in existing)
-        raise FileExistsError(
-            'all Flemish model-store destinations must be new; found:\n'
-            f'{details}')
     return pairs
+
+
+def _skipped_existing_report(source_path, destination_path):
+    return {
+        'status': 'skipped_existing',
+        'source_path': str(_resolved_path(source_path)),
+        'destination_path': str(_resolved_path(destination_path)),
+        'selected_embedding_count': 0,
+        'copied_count': 0,
+        'verified_count': 0,
+        'deleted_count': 0,
+        'affected_shard_count': 0,
+        'pure_flemish_shard_count': 0,
+        'mixed_shard_count': 0,
+        'compacted_shard_count': 0,
+        'reason': 'destination store already exists',
+    }
 
 
 def _print_flemish_report(report):
@@ -496,6 +504,7 @@ def _print_flemish_report(report):
     print('Flemish embedding move report', flush=True)
     print(
         f'  Stores: {summary["moved_stores"]:,} moved, '
+        f'{summary["skipped_existing_stores"]:,} already existing, '
         f'{summary["no_match_stores"]:,} without matches, '
         f'{summary["failed_stores"]:,} failed',
         flush=True,
@@ -517,6 +526,8 @@ def _print_flemish_report(report):
         detail = item.get('error', '')
         if item['status'] == 'moved':
             detail = f'{item["selected_embedding_count"]:,} embeddings'
+        elif item['status'] == 'skipped_existing':
+            detail = item['reason']
         print(
             f'  {Path(item["source_path"]).name}: '
             f'{item["status"]} {detail}',
@@ -533,9 +544,9 @@ def move_flemish_data(
 ):
     '''Move Flemish-key hidden states from every Dutch model-specific store.
 
-    All destination paths are checked before the first store is changed.
-    Individual store failures are recorded and later stores continue, so the
-    returned report describes the entire preflighted run.
+    Existing destination paths are skipped and reported. Individual store
+    failures are recorded and later stores continue, so the returned report
+    describes the entire run.
     '''
     _validate_batch_size(batch_size)
     started = time.perf_counter()
@@ -557,6 +568,16 @@ def move_flemish_data(
         if verbose:
             print(
                 f'[{index:,}/{len(pairs):,}] {source_path.name}', flush=True)
+        if destination_path.exists() or destination_path.is_symlink():
+            item = _skipped_existing_report(
+                source_path, destination_path)
+            store_reports.append(item)
+            if verbose:
+                print(
+                    f'[{source_path.name}] skipped: {item["reason"]}',
+                    flush=True,
+                )
+            continue
         try:
             item = move_embeddings_based_on_phraser_keys(
                 phraser_keys,
@@ -591,6 +612,9 @@ def move_flemish_data(
         'n_stores': len(store_reports),
         'moved_stores': sum(
             item['status'] == 'moved' for item in store_reports),
+        'skipped_existing_stores': sum(
+            item['status'] == 'skipped_existing'
+            for item in store_reports),
         'no_match_stores': sum(
             item['status'] == 'no_matches' for item in store_reports),
         'failed_stores': sum(

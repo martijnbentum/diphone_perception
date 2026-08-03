@@ -247,7 +247,7 @@ def test_source_discovery_and_destination_mapping_are_model_specific(
         flemish_root.resolve() / 'model-a')
 
 
-def test_move_flemish_data_preflights_every_destination(tmp_path, monkeypatch):
+def test_move_flemish_data_skips_existing_destinations(tmp_path, monkeypatch):
     source_root = tmp_path / 'dutch'
     flemish_root = tmp_path / 'flemish'
     source_root.mkdir()
@@ -257,19 +257,31 @@ def test_move_flemish_data_preflights_every_destination(tmp_path, monkeypatch):
     (flemish_root / 'model-b').mkdir()
     monkeypatch.setattr(
         mover, 'load_flemish_phraser_keys', lambda path: [make_key(1)])
+    calls = []
+
+    def move(keys, source_path, destination_path, **kwargs):
+        calls.append((source_path, destination_path))
+        return _synthetic_store_report(source_path, destination_path, 3)
+
     monkeypatch.setattr(
-        mover,
-        'move_embeddings_based_on_phraser_keys',
-        lambda *args, **kwargs: pytest.fail('move should not start'),
+        mover, 'move_embeddings_based_on_phraser_keys', move)
+
+    report = mover.move_flemish_data(
+        phraser_key_path=tmp_path / 'keys.bin',
+        netherlandic_root=source_root,
+        flemish_root=flemish_root,
+        verbose=False,
     )
 
-    with pytest.raises(FileExistsError, match='model-b'):
-        mover.move_flemish_data(
-            phraser_key_path=tmp_path / 'keys.bin',
-            netherlandic_root=source_root,
-            flemish_root=flemish_root,
-            verbose=False,
-        )
+    assert calls == [(
+        source_root / 'model-a', flemish_root.resolve() / 'model-a')]
+    assert [item['status'] for item in report['stores']] == [
+        'moved', 'skipped_existing']
+    assert report['stores'][1]['reason'] == (
+        'destination store already exists')
+    assert report['summary']['moved_stores'] == 1
+    assert report['summary']['skipped_existing_stores'] == 1
+    assert report['status'] == 'complete'
 
 
 def _synthetic_store_report(source_path, destination_path, count):
@@ -323,6 +335,7 @@ def test_move_flemish_data_reports_progress_and_aggregate_counts(
     assert report['summary'] == {
         'n_stores': 2,
         'moved_stores': 2,
+        'skipped_existing_stores': 0,
         'no_match_stores': 0,
         'failed_stores': 0,
         'selected_embedding_count': 6,
