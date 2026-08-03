@@ -59,7 +59,8 @@ def test_filter_component_audios_requires_exact_path_component():
     wrong_case = make_audio('/corpus/comp-K/six.wav')
 
     result = fix_phone_duplicate.filter_component_audios(
-        [similar, comp_k, suffix, comp_o, wrong_case, nested]
+        [similar, comp_k, suffix, comp_o, wrong_case, nested],
+        show_progress=False,
     )
 
     assert result == [comp_k, comp_o, nested]
@@ -136,7 +137,7 @@ def test_sampling_uses_module_random_seed_and_sample(monkeypatch):
     monkeypatch.setattr(fix_phone_duplicate.random, 'sample', sample)
 
     selected = fix_phone_duplicate._sample_candidate_keys(
-        candidates, {'a': 2, 'b': 1}, seed=42
+        candidates, {'a': 2, 'b': 1}, seed=42, show_progress=False,
     )
 
     assert calls == [
@@ -148,6 +149,39 @@ def test_sampling_uses_module_random_seed_and_sample(monkeypatch):
         'a': [make_key(2), make_key(1)],
         'b': [make_key(3)],
     }
+
+
+def test_collection_and_sampling_report_progress(monkeypatch):
+    prefixes = []
+    monkeypatch.setattr(
+        fix_phone_duplicate, '_duration_bounds', {'a': (1, 20)})
+
+    def fake_progressbar(items, prefix):
+        prefixes.append(prefix)
+        return items
+
+    monkeypatch.setattr(fix_phone_duplicate, 'progressbar', fake_progressbar)
+    monkeypatch.setattr(
+        fix_phone_duplicate.random,
+        'sample',
+        lambda population, count: list(population)[:count],
+    )
+    phone = make_phraser_phone('a', make_key(1))
+    phones = SimpleNamespace(store=SimpleNamespace(audios=[
+        make_audio('/corpus/comp-k/audio.wav', [phone]),
+    ]))
+
+    candidates = fix_phone_duplicate._collect_candidate_phones(
+        phones, {'a'}, set())
+    selected = fix_phone_duplicate._sample_candidate_keys(
+        candidates, {'a': 1}, seed=42)
+
+    assert selected == {'a': [phone.key]}
+    assert prefixes == [
+        'Filtering component audios: ',
+        'Collecting candidate phones: ',
+        'Sampling replacement labels: ',
+    ]
 
 
 @pytest.mark.parametrize(

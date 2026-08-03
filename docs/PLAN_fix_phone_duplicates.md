@@ -20,6 +20,8 @@
 - Exclude every key already present in `data/phraser_phone_keys.bin` and keep
   selected replacement keys unique.
 - Use `random.seed(42)` and `random.sample(...)` by default.
+- Show progress while filtering component audios, collecting candidate phones,
+  and sampling replacement labels; allow callers to disable it.
 - Write replacements in duplicate-occurrence order so they can be applied
   without losing the alignment between metadata phones and Phraser phones.
 - Validate that applying the replacements yields 418,500 unique keys and
@@ -32,6 +34,7 @@
 - Enforce inclusive minimum and maximum duration bounds.
 - Exclude existing and repeated candidate keys.
 - Produce deterministic samples for a fixed seed.
+- Report each collection/sampling phase through the progress helper.
 - Reject odd, invalid, or mismatched counts and insufficient candidate pools.
 - Require explicit overwrite permission.
 - Verify replacement-file record count and order against duplicate metadata
@@ -45,7 +48,11 @@
   `data/duplicate_replacement_phraser_phone_keys.bin`.
 - When the file exists, replace only repeated occurrences of an original key,
   preserving list length and positional alignment.
-- Keep current behavior when the optional replacement file is absent.
+- Store the loaded replacement Phraser phones on
+  `Phones.duplicate_replacement_phones` in replacement-file order.
+- Load from the key files and Phraser store without parsing metadata by
+  default; provide `validate_against_metadata=True` for strict validation.
+- Warn explicitly when the optional replacement file is absent or disabled.
 - Reject a present replacement file when its record count is wrong, it reuses
   an original key, it contains duplicate replacements, the final keys are not
   unique, or a loaded replacement phone has the wrong label.
@@ -56,6 +63,8 @@
 
 - Apply replacements in place while preserving nonduplicate keys and order.
 - Retain original duplicates and warn when no replacement file exists.
+- Verify the default load path does not load metadata phones.
+- Validate metadata alignment only when explicitly requested.
 - Reject malformed replacement inventories.
 - Warn for duplicate keys and unbalanced label counts.
 - Accept an all-unique, balanced inventory without warnings.

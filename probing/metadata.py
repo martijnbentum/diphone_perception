@@ -21,6 +21,8 @@ _boundary_tokens = ('SOS', 'EOS')
 _bool = {'True': True, 'False': False}
 _phraser_key_len = 22
 _phraser_key_placeholder = b'\x00' * _phraser_key_len
+_phraser_phones_per_label = 13_500
+_phraser_label_count = 31
 
 
 def load_cgn(path=cgn_lmdb):
@@ -395,6 +397,7 @@ class Phones:
         self.phraser_key_path = phraser_key_path
         self.duplicate_replacement_phraser_key_path = (
             duplicate_replacement_phraser_key_path)
+        self.duplicate_replacement_phones = []
 
     @property
     def store(self):
@@ -469,6 +472,12 @@ class Phones:
     def _applicable_replacement_path(self, phraser_key_path):
         replacement_path = self.duplicate_replacement_phraser_key_path
         if replacement_path is None:
+            warnings.warn(
+                'duplicate replacement Phraser key file is disabled; loading '
+                'the original keys without replacements',
+                RuntimeWarning,
+                stacklevel=3,
+            )
             return None
         uses_default_keys = (
             Path(phraser_key_path).resolve() == Path(phraser_key_file).resolve())
@@ -487,9 +496,40 @@ class Phones:
             )
             return None
         path = Path(replacement_path)
-        return path if path.exists() else None
+        if path.exists():
+            return path
+        warnings.warn(
+            f'duplicate replacement Phraser key file is not available: '
+            f'{path}; loading the original keys without replacements',
+            RuntimeWarning,
+            stacklevel=3,
+        )
+        return None
 
-    def _validate_replacement_labels(self, phraser_phones, indices):
+    def _validate_replacement_labels_against_original(
+        self, original_keys, phraser_phones, indices,
+    ):
+        if not indices:
+            return
+        duplicate_keys = {original_keys[index] for index in indices}
+        first_indices = {}
+        for index, key in enumerate(original_keys):
+            if key in duplicate_keys and key not in first_indices:
+                first_indices[key] = index
+
+        for index in indices:
+            original_index = first_indices[original_keys[index]]
+            expected = phraser_phones[original_index].label
+            observed = phraser_phones[index].label
+            if observed != expected:
+                raise ValueError(
+                    f'duplicate replacement at index {index} has Phraser '
+                    f'label {observed!r}, expected original label '
+                    f'{expected!r}')
+
+    def _validate_replacement_labels_against_metadata(
+        self, phraser_phones, indices,
+    ):
         for index in indices:
             expected = self.phones[index].phoneme_ipa
             observed = phraser_phones[index].label
@@ -498,7 +538,7 @@ class Phones:
                     f'duplicate replacement at index {index} has Phraser '
                     f'label {observed!r}, expected {expected!r}')
 
-    def _warn_phraser_inventory(self, phraser_phones):
+    def _warn_phraser_inventory(self, phraser_phones, expected_labels=None):
         keys = [bytes(phone.key) for phone in phraser_phones if phone is not None]
         duplicate_count = len(keys) - len(set(keys))
         if duplicate_count:
@@ -515,35 +555,52 @@ class Phones:
             if phone is None:
                 continue
             keys_by_label.setdefault(phone.label, set()).add(bytes(phone.key))
-        expected_labels = {phone.phoneme_ipa for phone in self.phones}
+
+        if expected_labels is None:
+            observed_label_count = len(keys_by_label)
+            if observed_label_count != _phraser_label_count:
+                warnings.warn(
+                    f'loaded Phraser phone inventory contains '
+                    f'{observed_label_count} distinct labels, expected '
+                    f'{_phraser_label_count}',
+                    RuntimeWarning,
+                    stacklevel=3,
+                )
+            expected_labels = set(keys_by_label)
         counts = {
             label: len(keys_by_label.get(label, set()))
             for label in expected_labels.union(keys_by_label)
         }
         invalid = {
             label: count for label, count in counts.items()
-            if count != 13_500
+            if count != _phraser_phones_per_label
         }
         if invalid:
             details = ', '.join(
                 f'{label!r}={count}' for label, count in sorted(invalid.items()))
             warnings.warn(
-                'Phraser phone inventory does not contain exactly 13,500 '
-                f'unique keys per label: {details}',
+                'Phraser phone inventory does not contain exactly '
+                f'{_phraser_phones_per_label:,} unique keys per label: '
+                f'{details}',
                 RuntimeWarning,
                 stacklevel=3,
             )
 
-    def load_phraser_phones(self, path=None):
+    def load_phraser_phones(
+        self, path=None, validate_against_metadata=False,
+    ):
         '''bulk-load the phraser Phone objects saved by save_phraser_keys.
 
-        returns a list aligned with self.phones (None where the phone
-        wasn't matched during save_phraser_keys). If an applicable duplicate
-        replacement key file exists, repeated keys are replaced in place
-        before loading so positional alignment is retained.
+        returns a list in key-file order (None where a phone wasn't matched
+        during save_phraser_keys). If an applicable duplicate replacement key
+        file exists, repeated keys are replaced in place before loading so
+        positional alignment is retained. By default only the key files and
+        Phraser store are used. Set validate_against_metadata=True to also
+        load metadata phones and validate replacement labels against them.
         '''
         path = path or self.phraser_key_path
-        keys = load_phraser_keys(path)
+        original_keys = load_phraser_keys(path)
+        keys = original_keys
         replacement_indices = []
         replacement_path = self._applicable_replacement_path(path)
         if replacement_path is not None:
@@ -554,9 +611,18 @@ class Phones:
         loaded = iter(self.store.load_many(real_keys))
         phraser_phones = [
             next(loaded) if key is not None else None for key in keys]
-        self._validate_replacement_labels(
-            phraser_phones, replacement_indices)
-        self._warn_phraser_inventory(phraser_phones)
+        self._validate_replacement_labels_against_original(
+            original_keys, phraser_phones, replacement_indices)
+        expected_labels = None
+        if validate_against_metadata:
+            self._validate_replacement_labels_against_metadata(
+                phraser_phones, replacement_indices)
+            expected_labels = {
+                phone.phoneme_ipa for phone in self.phones}
+        self.duplicate_replacement_phones = [
+            phraser_phones[index] for index in replacement_indices]
+        self._warn_phraser_inventory(
+            phraser_phones, expected_labels=expected_labels)
         return phraser_phones
 
     @property

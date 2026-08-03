@@ -550,7 +550,9 @@ def test_phones_phraser_phones_builds_then_reuses_key_file(tmp_path):
     assert [p.key for p in matched2] == [d_key, e_key, f_key]
 
 
-def test_load_phraser_phones_replaces_only_repeated_occurrences(tmp_path):
+def test_load_phraser_phones_replaces_without_loading_metadata(
+    tmp_path, monkeypatch,
+):
     key_path = tmp_path / 'keys.bin'
     replacement_path = tmp_path / 'replacement-keys.bin'
     original_key = make_phraser_key(1)
@@ -573,18 +575,28 @@ def test_load_phraser_phones_replaces_only_repeated_occurrences(tmp_path):
         phraser_key_path=key_path,
         duplicate_replacement_phraser_key_path=replacement_path,
     )
-    phones_obj._phones = [
-        SimpleNamespace(phoneme_ipa=label) for label in ('d', 'e', 'd', 'f')]
+    monkeypatch.setattr(
+        metadata,
+        'load_phones',
+        lambda *args, **kwargs: pytest.fail('metadata phones were loaded'),
+    )
 
-    with pytest.warns(RuntimeWarning, match='13,500'):
+    with pytest.warns(RuntimeWarning) as caught:
         loaded = phones_obj.load_phraser_phones()
 
+    messages = [str(item.message) for item in caught]
+    assert any('3 distinct labels, expected 31' in message
+        for message in messages)
+    assert any('13,500 unique keys per label' in message
+        for message in messages)
     expected_keys = [
         original_key, middle_key, replacement_key, final_key]
     assert len(loaded) == len(original_keys)
     assert [phone.key for phone in loaded] == expected_keys
     assert store.load_many_calls == [expected_keys]
     assert metadata.load_phraser_keys(key_path) == original_keys
+    assert not hasattr(phones_obj, '_phones')
+    assert phones_obj.duplicate_replacement_phones == [phraser_phones[2]]
 
 
 def test_load_phraser_phones_retains_duplicates_without_replacements(
@@ -611,8 +623,13 @@ def test_load_phraser_phones_retains_duplicates_without_replacements(
         loaded = phones_obj.load_phraser_phones()
 
     assert loaded == [duplicate_phone, duplicate_phone, other_phone]
+    assert phones_obj.duplicate_replacement_phones == []
     assert any(
         'contain 1 duplicate key occurrence' in str(item.message)
+        for item in caught
+    )
+    assert any(
+        'replacement Phraser key file is not available' in str(item.message)
         for item in caught
     )
 
@@ -742,8 +759,38 @@ def test_load_phraser_phones_rejects_wrong_replacement_label(tmp_path):
         SimpleNamespace(phoneme_ipa='d'),
     ]
 
-    with pytest.raises(ValueError, match="label 'x', expected 'd'"):
+    with pytest.raises(
+        ValueError, match="label 'x', expected original label 'd'",
+    ):
         phones_obj.load_phraser_phones()
+
+
+def test_load_phraser_phones_can_validate_replacements_against_metadata(
+    tmp_path,
+):
+    key_path = tmp_path / 'keys.bin'
+    replacement_path = tmp_path / 'replacement-keys.bin'
+    duplicate_key = make_phraser_key(1)
+    replacement_key = make_phraser_key(2)
+    write_phraser_keys(key_path, [duplicate_key, duplicate_key])
+    write_phraser_keys(replacement_path, [replacement_key])
+
+    phraser_phones = [
+        StubPhraserPhone('d', 0, 1, duplicate_key),
+        StubPhraserPhone('d', 1, 2, replacement_key),
+    ]
+    phones_obj = metadata.Phones(
+        store=StubBulkStore(StubAudio(phraser_phones)),
+        phraser_key_path=key_path,
+        duplicate_replacement_phraser_key_path=replacement_path,
+    )
+    phones_obj._phones = [
+        SimpleNamespace(phoneme_ipa='d'),
+        SimpleNamespace(phoneme_ipa='x'),
+    ]
+
+    with pytest.raises(ValueError, match="label 'd', expected 'x'"):
+        phones_obj.load_phraser_phones(validate_against_metadata=True)
 
 
 def test_warn_phraser_inventory_reports_duplicates_and_unbalanced_labels():
@@ -766,21 +813,21 @@ def test_warn_phraser_inventory_reports_duplicates_and_unbalanced_labels():
     messages = [str(item.message) for item in caught]
     assert any('contain 1 duplicate key occurrence' in message
         for message in messages)
+    assert any('2 distinct labels, expected 31' in message
+        for message in messages)
     assert any("'d'=1" in message and "'f'=1" in message
         for message in messages)
 
 
-def test_warn_phraser_inventory_accepts_balanced_unique_labels():
+def test_warn_phraser_inventory_accepts_balanced_unique_labels(monkeypatch):
+    monkeypatch.setattr(metadata, '_phraser_label_count', 2)
+    monkeypatch.setattr(metadata, '_phraser_phones_per_label', 2)
     phones_obj = metadata.Phones(store='unused')
-    phones_obj._phones = [
-        SimpleNamespace(phoneme_ipa='d'),
-        SimpleNamespace(phoneme_ipa='f'),
-    ]
     inventory = [
         StubPhraserPhone(label, index, index + 1, make_phraser_key(key))
         for label_index, label in enumerate(('d', 'f'))
         for index, key in enumerate(
-            range(label_index * 13_500, (label_index + 1) * 13_500))
+            range(label_index * 2, (label_index + 1) * 2))
     ]
 
     with warnings.catch_warnings():

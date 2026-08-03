@@ -160,6 +160,13 @@ Matching is cached to `data/phraser_phone_keys.bin` via
 inspected with `phones.analyze_phraser_failures()` after
 `save_phraser_keys()`.
 
+`Phones.load_phraser_phones()` loads directly from the original and optional
+duplicate-replacement key files without parsing `metadata.csv`. Pass
+`validate_against_metadata=True` to additionally validate replacement labels
+against the aligned metadata phones.
+After loading, `phones.duplicate_replacement_phones` contains the Phraser
+phones loaded from the replacement key file, in replacement-file order.
+
 `phones.phraser_phones` raises `ValueError` if any phone is unmatched, rather
 than silently returning a list with holes - downstream consumers (the
 embedding extraction below) rely on every phone having a phraser phone.

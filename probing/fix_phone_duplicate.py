@@ -3,6 +3,8 @@ import random
 from collections import Counter
 from pathlib import Path
 
+from progressbar import progressbar
+
 from probing.metadata import load_phraser_keys
 
 
@@ -66,8 +68,16 @@ def _is_component_audio(audio):
     return bool(_components.intersection(Path(audio.filename).parts))
 
 
-def filter_component_audios(audios):
+def _show_progress(items, prefix, enabled):
+    if not enabled:
+        return items
+    return progressbar(items, prefix=prefix)
+
+
+def filter_component_audios(audios, show_progress=True):
     '''Return audios stored below the exact comp-k or comp-o component.'''
+    audios = _show_progress(
+        audios, prefix='Filtering component audios: ', enabled=show_progress)
     return [audio for audio in audios if _is_component_audio(audio)]
 
 
@@ -119,11 +129,18 @@ def _phone_is_in_duration_range(phone):
     return minimum <= duration <= maximum
 
 
-def _collect_candidate_phones(phones, labels, current_keys):
+def _collect_candidate_phones(
+    phones, labels, current_keys, show_progress=True,
+):
     candidates = {label: [] for label in labels}
     candidate_keys = set()
 
-    for audio in filter_component_audios(phones.store.audios):
+    audios = filter_component_audios(
+        phones.store.audios, show_progress=show_progress)
+    audios = _show_progress(
+        audios, prefix='Collecting candidate phones: ',
+        enabled=show_progress)
+    for audio in audios:
         for phone in audio.phones:
             if phone.label not in labels:
                 continue
@@ -138,10 +155,15 @@ def _collect_candidate_phones(phones, labels, current_keys):
     return candidates
 
 
-def _sample_candidate_keys(candidates, required_counts, seed):
+def _sample_candidate_keys(
+    candidates, required_counts, seed, show_progress=True,
+):
     random.seed(seed)
     selected = {}
-    for label, count in required_counts.items():
+    label_counts = _show_progress(
+        list(required_counts.items()), prefix='Sampling replacement labels: ',
+        enabled=show_progress)
+    for label, count in label_counts:
         available = candidates[label]
         if len(available) < count:
             raise ValueError(
@@ -198,12 +220,14 @@ def save_duplicate_replacement_phraser_keys(
     counts_path=duplicate_phone_counts_file,
     seed=42,
     overwrite=False,
+    show_progress=True,
 ):
     '''Select unused Phraser phones and save keys that replace duplicates.
 
     The output contains one fixed-width key for each repeated occurrence in
     the current key file. Keys are ordered to match those occurrences in
     metadata order, so they can be substituted without changing alignment.
+    Set show_progress=False to suppress progress bars.
     '''
     path = Path(path)
     if path.exists() and not overwrite:
@@ -218,9 +242,11 @@ def save_duplicate_replacement_phraser_keys(
     required_counts = _check_duplicate_counts(duplicates, counts)
 
     candidates = _collect_candidate_phones(
-        phones, set(required_counts), set(current_keys)
+        phones, set(required_counts), set(current_keys),
+        show_progress=show_progress,
     )
-    selected = _sample_candidate_keys(candidates, required_counts, seed)
+    selected = _sample_candidate_keys(
+        candidates, required_counts, seed, show_progress=show_progress)
     replacement_keys = _arrange_replacement_keys(duplicates, selected)
     _validate_final_keys(
         current_keys, metadata_phones, duplicates, replacement_keys
