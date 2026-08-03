@@ -365,6 +365,162 @@ def test_phraser_phone_raises_without_store_or_parent():
         phone.phraser_phone()
 
 
+# -- FlemishPhones ---------------------------------------------------------
+
+def configure_small_flemish_inventory(monkeypatch):
+    monkeypatch.setattr(metadata, 'flemish_phone_labels', ('d', 'f'))
+    monkeypatch.setattr(metadata, 'flemish_phones_per_label', 2)
+    monkeypatch.setattr(metadata, 'flemish_phone_count', 4)
+
+
+def make_flemish_inventory(labels=('d', 'd', 'f', 'f')):
+    return [
+        StubPhraserPhone(label, index, index + 1, make_phraser_key(index + 1))
+        for index, label in enumerate(labels)
+    ]
+
+
+def test_flemish_phones_defaults_to_selected_key_file():
+    phones = metadata.FlemishPhones(store='unused')
+
+    assert phones.phraser_key_path == metadata.flemish_phraser_phone_key_file
+
+
+def test_flemish_phones_store_lazy_loads_cgn(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        metadata, 'load_cgn', lambda: calls.append(True) or 'cgn-store')
+
+    phones = metadata.FlemishPhones()
+
+    assert calls == []
+    assert phones.store == 'cgn-store'
+    assert phones.store == 'cgn-store'
+    assert calls == [True]
+
+
+def test_flemish_phones_loads_valid_inventory_without_metadata(
+    tmp_path, monkeypatch,
+):
+    configure_small_flemish_inventory(monkeypatch)
+    inventory = make_flemish_inventory()
+    store = StubBulkStore(StubAudio(inventory))
+    key_path = tmp_path / 'flemish.bin'
+    write_phraser_keys(key_path, [phone.key for phone in inventory])
+    monkeypatch.setattr(
+        metadata, 'load_phones',
+        lambda *args, **kwargs: pytest.fail('metadata should not be loaded'),
+    )
+    phones = metadata.FlemishPhones(store=store, phraser_key_path=key_path)
+
+    loaded = phones.phraser_phones
+
+    assert loaded == inventory
+    assert phones.flemish_phraser_phones is loaded
+    assert phones.phraser_phones is loaded
+    assert store.load_many_calls == [[phone.key for phone in inventory]]
+
+
+@pytest.mark.parametrize(
+    ('keys', 'match'),
+    [
+        ([make_phraser_key(1)] * 4, 'duplicate keys'),
+        ([None, make_phraser_key(2), make_phraser_key(3),
+            make_phraser_key(4)], 'placeholders'),
+        ([make_phraser_key(1), make_phraser_key(2)], '2 records'),
+    ],
+)
+def test_flemish_phones_rejects_invalid_key_inventory(
+    tmp_path, monkeypatch, keys, match,
+):
+    configure_small_flemish_inventory(monkeypatch)
+    key_path = tmp_path / 'flemish.bin'
+    write_phraser_keys(key_path, keys)
+    phones = metadata.FlemishPhones(store='unused', phraser_key_path=key_path)
+
+    with pytest.raises(ValueError, match=match):
+        phones.phraser_phones
+
+
+def test_flemish_phones_rejects_malformed_key_record(tmp_path):
+    key_path = tmp_path / 'flemish.bin'
+    key_path.write_bytes(b'incomplete')
+    phones = metadata.FlemishPhones(store='unused', phraser_key_path=key_path)
+
+    with pytest.raises(ValueError, match='not a multiple'):
+        phones.phraser_phones
+
+
+def test_flemish_phones_rejects_missing_store_object(tmp_path, monkeypatch):
+    configure_small_flemish_inventory(monkeypatch)
+    inventory = make_flemish_inventory()
+    store = StubBulkStore(StubAudio(inventory[:-1]))
+    key_path = tmp_path / 'flemish.bin'
+    write_phraser_keys(key_path, [phone.key for phone in inventory])
+    phones = metadata.FlemishPhones(store=store, phraser_key_path=key_path)
+
+    with pytest.raises(ValueError, match='missing object'):
+        phones.phraser_phones
+
+
+def test_flemish_phones_rejects_none_store_object(tmp_path, monkeypatch):
+    configure_small_flemish_inventory(monkeypatch)
+    inventory = make_flemish_inventory()
+    key_path = tmp_path / 'flemish.bin'
+    write_phraser_keys(key_path, [phone.key for phone in inventory])
+
+    class MissingObjectStore:
+        def load_many(self, keys):
+            return inventory[:-1] + [None]
+
+    phones = metadata.FlemishPhones(
+        store=MissingObjectStore(), phraser_key_path=key_path)
+
+    with pytest.raises(ValueError, match='no stored object'):
+        phones.phraser_phones
+
+
+def test_flemish_phones_rejects_mismatched_store_object(
+    tmp_path, monkeypatch,
+):
+    configure_small_flemish_inventory(monkeypatch)
+    inventory = make_flemish_inventory()
+    key_path = tmp_path / 'flemish.bin'
+    write_phraser_keys(key_path, [phone.key for phone in inventory])
+
+    class ReorderedStore:
+        def load_many(self, keys):
+            return list(reversed(inventory))
+
+    phones = metadata.FlemishPhones(
+        store=ReorderedStore(), phraser_key_path=key_path)
+
+    with pytest.raises(ValueError, match='requested keys'):
+        phones.phraser_phones
+
+
+@pytest.mark.parametrize(
+    ('labels', 'match'),
+    [
+        (('d', 'f', 'd', 'f'), 'index 1'),
+        (('d', 'd', 'd', 'f'), 'exactly 2 phones per label'),
+        (('d', 'd', 'q', 'q'), 'unexpected label'),
+    ],
+)
+def test_flemish_phones_rejects_invalid_label_inventory(
+    tmp_path, monkeypatch, labels, match,
+):
+    configure_small_flemish_inventory(monkeypatch)
+    inventory = make_flemish_inventory(labels)
+    store = StubBulkStore(StubAudio(inventory))
+    key_path = tmp_path / 'flemish.bin'
+    write_phraser_keys(key_path, [phone.key for phone in inventory])
+    phones = metadata.FlemishPhones(store=store, phraser_key_path=key_path)
+
+    with pytest.raises(ValueError, match=match):
+        phones.phraser_phones
+
+
 # -- Phones -----------------------------------------------------------------
 
 def write_dataset(tmp_path, sentence_rows, phone_rows):

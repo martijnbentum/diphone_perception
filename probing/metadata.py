@@ -6,6 +6,22 @@ from pathlib import Path
 from progressbar import progressbar
 from phone_mapper import cgn
 from phraser import Store
+try:
+    from probing.select_flemish_phones import (
+        flemish_phone_count,
+        flemish_phone_labels,
+        flemish_phraser_phone_key_file,
+        flemish_phones_per_label,
+    )
+except ModuleNotFoundError as error:
+    if error.name != 'probing':
+        raise
+    from select_flemish_phones import (
+        flemish_phone_count,
+        flemish_phone_labels,
+        flemish_phraser_phone_key_file,
+        flemish_phones_per_label,
+    )
 
 # this file lives at repo/probing/metadata.py; the data dir is a sibling of
 # repo/, not inside it, so this needs three parents (probing -> repo -> the
@@ -382,6 +398,110 @@ def _replace_duplicate_phraser_keys(keys, replacement_keys):
     if len(real_keys) != len(set(real_keys)):
         raise ValueError('duplicate Phraser keys remain after replacement')
     return output, duplicate_indices
+
+
+def _validate_flemish_phraser_keys(keys):
+    if len(keys) != flemish_phone_count:
+        raise ValueError(
+            f'Flemish Phraser key file contains {len(keys):,} records, '
+            f'expected {flemish_phone_count:,}')
+    if any(key is None for key in keys):
+        raise ValueError('Flemish Phraser key file contains placeholders')
+    if len(set(keys)) != len(keys):
+        raise ValueError('Flemish Phraser key file contains duplicate keys')
+
+
+def _validate_flemish_phraser_labels(phraser_phones):
+    labels = [phone.label for phone in phraser_phones]
+    for index, label in enumerate(labels):
+        if label not in flemish_phone_labels:
+            raise ValueError(
+                f'Flemish Phraser phone at index {index} has unexpected '
+                f'label {label!r}')
+
+    counts = Counter(labels)
+    invalid_counts = {
+        label: counts.get(label, 0)
+        for label in set(flemish_phone_labels).union(counts)
+        if counts.get(label, 0) != flemish_phones_per_label
+    }
+    if invalid_counts:
+        details = ', '.join(
+            f'{label!r}={count}'
+            for label, count in sorted(invalid_counts.items()))
+        raise ValueError(
+            'Flemish Phraser phone inventory does not contain exactly '
+            f'{flemish_phones_per_label:,} phones per label: '
+            f'{details}')
+
+    for index, phraser_phone in enumerate(phraser_phones):
+        label_index = index // flemish_phones_per_label
+        expected_label = flemish_phone_labels[label_index]
+        if phraser_phone.label != expected_label:
+            raise ValueError(
+                f'Flemish Phraser phone at index {index} has label '
+                f'{phraser_phone.label!r}, expected {expected_label!r}')
+
+
+class FlemishPhones:
+    '''Metadata-free owner of the selected Flemish Phraser phones.'''
+    def __init__(
+        self, store=None,
+        phraser_key_path=flemish_phraser_phone_key_file,
+    ):
+        self._store = store
+        self.phraser_key_path = phraser_key_path
+
+    @property
+    def store(self):
+        if self._store is None:
+            self._store = load_cgn()
+        return self._store
+
+    def load_phraser_phones(self, path=None):
+        '''Load and validate the label-major Flemish Phraser inventory.'''
+        path = path or self.phraser_key_path
+        keys = load_phraser_keys(path)
+        _validate_flemish_phraser_keys(keys)
+        try:
+            phraser_phones = list(self.store.load_many(keys))
+        except KeyError as error:
+            raise ValueError(
+                'Flemish Phraser key file refers to a missing object'
+            ) from error
+        if len(phraser_phones) != flemish_phone_count:
+            raise ValueError(
+                f'loaded {len(phraser_phones):,} Flemish Phraser phones, '
+                f'expected {flemish_phone_count:,}')
+        missing = sum(phone is None for phone in phraser_phones)
+        if missing:
+            raise ValueError(
+                f'{missing:,} Flemish Phraser keys have no stored object')
+        missing_labels = sum(
+            not hasattr(phone, 'label') for phone in phraser_phones)
+        if missing_labels:
+            raise ValueError(
+                f'{missing_labels:,} Flemish Phraser phones have no label')
+        mismatched_keys = sum(
+            not hasattr(phone, 'key') or phone.key != key
+            for key, phone in zip(keys, phraser_phones, strict=True)
+        )
+        if mismatched_keys:
+            raise ValueError(
+                f'{mismatched_keys:,} loaded Flemish Phraser phones do not '
+                'match their requested keys')
+        _validate_flemish_phraser_labels(phraser_phones)
+        return phraser_phones
+
+    @property
+    def phraser_phones(self):
+        if not hasattr(self, '_phraser_phones'):
+            self._phraser_phones = self.load_phraser_phones()
+        return self._phraser_phones
+
+    @property
+    def flemish_phraser_phones(self):
+        return self.phraser_phones
 
 
 class Phones:

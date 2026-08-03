@@ -11,6 +11,8 @@ from probing.metadata import _data_dir
 default_model_paths_file = _data_dir / 'model_paths.json'
 default_store_root = _data_dir / 'echoframe_store'
 default_model_stores_root = _data_dir / 'echoframe_model_stores'
+default_flemish_model_stores_root = (
+    _data_dir / 'echoframe_model_flemish_stores')
 default_model_name = 'wav2vec2_nl1_checkpoint-200000'
 default_phraser_source_id = 'cgn-awd'
 
@@ -74,7 +76,7 @@ def extract_phone_embeddings(
     model_paths_file=default_model_paths_file,
     phraser_source_id=default_phraser_source_id,
     gpu=False,
-    batch_size=32,
+    batch_size=120,
     tags=None,
     verbose=True,
 ):
@@ -137,7 +139,7 @@ def extract_phone_embeddings_for_models(
     model_paths_file=default_model_paths_file,
     phraser_source_id=default_phraser_source_id,
     gpu=False,
-    batch_size=32,
+    batch_size=120,
     tags=None,
     verbose=True,
 ):
@@ -151,6 +153,72 @@ def extract_phone_embeddings_for_models(
 
     Returns a dictionary mapping each model name to its store path.
     '''
+    return _extract_phone_embeddings_for_models(
+        phones,
+        model_names,
+        layers=layers,
+        collar=collar,
+        store_root=store_root,
+        model_paths_file=model_paths_file,
+        phraser_source_id=phraser_source_id,
+        gpu=gpu,
+        batch_size=batch_size,
+        tags=tags,
+        verbose=verbose,
+    )
+
+
+def extract_flemish_phone_embeddings_for_models(
+    flemish_phones,
+    model_names,
+    layers=[9],
+    collar=2000,
+    store_root=default_flemish_model_stores_root,
+    model_paths_file=default_model_paths_file,
+    phraser_source_id=default_phraser_source_id,
+    gpu=False,
+    batch_size=120,
+    tags=None,
+    verbose=True,
+):
+    '''Compute Flemish phone embeddings in a dedicated store per model.
+
+    The model stores are opened below ``store_root``. The validated inventory
+    exposed by ``flemish_phones.phraser_phones`` is extracted through the same
+    single-model workflow used for the Netherlandic phone inventory. Each
+    cached model is unloaded and its store is closed after extraction.
+
+    Returns a dictionary mapping each model name to its store path.
+    '''
+    return _extract_phone_embeddings_for_models(
+        flemish_phones,
+        model_names,
+        layers=layers,
+        collar=collar,
+        store_root=store_root,
+        model_paths_file=model_paths_file,
+        phraser_source_id=phraser_source_id,
+        gpu=gpu,
+        batch_size=batch_size,
+        tags=tags,
+        verbose=verbose,
+    )
+
+
+def _extract_phone_embeddings_for_models(
+    phones,
+    model_names,
+    layers,
+    collar,
+    store_root,
+    model_paths_file,
+    phraser_source_id,
+    gpu,
+    batch_size,
+    tags,
+    verbose,
+):
+    '''Run the shared dedicated-store lifecycle for a phone inventory.'''
     if isinstance(model_names, str):
         raise TypeError('model_names must be an iterable, not a string')
 

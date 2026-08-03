@@ -10,18 +10,18 @@ flemish_phraser_phone_key_file = (
 )
 
 _phraser_key_len = 22
-_phones_per_label = 5_000
-_total_phone_count = 155_000
 _components = {'comp-k', 'comp-o'}
 _language_component = 'vl'
 
 # This order is the binary layout contract: each label occupies one block of
-# _phones_per_label consecutive keys.
+# flemish_phones_per_label consecutive keys.
 flemish_phone_labels = (
     'd', 'f', 'ə', 'z', 'p', 'l', 'ɛ', 'eː', 't', 'r', 'ʉ', 'ŋ', 'aː', 'v',
     'ɔ', 'm', 'ɪ', 'ɣ', 'x', 'oː', 'ɑ', 'n', 'h', 'k', 'iː', 'j', 'b', 's',
     'ɛi', 'ʋ', 'uː',
 )
+flemish_phones_per_label = 5_000
+flemish_phone_count = len(flemish_phone_labels) * flemish_phones_per_label
 
 # Inclusive bounds in milliseconds, copied from
 # notes/phone_duration_stats.md, regenerated from data/metadata.csv.
@@ -140,7 +140,7 @@ def _sample_candidate_keys(candidates, seed, show_progress=True):
     )
     for label in labels:
         selected[label] = random.sample(
-            candidates[label], _phones_per_label
+            candidates[label], flemish_phones_per_label
         )
     return selected
 
@@ -158,19 +158,19 @@ def _validate_selected_keys(selected):
     selected_keys = []
     for label in flemish_phone_labels:
         keys = selected[label]
-        if len(keys) != _phones_per_label:
+        if len(keys) != flemish_phones_per_label:
             raise ValueError(
                 f'selected {len(keys)} keys for {label!r}, expected '
-                f'{_phones_per_label}'
+                f'{flemish_phones_per_label}'
             )
         for key in keys:
             _valid_key(key, 'selected Phraser phone key')
         selected_keys.extend(keys)
 
-    if len(selected_keys) != _total_phone_count:
+    if len(selected_keys) != flemish_phone_count:
         raise ValueError(
             f'selected {len(selected_keys)} keys, expected '
-            f'{_total_phone_count}'
+            f'{flemish_phone_count}'
         )
     if len(set(selected_keys)) != len(selected_keys):
         raise ValueError('selected Phraser phone keys are not globally unique')
@@ -202,7 +202,10 @@ def save_flemish_phraser_phone_keys(
     )
     available_counts = _available_counts(candidates)
     selected_counts = {label: 0 for label in flemish_phone_labels}
-    if any(count < _phones_per_label for count in available_counts.values()):
+    if any(
+        count < flemish_phones_per_label
+        for count in available_counts.values()
+    ):
         return _selection_result(
             path, available_counts, selected_counts, written=False
         )

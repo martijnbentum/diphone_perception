@@ -185,6 +185,19 @@ the available count for all 31 labels, and writes 5,000 randomly selected
 keys per label to `data/flemish_phraser_phone_keys.bin` only when every label
 has enough eligible unique tokens.
 
+Load that binary inventory without parsing the Netherlandic metadata files:
+
+```python
+from probing.metadata import FlemishPhones
+
+flemish_phones = FlemishPhones()
+flemish_phones.phraser_phones
+flemish_phones.flemish_phraser_phones  # alias of the same cached list
+```
+
+The loader lazily opens the existing CGN Phraser store and strictly validates
+the 31 label-major blocks of 5,000 unique phones.
+
 `phones.phraser_phones` raises `ValueError` if any phone is unmatched, rather
 than silently returning a list with holes - downstream consumers (the
 embedding extraction below) rely on every phone having a phraser phone.
@@ -226,7 +239,7 @@ Defaults:
   store= is passed in.
 - phraser_source_id='cgn-awd' - label the phones' phraser store is
   registered under in the echoframe store.
-- batch_size=32 - compute_embeddings_batch only auto-computes a batch size
+- batch_size=120 - compute_embeddings_batch only auto-computes a batch size
   when gpu=True; left at None with gpu=False it loads every segment's audio
   into a single batch before running anything. The default here avoids that
   for large phone sets.
@@ -255,6 +268,20 @@ from the store cache and CUDA memory before the next model is loaded:
 
 Probe functions can open the matching checkpoint store by passing
 `store_root=model_store_path(model_name)`.
+
+The Flemish inventory has a parallel multi-model entry point whose stores
+default to `data/echoframe_model_flemish_stores` while retaining the
+`cgn-awd` Phraser source ID:
+
+```python
+from probing.extract_embeddings import (
+    extract_flemish_phone_embeddings_for_models,
+)
+from probing.metadata import FlemishPhones
+
+flemish_store_paths = extract_flemish_phone_embeddings_for_models(
+    FlemishPhones(), checkpoint_model_names, layers=[9], gpu=True)
+```
 
 c) train_binary_embedding_probe.py
 

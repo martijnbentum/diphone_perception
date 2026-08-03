@@ -28,9 +28,9 @@ def configure_small_inventory(
     monkeypatch.setattr(
         select_flemish_phones, 'flemish_phone_labels', tuple(labels))
     monkeypatch.setattr(
-        select_flemish_phones, '_phones_per_label', per_label)
+        select_flemish_phones, 'flemish_phones_per_label', per_label)
     monkeypatch.setattr(
-        select_flemish_phones, '_total_phone_count',
+        select_flemish_phones, 'flemish_phone_count',
         len(labels) * per_label,
     )
     monkeypatch.setattr(select_flemish_phones, '_duration_bounds', bounds)
@@ -56,8 +56,8 @@ def test_default_path_labels_and_duration_bounds_are_complete():
     assert select_flemish_phones.flemish_phone_labels == expected_labels
     assert set(select_flemish_phones._duration_bounds) == set(expected_labels)
     assert select_flemish_phones._duration_bounds['ə'] == (46, 1077)
-    assert select_flemish_phones._phones_per_label == 5_000
-    assert select_flemish_phones._total_phone_count == 155_000
+    assert select_flemish_phones.flemish_phones_per_label == 5_000
+    assert select_flemish_phones.flemish_phone_count == 155_000
     assert (
         select_flemish_phones.flemish_phraser_phone_key_file.name
         == 'flemish_phraser_phone_keys.bin'

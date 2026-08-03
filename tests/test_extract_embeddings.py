@@ -1,4 +1,5 @@
 import json
+import inspect
 import sys
 from pathlib import Path
 
@@ -350,4 +351,125 @@ def test_extract_phone_embeddings_for_models_cleans_up_after_failure(
 def test_extract_phone_embeddings_for_models_rejects_string_model_names():
     with pytest.raises(TypeError, match='iterable, not a string'):
         extract_embeddings.extract_phone_embeddings_for_models(
+            object(), 'model-a')
+
+
+# -- Flemish embedding extraction ------------------------------------------
+
+def test_flemish_model_store_root_and_batch_defaults():
+    assert (
+        extract_embeddings.default_flemish_model_stores_root
+        == extract_embeddings._data_dir / 'echoframe_model_flemish_stores'
+    )
+    assert extract_embeddings.model_store_path(
+        'owner/model',
+        extract_embeddings.default_flemish_model_stores_root,
+    ) == (
+        extract_embeddings.default_flemish_model_stores_root
+        / 'owner%2Fmodel'
+    )
+    functions = (
+        extract_embeddings.extract_phone_embeddings,
+        extract_embeddings.extract_phone_embeddings_for_models,
+        extract_embeddings.extract_flemish_phone_embeddings_for_models,
+    )
+    assert all(
+        inspect.signature(function).parameters['batch_size'].default == 120
+        for function in functions
+    )
+
+
+def test_extract_flemish_phone_embeddings_for_models_lifecycle(
+    tmp_path, monkeypatch,
+):
+    stores = {name: FakeStore() for name in ('model-a', 'model-b')}
+    open_calls = []
+    extract_calls = []
+
+    def fake_open_model_store(model_name, stores_root, model_paths_file):
+        open_calls.append((model_name, stores_root, model_paths_file))
+        return stores[model_name]
+
+    monkeypatch.setattr(
+        extract_embeddings, 'open_model_store', fake_open_model_store)
+    monkeypatch.setattr(
+        extract_embeddings, 'extract_phone_embeddings',
+        lambda phones, **kwargs: extract_calls.append((phones, kwargs)),
+    )
+
+    model_paths_file = tmp_path / 'model_paths.json'
+    flemish_phones = object()
+    store_root = tmp_path / 'flemish-stores'
+    result = (
+        extract_embeddings.extract_flemish_phone_embeddings_for_models(
+            flemish_phones,
+            ['model-a', 'model-b'],
+            layers=[8, 9],
+            collar=500,
+            store_root=store_root,
+            model_paths_file=model_paths_file,
+            gpu=False,
+            tags=['flemish'],
+            verbose=False,
+        )
+    )
+
+    assert open_calls == [
+        ('model-a', store_root, model_paths_file),
+        ('model-b', store_root, model_paths_file),
+    ]
+    assert [phones for phones, _ in extract_calls] == [
+        flemish_phones, flemish_phones]
+    assert [kwargs for _, kwargs in extract_calls] == [
+        dict(
+            model_name=model_name,
+            layers=[8, 9],
+            collar=500,
+            store=stores[model_name],
+            model_paths_file=model_paths_file,
+            phraser_source_id='cgn-awd',
+            gpu=False,
+            batch_size=120,
+            tags=['flemish'],
+            verbose=False,
+        )
+        for model_name in ('model-a', 'model-b')
+    ]
+    assert all(store.remove_cached_model_calls == 1
+        for store in stores.values())
+    assert all(store.close_calls == 1 for store in stores.values())
+    assert result == {
+        'model-a': store_root / 'model-a',
+        'model-b': store_root / 'model-b',
+    }
+
+
+def test_extract_flemish_phone_embeddings_for_models_cleans_up_after_failure(
+    tmp_path, monkeypatch,
+):
+    store = FakeStore()
+
+    def fail_extraction(*args, **kwargs):
+        raise RuntimeError('extraction failed')
+
+    monkeypatch.setattr(
+        extract_embeddings, 'open_model_store',
+        lambda *args, **kwargs: store,
+    )
+    monkeypatch.setattr(
+        extract_embeddings, 'extract_phone_embeddings',
+        fail_extraction,
+    )
+
+    with pytest.raises(RuntimeError, match='extraction failed'):
+        extract_embeddings.extract_flemish_phone_embeddings_for_models(
+            object(), ['model-a'], store_root=tmp_path)
+
+    assert store.remove_cached_model_calls == 1
+    assert store.close_calls == 1
+
+
+def test_extract_flemish_phone_embeddings_rejects_string_model_names():
+    with pytest.raises(TypeError, match='iterable, not a string'):
+        extract_embeddings.extract_flemish_phone_embeddings_for_models(
             object(), 'model-a')
