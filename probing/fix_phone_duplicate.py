@@ -141,7 +141,7 @@ def _collect_candidate_phones(
     audios = filter_component_audios(
         phones.store.audios, show_progress=show_progress)
     audios = _show_progress(
-        audios, prefix='Collecting candidate phones: ',
+        audios, prefix='Scanning candidate phones in audios: ',
         enabled=show_progress)
     for audio in audios:
         for phone in audio.phones:

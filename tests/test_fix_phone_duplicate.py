@@ -185,7 +185,7 @@ def test_collection_and_sampling_report_progress(monkeypatch):
     assert selected == {'a': [phone.key]}
     assert prefixes == [
         'Filtering component audios: ',
-        'Collecting candidate phones: ',
+        'Scanning candidate phones in audios: ',
         'Sampling replacement labels: ',
     ]
 
