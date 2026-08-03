@@ -7,6 +7,11 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from probing import phone_binary_probe as pbp
+from probing import phone_probe_common as probe_common
+from probing import phone_probe_metadata as probe_metadata
+from probing import phone_probe_report as probe_report
+from probing import phone_probe_sweep as probe_sweep
+from probing import phone_probe_worker as probe_worker
 from probing import probe_utils
 
 
@@ -83,8 +88,8 @@ class _FakeEchoframeStore:
 def worker_fakes(monkeypatch):
     _FakePhones.instances = []
     _FakeEchoframeStore.instances = []
-    monkeypatch.setattr(pbp.metadata, 'Phones', _FakePhones)
-    monkeypatch.setattr(pbp.echoframe, 'Store', _FakeEchoframeStore)
+    monkeypatch.setattr(probe_worker.metadata, 'Phones', _FakePhones)
+    monkeypatch.setattr(probe_worker.echoframe, 'Store', _FakeEchoframeStore)
     return _FakePhones, _FakeEchoframeStore
 
 
@@ -101,7 +106,7 @@ def test_worker_records_status_and_uses_one_phraser_store(
         calls.append((args, kwargs))
         return _probe_result(skipped=skipped)
 
-    monkeypatch.setattr(pbp, 'train_binary_embedding_probe', train)
+    monkeypatch.setattr(probe_worker, 'train_binary_embedding_probe', train)
     status_path = tmp_path / 'task.json'
     probe_dir = tmp_path / 'probes'
 
@@ -151,7 +156,7 @@ def test_worker_records_failure_and_closes_each_store_once(
     def fail(*args, **kwargs):
         raise RuntimeError('synthetic training failure')
 
-    monkeypatch.setattr(pbp, 'train_binary_embedding_probe', fail)
+    monkeypatch.setattr(probe_worker, 'train_binary_embedding_probe', fail)
     status_path = tmp_path / 'task.json'
 
     with pytest.raises(RuntimeError, match='synthetic training failure'):
@@ -222,10 +227,10 @@ def _patch_metadata_check(
         model_paths.append((model_name, path))
 
     monkeypatch.setattr(
-        pbp, 'discover_wav2vec2_checkpoint_stores',
+        probe_metadata, 'discover_wav2vec2_checkpoint_stores',
         lambda root: model_paths,
     )
-    monkeypatch.setattr(pbp.metadata, 'Phones', _FakePhones)
+    monkeypatch.setattr(probe_metadata.metadata, 'Phones', _FakePhones)
 
     class Store(_FakeEchoframeStore):
         def __init__(self, path):
@@ -233,7 +238,7 @@ def _patch_metadata_check(
                 raise RuntimeError(f'cannot open {Path(path).name}')
             super().__init__(path)
 
-    monkeypatch.setattr(pbp.echoframe, 'Store', Store)
+    monkeypatch.setattr(probe_metadata.echoframe, 'Store', Store)
     calls = []
 
     def check(phones, store, model_name, layer, **kwargs):
@@ -243,7 +248,7 @@ def _patch_metadata_check(
             raise value
         return dict(value)
 
-    monkeypatch.setattr(pbp, 'check_embedding_inventory', check)
+    monkeypatch.setattr(probe_metadata, 'check_embedding_inventory', check)
     return calls
 
 
@@ -374,7 +379,7 @@ def test_metadata_cache_retains_independent_collar_records(
     )
 
     status = json.loads((
-        tmp_path / 'stores' / pbp._metadata_status_filename
+        tmp_path / 'stores' / probe_metadata._metadata_status_filename
     ).read_text(encoding='utf-8'))
     collars = status['models'][MODEL_NAME]['layers']['9']
     assert set(collars) == {'500', '2000'}
@@ -387,12 +392,12 @@ def test_metadata_empty_root_records_failure_without_opening_stores(
     model_root.mkdir()
     key_path, replacement_path = _metadata_inputs(tmp_path)
     monkeypatch.setattr(
-        pbp, 'discover_wav2vec2_checkpoint_stores', lambda root: [])
+        probe_metadata, 'discover_wav2vec2_checkpoint_stores', lambda root: [])
     monkeypatch.setattr(
-        pbp.metadata, 'Phones',
+        probe_metadata.metadata, 'Phones',
         lambda **kwargs: pytest.fail('metadata should not be opened'))
     monkeypatch.setattr(
-        pbp.echoframe, 'Store',
+        probe_metadata.echoframe, 'Store',
         lambda path: pytest.fail('Echoframe should not be opened'))
 
     with pytest.warns(RuntimeWarning, match='no supported checkpoint'):
@@ -420,7 +425,7 @@ def test_metadata_failure_continues_to_later_model_and_suppresses_progress(
         OTHER_MODEL_NAME: complete,
     }
     monkeypatch.setattr(
-        pbp, '_metadata_progress_bar',
+        probe_metadata, '_metadata_progress_bar',
         lambda *args, **kwargs: pytest.fail('progress bar was constructed'))
     with pytest.warns(RuntimeWarning, match='Could not open'):
         report, calls, _, _ = _run_metadata_check(
@@ -469,7 +474,7 @@ def _task(phone='p', model_name=MODEL_NAME, layer=9, store_path=None):
 
 def test_worker_command_contains_exact_task_and_boolean_options(tmp_path):
     status_path = tmp_path / 'status.json'
-    command = pbp._build_train_subprocess_command(
+    command = probe_sweep._build_train_subprocess_command(
         _task(store_path=tmp_path / 'model'),
         task_status_path=status_path,
         **_command_options(
@@ -479,7 +484,8 @@ def test_worker_command_contains_exact_task_and_boolean_options(tmp_path):
     )
 
     assert command[:5] == [
-        pbp.sys.executable, '-u', '-m', 'probing.phone_binary_probe', 'train']
+        probe_sweep.sys.executable, '-u', '-m',
+        'probing.phone_binary_probe', 'train']
     assert command[command.index('--phone') + 1] == 'p'
     assert command[command.index('--model-name') + 1] == MODEL_NAME
     assert command[command.index('--layer') + 1] == '9'
@@ -531,13 +537,13 @@ def test_scheduler_accepts_arbitrary_jobs_and_continues_after_failure(
     _ImmediateProcess.peak = 0
     _ImmediateProcess.launches = 0
     _ImmediateProcess.fail_indices = {1}
-    monkeypatch.setattr(pbp.subprocess, 'Popen', _ImmediateProcess)
+    monkeypatch.setattr(probe_sweep.subprocess, 'Popen', _ImmediateProcess)
     tasks = [_task(phone=f'p-{index}', store_path=tmp_path / 'store')
              for index in range(7)]
     temporary = tmp_path / 'temporary'
     temporary.mkdir()
 
-    result = pbp._run_sweep_subprocesses(
+    result = probe_sweep._run_sweep_subprocesses(
         tasks,
         jobs=4,
         temporary_directory=temporary,
@@ -584,15 +590,15 @@ def test_scheduler_interrupt_terminates_active_workers(
     tmp_path, monkeypatch,
 ):
     _RunningProcess.instances = []
-    monkeypatch.setattr(pbp.subprocess, 'Popen', _RunningProcess)
+    monkeypatch.setattr(probe_sweep.subprocess, 'Popen', _RunningProcess)
     monkeypatch.setattr(
-        pbp.time, 'sleep',
+        probe_sweep.time, 'sleep',
         lambda seconds: (_ for _ in ()).throw(KeyboardInterrupt()),
     )
     temporary = tmp_path / 'temporary'
     temporary.mkdir()
 
-    result = pbp._run_sweep_subprocesses(
+    result = probe_sweep._run_sweep_subprocesses(
         [_task(phone=f'p-{index}', store_path=tmp_path / 'store')
          for index in range(5)],
         jobs=3,
@@ -616,7 +622,8 @@ def _metadata_cache(
 ):
     store_path = model_root / MODEL_NAME
     store_path.mkdir(parents=True, exist_ok=True)
-    inventory = pbp._phone_inventory_fingerprint(key_path, replacement_path)
+    inventory = probe_common._phone_inventory_fingerprint(
+        key_path, replacement_path)
     record = {
         'model_name': MODEL_NAME,
         'layer': 9,
@@ -630,7 +637,7 @@ def _metadata_cache(
         'checked_at': '2026-08-03T00:00:00Z',
     }
     cache = {
-        'schema_version': pbp._metadata_status_schema_version,
+        'schema_version': probe_metadata._metadata_status_schema_version,
         'kind': 'phone_binary_probe_metadata_status',
         'phone_inventory': inventory,
         'phone_labels': list(phone_labels),
@@ -647,7 +654,7 @@ def _metadata_cache(
         },
         'errors': [],
     }
-    _write_json(model_root / pbp._metadata_status_filename, cache)
+    _write_json(model_root / probe_metadata._metadata_status_filename, cache)
     return cache
 
 
@@ -756,11 +763,8 @@ def test_report_is_artifact_only_filters_settings_and_classifies_artifacts(
         paths['probe_save_dir'], paths['results_dir'], 'missing',
         random_state=7)
     monkeypatch.setattr(
-        pbp.metadata, 'Phones',
+        probe_report.metadata, 'Phones',
         lambda **kwargs: pytest.fail('report opened metadata'))
-    monkeypatch.setattr(
-        pbp.echoframe, 'Store',
-        lambda path: pytest.fail('report opened Echoframe'))
 
     report = pbp.build_phone_binary_probe_report(
         **paths,
@@ -797,9 +801,9 @@ def test_report_is_artifact_only_filters_settings_and_classifies_artifacts(
     saved = json.loads(Path(report['report_path']).read_text(encoding='utf-8'))
     assert saved == report
     assert Path(report['report_path']) == (
-        paths['probe_save_dir'].resolve() / pbp._probe_report_filename)
+        paths['probe_save_dir'].resolve() / probe_report._probe_report_filename)
     assert not list(paths['probe_save_dir'].glob(
-        f'.{pbp._probe_report_filename}.*.tmp'))
+        f'.{probe_report._probe_report_filename}.*.tmp'))
 
 
 def test_report_uses_selected_run_pointer_and_flags_ambiguous_fallback(
@@ -818,7 +822,7 @@ def test_report_uses_selected_run_pointer_and_flags_ambiguous_fallback(
     _write_probe_run(
         paths['probe_save_dir'], paths['results_dir'], 'a',
         discriminator='second')
-    pbp._write_selected_run_pointer(
+    probe_common._write_selected_run_pointer(
         phone='p', model_name=MODEL_NAME, layer=9, collar=2000,
         n_embeds=30, n_splits=2, random_state=42, standardize=False,
         probe_save_dir=paths['probe_save_dir'], run_id=second,
@@ -877,7 +881,7 @@ def _preflight_report(model_root, phone_labels=('p',)):
 
 
 def _patch_temporary_directory(monkeypatch, tmp_path):
-    original = pbp.tempfile.TemporaryDirectory
+    original = probe_sweep.tempfile.TemporaryDirectory
     temporary_root = tmp_path / 'temporary-runs'
     temporary_root.mkdir()
     created = []
@@ -897,7 +901,7 @@ def _patch_temporary_directory(monkeypatch, tmp_path):
         return Context()
 
     monkeypatch.setattr(
-        pbp.tempfile, 'TemporaryDirectory', temporary_directory)
+        probe_sweep.tempfile, 'TemporaryDirectory', temporary_directory)
     return created
 
 
@@ -906,9 +910,10 @@ def _patch_sweep_prerequisites(tmp_path, monkeypatch, *, interrupted=False):
     paths = _report_paths(tmp_path, labels)
     preflight = _preflight_report(paths['model_stores_root'], labels)
     monkeypatch.setattr(
-        pbp, 'check_phone_binary_probe_metadata', lambda **kwargs: preflight)
+        probe_sweep, 'check_phone_binary_probe_metadata',
+        lambda **kwargs: preflight)
     monkeypatch.setattr(
-        pbp, '_sweep_phone_labels_from_preflight',
+        probe_sweep, '_sweep_phone_labels_from_preflight',
         lambda report, **kwargs: labels,
     )
 
@@ -950,7 +955,7 @@ def _patch_sweep_prerequisites(tmp_path, monkeypatch, *, interrupted=False):
             'elapsed_seconds': 0.1,
         }
 
-    monkeypatch.setattr(pbp, '_run_sweep_subprocesses', scheduler)
+    monkeypatch.setattr(probe_sweep, '_run_sweep_subprocesses', scheduler)
     created = _patch_temporary_directory(monkeypatch, tmp_path)
     return paths, created
 

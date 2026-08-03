@@ -11,8 +11,11 @@ cache, scheduler, and report contracts are still changing.
 - Keep the existing low-level binary-probe training and five-fold cache
   behavior in `probing/train_binary_embedding_probe.py` and
   `probing/probe_utils.py`.
-- Add `probing/phone_binary_probe.py` as the path-based worker, sweep, metadata
-  preflight, report, and command-line module.
+- Keep `probing/phone_binary_probe.py` as the public API and command-line
+  façade. Separate the implementation by responsibility into
+  `phone_probe_worker.py`, `phone_probe_metadata.py`, `phone_probe_sweep.py`,
+  `phone_probe_report.py`, `phone_probe_artifacts.py`, and
+  `phone_probe_common.py`.
 - Default all paths to the existing Netherlandic locations, including
   `data/echoframe_model_stores`, `data/phone_probes`, and
   `data/probe_results`, so `run_phone_binary_probe_sweep()` needs no
