@@ -167,6 +167,24 @@ against the aligned metadata phones.
 After loading, `phones.duplicate_replacement_phones` contains the Phraser
 phones loaded from the replacement key file, in replacement-file order.
 
+Create the balanced Flemish Dutch key inventory directly from a Phraser
+store with:
+
+```python
+from probing.select_flemish_phones import save_flemish_phraser_phone_keys
+
+result = save_flemish_phraser_phone_keys(
+    store,
+    seed=42,
+    overwrite=True,
+)
+```
+
+The selector uses exact `comp-k`/`comp-o` plus `vl` path components, prints
+the available count for all 31 labels, and writes 13,500 randomly selected
+keys per label to `data/flemish_phraser_phone_keys.bin` only when every label
+has enough eligible unique tokens.
+
 `phones.phraser_phones` raises `ValueError` if any phone is unmatched, rather
 than silently returning a list with holes - downstream consumers (the
 embedding extraction below) rely on every phone having a phraser phone.

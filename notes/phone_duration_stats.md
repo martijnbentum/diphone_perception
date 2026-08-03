@@ -29,6 +29,7 @@ Min/max/median duration (seconds) per IPA phone label, computed from the
 | z | 0.046 | 0.354 | 0.081 | 13500 |
 | ɑ | 0.047 | 0.355 | 0.071 | 13500 |
 | ɔ | 0.046 | 0.283 | 0.076 | 13500 |
+| ə | 0.046 | 1.077 | 0.061 | 13500 |
 | ɛ | 0.046 | 0.273 | 0.071 | 13500 |
 | ɛi | 0.050 | 0.429 | 0.111 | 13500 |
 | ɪ | 0.046 | 0.466 | 0.071 | 13500 |
@@ -41,8 +42,8 @@ Min/max/median duration (seconds) per IPA phone label, computed from the
 
 - Diphthongs and long vowels (`ɛi`, `eː`, `aː`, `oː`) have the highest
   medians (0.111s), consistent with their phonologically longer duration.
-- `iː` has the largest max (0.965s) by a wide margin — worth a spot check
-  if outlier durations matter downstream (e.g. sanity-checking
+- `ə` has the largest max (1.077s), followed by `iː` (0.965s). Both are worth
+  a spot check if outlier durations matter downstream (e.g. sanity-checking
   `phraser_matching_diagnostics.md`'s tolerance window assumptions).
 - Computed with:
   ```python
