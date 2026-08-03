@@ -10,8 +10,8 @@ flemish_phraser_phone_key_file = (
 )
 
 _phraser_key_len = 22
-_phones_per_label = 13_500
-_total_phone_count = 418_500
+_phones_per_label = 5_000
+_total_phone_count = 155_000
 _components = {'comp-k', 'comp-o'}
 _language_component = 'vl'
 
@@ -186,7 +186,7 @@ def save_flemish_phraser_phone_keys(
 ):
     '''Select a balanced Flemish phone inventory and save its Phraser keys.
 
-    The output is label-major in ``flemish_phone_labels`` order, with 13,500
+    The output is label-major in ``flemish_phone_labels`` order, with 5,000
     consecutive 22-byte keys per label. If any label has too few eligible
     unique tokens, counts are reported and the output is untouched. Set
     show_progress=False to suppress progress bars.

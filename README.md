@@ -181,7 +181,7 @@ result = save_flemish_phraser_phone_keys(
 ```
 
 The selector uses exact `comp-k`/`comp-o` plus `vl` path components, prints
-the available count for all 31 labels, and writes 13,500 randomly selected
+the available count for all 31 labels, and writes 5,000 randomly selected
 keys per label to `data/flemish_phraser_phone_keys.bin` only when every label
 has enough eligible unique tokens.
 

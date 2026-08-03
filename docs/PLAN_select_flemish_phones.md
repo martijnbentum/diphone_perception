@@ -9,7 +9,7 @@
   store directly and does not depend on `probing.metadata.Phones`.
 - Default the output path to `data/flemish_phraser_phone_keys.bin`.
 - Require `overwrite=True` when the output already exists.
-- Use the provided 31-label order as the binary layout contract, with 13,500
+- Use the provided 31-label order as the binary layout contract, with 5,000
   consecutive fixed-width keys per label.
 - Consider only audios whose paths contain both an exact `comp-k` or `comp-o`
   component and the exact Flemish Dutch `vl` component.
@@ -24,9 +24,9 @@
 - Print the available unique-token count for every label and return a
   structured result containing available counts, selected counts, output
   path, and whether a file was written.
-- If any label has fewer than 13,500 candidates, report every count, do not
+- If any label has fewer than 5,000 candidates, report every count, do not
   raise, do not create or alter the output, and return `written=False`.
-- On success, validate 418,500 globally unique keys before writing the
+- On success, validate 155,000 globally unique keys before writing the
   label-major binary and return `written=True`.
 
 ### Tests
