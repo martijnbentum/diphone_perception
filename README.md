@@ -283,6 +283,34 @@ flemish_store_paths = extract_flemish_phone_embeddings_for_models(
     FlemishPhones(), checkpoint_model_names, layers=[9], gpu=True)
 ```
 
+If Flemish embeddings were accidentally written into the model-specific
+Netherlandic stores, move them into new Flemish stores using their Phraser
+keys:
+
+```python
+from scripts.move_embeddings_based_on_phraser_key import move_flemish_data
+
+report = move_flemish_data()
+```
+
+The lower-level function accepts an explicit key list and one store pair:
+
+```python
+from scripts.move_embeddings_based_on_phraser_key import (
+    move_embeddings_based_on_phraser_keys,
+)
+
+report = move_embeddings_based_on_phraser_keys(
+    flemish_keys, dutch_model_store, new_flemish_model_store)
+```
+
+The move first checks that every model-specific destination below
+`data/echoframe_model_flemish_stores/` is new. It copies and exactly verifies
+every matching hidden-state payload before deleting source metadata, then
+compacts only affected Dutch shards. Fully Flemish shards are removed; mixed
+shards are rewritten with their remaining Dutch embeddings. Per-store
+progress and a final aggregate report are printed and returned.
+
 c) train_binary_embedding_probe.py
 
 `train_binary_embedding_probe(phones, target_phoneme, ...)` trains and
