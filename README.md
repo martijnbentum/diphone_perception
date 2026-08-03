@@ -304,6 +304,32 @@ To train one binary embedding probe run for every Phraser phone label:
 
 	results = train_binary_embedding_probes(phones, layer=9)
 
+To sweep every Wav2Vec2 checkpoint store and train every label:
+
+```python
+from probing.metadata import Phones
+from probing.train_binary_embedding_probe import (
+    train_binary_embedding_probe_checkpoint_sweep,
+)
+
+report = train_binary_embedding_probe_checkpoint_sweep(
+    Phones(),
+    collar=2000,
+    overwrite=False,
+    verbose=True,
+)
+```
+
+The sweep discovers only `wav2vec2_checkpoint-0` and
+`wav2vec2_nl1_checkpoint-*` directories under
+`data/echoframe_model_stores`. It trains layers 1–12 for the random
+checkpoint and checkpoint 200000, and layer 9 for every other checkpoint.
+Before each checkpoint/layer, it verifies that every Phraser phone has stored
+embedding metadata. Incomplete runs are skipped; unexpected failures are
+warned about; processing continues; and a compact status and accuracy report
+is printed and returned at the end. Probe and prediction artifacts remain
+model-, phone-label-, layer-, and collar-specific.
+
 Sampling: the target phoneme gets `n_embeds` phones
 (default `None` - every available target-phoneme phone, not an arbitrary
 cap); every other phoneme class gets `n_embeds // (number of other phoneme
