@@ -1,5 +1,6 @@
 import bisect
 import csv
+import warnings
 from collections import Counter
 from pathlib import Path
 from progressbar import progressbar
@@ -13,6 +14,8 @@ _data_dir = Path(__file__).resolve().parent.parent.parent / 'data'
 metadata_file = _data_dir / 'metadata.csv'
 sentence_file = _data_dir / 'news_books_sentences_zs.tsv'
 phraser_key_file = _data_dir / 'phraser_phone_keys.bin'
+duplicate_replacement_phraser_key_file = (
+    _data_dir / 'duplicate_replacement_phraser_phone_keys.bin')
 cgn_lmdb = Path('/vol/mlusers/mbentum/phraser/data/cgn_awd_lmdb')
 _boundary_tokens = ('SOS', 'EOS')
 _bool = {'True': True, 'False': False}
@@ -330,6 +333,9 @@ def load_phraser_keys(path=phraser_key_file):
     a phone that could not be matched at save time is None.
     '''
     data = Path(path).read_bytes()
+    if len(data) % _phraser_key_len:
+        raise ValueError(
+            f'{path} size is not a multiple of {_phraser_key_len} bytes')
     keys = [
         data[i:i + _phraser_key_len]
         for i in range(0, len(data), _phraser_key_len)
@@ -337,14 +343,58 @@ def load_phraser_keys(path=phraser_key_file):
     return [None if key == _phraser_key_placeholder else key for key in keys]
 
 
+def _replace_duplicate_phraser_keys(keys, replacement_keys):
+    '''replace repeated real keys in place and return keys and changed indices.'''
+    duplicate_indices = []
+    seen = set()
+    for index, key in enumerate(keys):
+        if key is None:
+            continue
+        if key in seen:
+            duplicate_indices.append(index)
+        else:
+            seen.add(key)
+
+    if len(replacement_keys) != len(duplicate_indices):
+        raise ValueError(
+            f'expected {len(duplicate_indices)} duplicate replacement keys, '
+            f'found {len(replacement_keys)}')
+    if any(key is None for key in replacement_keys):
+        raise ValueError('duplicate replacement keys cannot contain placeholders')
+
+    replacements = set(replacement_keys)
+    if len(replacements) != len(replacement_keys):
+        raise ValueError('duplicate replacement key file contains repeated keys')
+    reused = seen.intersection(replacements)
+    if reused:
+        raise ValueError(
+            f'{len(reused)} duplicate replacement keys already occur in the '
+            'original Phraser key file')
+
+    output = list(keys)
+    for index, replacement in zip(
+        duplicate_indices, replacement_keys, strict=True,
+    ):
+        output[index] = replacement
+    real_keys = [key for key in output if key is not None]
+    if len(real_keys) != len(set(real_keys)):
+        raise ValueError('duplicate Phraser keys remain after replacement')
+    return output, duplicate_indices
+
+
 class Phones:
     '''all Phone objects linked to a phraser store.'''
     def __init__(self, store=None, path=metadata_file,
-        sentence_path=sentence_file, phraser_key_path=phraser_key_file):
+        sentence_path=sentence_file, phraser_key_path=phraser_key_file,
+        duplicate_replacement_phraser_key_path=(
+            duplicate_replacement_phraser_key_file),
+    ):
         self._store = store
         self.path = path
         self.sentence_path = sentence_path
         self.phraser_key_path = phraser_key_path
+        self.duplicate_replacement_phraser_key_path = (
+            duplicate_replacement_phraser_key_path)
 
     @property
     def store(self):
@@ -416,17 +466,98 @@ class Phones:
             f.write(keys)
         self.phraser_match_failures = failures
 
+    def _applicable_replacement_path(self, phraser_key_path):
+        replacement_path = self.duplicate_replacement_phraser_key_path
+        if replacement_path is None:
+            return None
+        uses_default_keys = (
+            Path(phraser_key_path).resolve() == Path(phraser_key_file).resolve())
+        uses_default_replacements = (
+            Path(replacement_path).resolve()
+            == Path(duplicate_replacement_phraser_key_file).resolve()
+        )
+        if not uses_default_keys and uses_default_replacements:
+            warnings.warn(
+                'not applying the default duplicate replacement Phraser key '
+                'file: it was generated from the duplicate history of the '
+                'default phraser_phone_keys.bin and is not valid for a custom '
+                'phraser_key_path',
+                RuntimeWarning,
+                stacklevel=3,
+            )
+            return None
+        path = Path(replacement_path)
+        return path if path.exists() else None
+
+    def _validate_replacement_labels(self, phraser_phones, indices):
+        for index in indices:
+            expected = self.phones[index].phoneme_ipa
+            observed = phraser_phones[index].label
+            if observed != expected:
+                raise ValueError(
+                    f'duplicate replacement at index {index} has Phraser '
+                    f'label {observed!r}, expected {expected!r}')
+
+    def _warn_phraser_inventory(self, phraser_phones):
+        keys = [bytes(phone.key) for phone in phraser_phones if phone is not None]
+        duplicate_count = len(keys) - len(set(keys))
+        if duplicate_count:
+            warnings.warn(
+                f'loaded Phraser phones contain {duplicate_count} duplicate '
+                'key occurrences; generate and load the duplicate replacement '
+                'Phraser key file to obtain a unique inventory',
+                RuntimeWarning,
+                stacklevel=3,
+            )
+
+        keys_by_label = {}
+        for phone in phraser_phones:
+            if phone is None:
+                continue
+            keys_by_label.setdefault(phone.label, set()).add(bytes(phone.key))
+        expected_labels = {phone.phoneme_ipa for phone in self.phones}
+        counts = {
+            label: len(keys_by_label.get(label, set()))
+            for label in expected_labels.union(keys_by_label)
+        }
+        invalid = {
+            label: count for label, count in counts.items()
+            if count != 13_500
+        }
+        if invalid:
+            details = ', '.join(
+                f'{label!r}={count}' for label, count in sorted(invalid.items()))
+            warnings.warn(
+                'Phraser phone inventory does not contain exactly 13,500 '
+                f'unique keys per label: {details}',
+                RuntimeWarning,
+                stacklevel=3,
+            )
+
     def load_phraser_phones(self, path=None):
         '''bulk-load the phraser Phone objects saved by save_phraser_keys.
 
         returns a list aligned with self.phones (None where the phone
-        wasn't matched during save_phraser_keys).
+        wasn't matched during save_phraser_keys). If an applicable duplicate
+        replacement key file exists, repeated keys are replaced in place
+        before loading so positional alignment is retained.
         '''
         path = path or self.phraser_key_path
         keys = load_phraser_keys(path)
+        replacement_indices = []
+        replacement_path = self._applicable_replacement_path(path)
+        if replacement_path is not None:
+            replacement_keys = load_phraser_keys(replacement_path)
+            keys, replacement_indices = _replace_duplicate_phraser_keys(
+                keys, replacement_keys)
         real_keys = [key for key in keys if key is not None]
         loaded = iter(self.store.load_many(real_keys))
-        return [next(loaded) if key is not None else None for key in keys]
+        phraser_phones = [
+            next(loaded) if key is not None else None for key in keys]
+        self._validate_replacement_labels(
+            phraser_phones, replacement_indices)
+        self._warn_phraser_inventory(phraser_phones)
+        return phraser_phones
 
     @property
     def phraser_phones(self):

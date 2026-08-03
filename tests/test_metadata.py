@@ -1,4 +1,5 @@
 import sys
+import warnings
 from collections import Counter
 from pathlib import Path
 from types import SimpleNamespace
@@ -222,9 +223,21 @@ class StubBulkStore(StubStore):
     def __init__(self, audio):
         super().__init__(audio)
         self._by_key = {phone.key: phone for phone in audio.phones}
+        self.load_many_calls = []
 
     def load_many(self, keys):
+        self.load_many_calls.append(list(keys))
         return [self._by_key[key] for key in keys]
+
+
+def make_phraser_key(value):
+    return value.to_bytes(22, byteorder='big')
+
+
+def write_phraser_keys(path, keys):
+    placeholder = bytes(22)
+    path.write_bytes(b''.join(
+        placeholder if key is None else key for key in keys))
 
 
 def make_phone_object(**overrides):
@@ -498,8 +511,9 @@ def test_phones_phraser_phones_raises_when_incomplete(tmp_path):
     phones_obj._store = StubBulkStore(stub_audio)
 
     assert not key_path.exists()
-    with pytest.raises(ValueError, match='1 / 3'):
-        phones_obj.phraser_phones
+    with pytest.warns(RuntimeWarning):
+        with pytest.raises(ValueError, match='1 / 3'):
+            phones_obj.phraser_phones
     # save_phraser_keys still ran (and wrote the key file) before the check
     assert key_path.exists()
 
@@ -522,7 +536,8 @@ def test_phones_phraser_phones_builds_then_reuses_key_file(tmp_path):
     phones_obj._store = StubBulkStore(stub_audio)
 
     assert not key_path.exists()
-    matched = phones_obj.phraser_phones
+    with pytest.warns(RuntimeWarning):
+        matched = phones_obj.phraser_phones
     assert key_path.exists()
     assert [p.key for p in matched] == [d_key, e_key, f_key]
 
@@ -530,8 +545,247 @@ def test_phones_phraser_phones_builds_then_reuses_key_file(tmp_path):
     phones_obj2 = metadata.Phones(
         store=phones_obj.store, path=metadata_path, sentence_path=sentence_path,
         phraser_key_path=key_path)
-    matched2 = phones_obj2.phraser_phones
+    with pytest.warns(RuntimeWarning):
+        matched2 = phones_obj2.phraser_phones
     assert [p.key for p in matched2] == [d_key, e_key, f_key]
+
+
+def test_load_phraser_phones_replaces_only_repeated_occurrences(tmp_path):
+    key_path = tmp_path / 'keys.bin'
+    replacement_path = tmp_path / 'replacement-keys.bin'
+    original_key = make_phraser_key(1)
+    middle_key = make_phraser_key(2)
+    replacement_key = make_phraser_key(3)
+    final_key = make_phraser_key(4)
+    original_keys = [original_key, middle_key, original_key, final_key]
+    write_phraser_keys(key_path, original_keys)
+    write_phraser_keys(replacement_path, [replacement_key])
+
+    phraser_phones = [
+        StubPhraserPhone('d', 0, 1, original_key),
+        StubPhraserPhone('e', 1, 2, middle_key),
+        StubPhraserPhone('d', 2, 3, replacement_key),
+        StubPhraserPhone('f', 3, 4, final_key),
+    ]
+    store = StubBulkStore(StubAudio(phraser_phones))
+    phones_obj = metadata.Phones(
+        store=store,
+        phraser_key_path=key_path,
+        duplicate_replacement_phraser_key_path=replacement_path,
+    )
+    phones_obj._phones = [
+        SimpleNamespace(phoneme_ipa=label) for label in ('d', 'e', 'd', 'f')]
+
+    with pytest.warns(RuntimeWarning, match='13,500'):
+        loaded = phones_obj.load_phraser_phones()
+
+    expected_keys = [
+        original_key, middle_key, replacement_key, final_key]
+    assert len(loaded) == len(original_keys)
+    assert [phone.key for phone in loaded] == expected_keys
+    assert store.load_many_calls == [expected_keys]
+    assert metadata.load_phraser_keys(key_path) == original_keys
+
+
+def test_load_phraser_phones_retains_duplicates_without_replacements(
+    tmp_path,
+):
+    key_path = tmp_path / 'keys.bin'
+    missing_replacement_path = tmp_path / 'missing-replacement-keys.bin'
+    duplicate_key = make_phraser_key(1)
+    other_key = make_phraser_key(2)
+    write_phraser_keys(key_path, [duplicate_key, duplicate_key, other_key])
+
+    duplicate_phone = StubPhraserPhone('d', 0, 1, duplicate_key)
+    other_phone = StubPhraserPhone('f', 1, 2, other_key)
+    store = StubBulkStore(StubAudio([duplicate_phone, other_phone]))
+    phones_obj = metadata.Phones(
+        store=store,
+        phraser_key_path=key_path,
+        duplicate_replacement_phraser_key_path=missing_replacement_path,
+    )
+    phones_obj._phones = [
+        SimpleNamespace(phoneme_ipa=label) for label in ('d', 'd', 'f')]
+
+    with pytest.warns(RuntimeWarning) as caught:
+        loaded = phones_obj.load_phraser_phones()
+
+    assert loaded == [duplicate_phone, duplicate_phone, other_phone]
+    assert any(
+        'contain 1 duplicate key occurrence' in str(item.message)
+        for item in caught
+    )
+
+
+def test_custom_key_path_does_not_use_default_replacement_history(
+    tmp_path, monkeypatch,
+):
+    key_path = tmp_path / 'custom-keys.bin'
+    default_replacement_path = tmp_path / 'default-replacement-keys.bin'
+    duplicate_key = make_phraser_key(1)
+    replacement_key = make_phraser_key(2)
+    write_phraser_keys(key_path, [duplicate_key, duplicate_key])
+    write_phraser_keys(default_replacement_path, [replacement_key])
+    monkeypatch.setattr(
+        metadata, 'duplicate_replacement_phraser_key_file',
+        default_replacement_path,
+    )
+
+    duplicate_phone = StubPhraserPhone('d', 0, 1, duplicate_key)
+    store = StubBulkStore(StubAudio([duplicate_phone]))
+    phones_obj = metadata.Phones(
+        store=store,
+        phraser_key_path=key_path,
+        duplicate_replacement_phraser_key_path=default_replacement_path,
+    )
+    phones_obj._phones = [
+        SimpleNamespace(phoneme_ipa='d'),
+        SimpleNamespace(phoneme_ipa='d'),
+    ]
+
+    with pytest.warns(RuntimeWarning) as caught:
+        loaded = phones_obj.load_phraser_phones()
+
+    messages = [str(item.message) for item in caught]
+    assert loaded == [duplicate_phone, duplicate_phone]
+    assert any('duplicate history of the default' in message
+        for message in messages)
+    assert store.load_many_calls == [[duplicate_key, duplicate_key]]
+
+
+@pytest.mark.parametrize(
+    ('keys', 'replacement_keys', 'message'),
+    [
+        ([1, 1], [], 'expected 1 duplicate replacement key'),
+        ([1, 1], [None], 'cannot contain placeholders'),
+        ([1, 1], [1], 'already occur in the original'),
+        ([1, 1, 2, 2], [3, 3], 'contains repeated keys'),
+    ],
+    ids=['wrong-count', 'placeholder', 'reused-original', 'repeated'],
+)
+def test_load_phraser_phones_rejects_malformed_replacement_inventory(
+    tmp_path, keys, replacement_keys, message,
+):
+    key_path = tmp_path / 'keys.bin'
+    replacement_path = tmp_path / 'replacement-keys.bin'
+    write_phraser_keys(key_path, [make_phraser_key(key) for key in keys])
+    write_phraser_keys(
+        replacement_path,
+        [None if key is None else make_phraser_key(key)
+         for key in replacement_keys],
+    )
+    phones_obj = metadata.Phones(
+        store=StubBulkStore(StubAudio([])),
+        phraser_key_path=key_path,
+        duplicate_replacement_phraser_key_path=replacement_path,
+    )
+
+    with pytest.raises(ValueError, match=message):
+        phones_obj.load_phraser_phones()
+
+
+def test_load_phraser_phones_rejects_non_record_replacement_data(tmp_path):
+    key_path = tmp_path / 'keys.bin'
+    replacement_path = tmp_path / 'replacement-keys.bin'
+    duplicate_key = make_phraser_key(1)
+    write_phraser_keys(key_path, [duplicate_key, duplicate_key])
+    replacement_path.write_bytes(b'not-a-22-byte-record')
+    phones_obj = metadata.Phones(
+        store=StubBulkStore(StubAudio([])),
+        phraser_key_path=key_path,
+        duplicate_replacement_phraser_key_path=replacement_path,
+    )
+
+    with pytest.raises(ValueError, match='not a multiple of 22 bytes'):
+        phones_obj.load_phraser_phones()
+
+
+def test_load_phraser_phones_rejects_final_duplicate_keys(tmp_path):
+    key_path = tmp_path / 'keys.bin'
+    replacement_path = tmp_path / 'replacement-keys.bin'
+    duplicate_key = make_phraser_key(1)
+    colliding_key = make_phraser_key(2)
+    write_phraser_keys(
+        key_path, [duplicate_key, duplicate_key, colliding_key])
+    write_phraser_keys(replacement_path, [colliding_key])
+    phones_obj = metadata.Phones(
+        store=StubBulkStore(StubAudio([])),
+        phraser_key_path=key_path,
+        duplicate_replacement_phraser_key_path=replacement_path,
+    )
+
+    with pytest.raises(
+        ValueError, match='already occur in the original|remain after replacement',
+    ):
+        phones_obj.load_phraser_phones()
+
+
+def test_load_phraser_phones_rejects_wrong_replacement_label(tmp_path):
+    key_path = tmp_path / 'keys.bin'
+    replacement_path = tmp_path / 'replacement-keys.bin'
+    duplicate_key = make_phraser_key(1)
+    replacement_key = make_phraser_key(2)
+    write_phraser_keys(key_path, [duplicate_key, duplicate_key])
+    write_phraser_keys(replacement_path, [replacement_key])
+
+    phraser_phones = [
+        StubPhraserPhone('d', 0, 1, duplicate_key),
+        StubPhraserPhone('x', 1, 2, replacement_key),
+    ]
+    phones_obj = metadata.Phones(
+        store=StubBulkStore(StubAudio(phraser_phones)),
+        phraser_key_path=key_path,
+        duplicate_replacement_phraser_key_path=replacement_path,
+    )
+    phones_obj._phones = [
+        SimpleNamespace(phoneme_ipa='d'),
+        SimpleNamespace(phoneme_ipa='d'),
+    ]
+
+    with pytest.raises(ValueError, match="label 'x', expected 'd'"):
+        phones_obj.load_phraser_phones()
+
+
+def test_warn_phraser_inventory_reports_duplicates_and_unbalanced_labels():
+    duplicate_key = make_phraser_key(1)
+    phones_obj = metadata.Phones(store='unused')
+    phones_obj._phones = [
+        SimpleNamespace(phoneme_ipa='d'),
+        SimpleNamespace(phoneme_ipa='d'),
+        SimpleNamespace(phoneme_ipa='f'),
+    ]
+    inventory = [
+        StubPhraserPhone('d', 0, 1, duplicate_key),
+        StubPhraserPhone('d', 1, 2, duplicate_key),
+        StubPhraserPhone('f', 2, 3, make_phraser_key(2)),
+    ]
+
+    with pytest.warns(RuntimeWarning) as caught:
+        phones_obj._warn_phraser_inventory(inventory)
+
+    messages = [str(item.message) for item in caught]
+    assert any('contain 1 duplicate key occurrence' in message
+        for message in messages)
+    assert any("'d'=1" in message and "'f'=1" in message
+        for message in messages)
+
+
+def test_warn_phraser_inventory_accepts_balanced_unique_labels():
+    phones_obj = metadata.Phones(store='unused')
+    phones_obj._phones = [
+        SimpleNamespace(phoneme_ipa='d'),
+        SimpleNamespace(phoneme_ipa='f'),
+    ]
+    inventory = [
+        StubPhraserPhone(label, index, index + 1, make_phraser_key(key))
+        for label_index, label in enumerate(('d', 'f'))
+        for index, key in enumerate(
+            range(label_index * 13_500, (label_index + 1) * 13_500))
+    ]
+
+    with warnings.catch_warnings():
+        warnings.simplefilter('error')
+        phones_obj._warn_phraser_inventory(inventory)
 
 
 def test_phones_label_to_phraser_phone_groups_by_label(tmp_path):
@@ -551,7 +805,8 @@ def test_phones_label_to_phraser_phone_groups_by_label(tmp_path):
     ])
     phones_obj._store = StubBulkStore(stub_audio)
 
-    grouped = phones_obj.label_to_phraser_phone
+    with pytest.warns(RuntimeWarning):
+        grouped = phones_obj.label_to_phraser_phone
 
     assert set(grouped.keys()) == {'d', e_ipa, 'f'}
     assert [p.key for p in grouped['d']] == [d_key]
