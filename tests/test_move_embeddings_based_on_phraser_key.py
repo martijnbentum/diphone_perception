@@ -1,5 +1,6 @@
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -122,6 +123,75 @@ def test_move_removes_a_pure_flemish_shard(tmp_path):
     assert report['mixed_shard_count'] == 0
     assert report['compacted_shard_count'] == 1
     assert not source_shard.exists()
+
+
+def test_source_deletion_verification_uses_batched_direct_lookups(monkeypatch):
+    monkeypatch.setattr(mover, '_source_verification_batch_size', 2)
+
+    class Source:
+        def __init__(self):
+            self.calls = []
+
+        @property
+        def metadatas(self):
+            pytest.fail('source metadata inventory must not be rescanned')
+
+        def load_many_metadata(self, keys, keep_missing=False):
+            self.calls.append((list(keys), keep_missing))
+            return [None] * len(keys)
+
+    source = Source()
+    selected = [
+        SimpleNamespace(echoframe_key=make_key(index))
+        for index in range(1, 6)
+    ]
+
+    remaining = mover._count_remaining_selected(source, selected)
+
+    assert remaining == 0
+    assert source.calls == [
+        ([make_key(1), make_key(2)], True),
+        ([make_key(3), make_key(4)], True),
+        ([make_key(5)], True),
+    ]
+
+
+def test_source_deletion_verification_updates_a_progress_bar(monkeypatch):
+    monkeypatch.setattr(mover, '_source_verification_batch_size', 2)
+
+    class Bar:
+        def __init__(self):
+            self.variables = {}
+            self.updates = []
+            self.finished = False
+
+        def update(self, value, **variables):
+            self.updates.append((value, variables['label']))
+
+        def finish(self):
+            self.finished = True
+
+    class Source:
+        def load_many_metadata(self, keys, keep_missing=False):
+            return [None] * len(keys)
+
+    bar = Bar()
+    monkeypatch.setattr(
+        mover, '_move_progress_bar',
+        lambda max_value, label, verbose: bar,
+    )
+    selected = [
+        SimpleNamespace(echoframe_key=make_key(index))
+        for index in range(1, 6)
+    ]
+
+    remaining = mover._count_remaining_selected(
+        Source(), selected, label='model-a', verbose=True)
+
+    assert remaining == 0
+    assert [value for value, _ in bar.updates] == [2, 4, 5]
+    assert bar.variables['label'] == '[model-a] source deletions checked'
+    assert bar.finished is True
 
 
 def test_move_leaves_source_untouched_when_payload_verification_fails(

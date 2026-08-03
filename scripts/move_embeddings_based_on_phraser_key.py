@@ -6,6 +6,9 @@ from pathlib import Path
 
 import numpy as np
 from echoframe import EchoframeMetadata, Store
+from progressbar import (
+    Bar, ETA, Percentage, ProgressBar, SimpleProgress, Variable,
+)
 
 from probing import metadata
 from probing.extract_embeddings import (
@@ -19,10 +22,35 @@ default_flemish_stores_root = default_flemish_model_stores_root
 default_flemish_phraser_key_path = (
     metadata.flemish_phraser_phone_key_file)
 default_batch_size = 100
+_source_verification_batch_size = 10_000
 
 
 def _resolved_path(path):
     return Path(path).expanduser().resolve()
+
+
+def _move_progress_bar(max_value, label, verbose):
+    if not verbose:
+        return None
+    return ProgressBar(
+        max_value=max(max_value, 1),
+        widgets=[
+            Variable('label', format='{formatted_value}', width=62),
+            ' ', Bar(), ' ', SimpleProgress(), ' ', Percentage(), ' ', ETA(),
+        ],
+        variables={'label': label},
+    ).start()
+
+
+def _update_move_progress(bar, value, label):
+    if bar is not None:
+        bar.update(value, label=label)
+
+
+def _finish_move_progress(bar, label):
+    if bar is not None:
+        bar.variables['label'] = label
+        bar.finish()
 
 
 def _validate_batch_size(batch_size):
@@ -205,66 +233,74 @@ def _copy_and_verify_batches(
 ):
     destination_keys = []
     n_total = len(selected)
-    for start in range(0, n_total, batch_size):
-        batch = selected[start:start + batch_size]
-        source_payloads = source.metadatas_to_payloads(batch)
-        if len(source_payloads) != len(batch):
-            raise RuntimeError(
-                'source returned an unexpected number of payloads')
-        items = [
-            _destination_item(destination, source_metadata, payload)
-            for source_metadata, payload in zip(
-                batch, source_payloads, strict=True)
-        ]
-        destination.save_many(items)
-        batch_keys = [item['echoframe_key'] for item in items]
-        copied_metadatas = destination.load_many_metadata(
-            batch_keys, keep_missing=True)
-        copied_payloads = destination.metadatas_to_payloads(copied_metadatas)
-        if len(copied_metadatas) != len(batch):
-            raise RuntimeError(
-                'destination returned an unexpected number of metadata '
-                'records')
-        if len(copied_payloads) != len(batch):
-            raise RuntimeError(
-                'destination returned an unexpected number of payloads')
+    progress_label = f'[{label}] copying and verifying embeddings'
+    progress = _move_progress_bar(n_total, progress_label, verbose)
+    completed = False
+    try:
+        for start in range(0, n_total, batch_size):
+            batch = selected[start:start + batch_size]
+            source_payloads = source.metadatas_to_payloads(batch)
+            if len(source_payloads) != len(batch):
+                raise RuntimeError(
+                    'source returned an unexpected number of payloads')
+            items = [
+                _destination_item(destination, source_metadata, payload)
+                for source_metadata, payload in zip(
+                    batch, source_payloads, strict=True)
+            ]
+            destination.save_many(items)
+            batch_keys = [item['echoframe_key'] for item in items]
+            copied_metadatas = destination.load_many_metadata(
+                batch_keys, keep_missing=True)
+            copied_payloads = destination.metadatas_to_payloads(
+                copied_metadatas)
+            if len(copied_metadatas) != len(batch):
+                raise RuntimeError(
+                    'destination returned an unexpected number of metadata '
+                    'records')
+            if len(copied_payloads) != len(batch):
+                raise RuntimeError(
+                    'destination returned an unexpected number of payloads')
 
-        records = zip(
-            batch,
-            source_payloads,
-            copied_metadatas,
-            copied_payloads,
-            strict=True,
-        )
-        for (
-            source_metadata,
-            source_payload,
-            copied_metadata,
-            copied_payload,
-        ) in records:
-            if copied_metadata is None:
-                raise RuntimeError(
-                    'destination metadata verification found a missing '
-                    'record')
-            if _metadata_signature(source_metadata) != _metadata_signature(
-                copied_metadata,
-            ):
-                raise RuntimeError(
-                    'destination metadata does not match its source record: '
-                    f'{copied_metadata.echoframe_key.hex()}')
-            if not _payloads_match(source_payload, copied_payload):
-                raise RuntimeError(
-                    'destination payload does not exactly match its source '
-                    f'record: {copied_metadata.echoframe_key.hex()}')
-
-        destination_keys.extend(batch_keys)
-        if verbose:
-            finished = min(start + len(batch), n_total)
-            print(
-                f'[{label}] copied and verified '
-                f'{finished:,}/{n_total:,} embeddings',
-                flush=True,
+            records = zip(
+                batch,
+                source_payloads,
+                copied_metadatas,
+                copied_payloads,
+                strict=True,
             )
+            for (
+                source_metadata,
+                source_payload,
+                copied_metadata,
+                copied_payload,
+            ) in records:
+                if copied_metadata is None:
+                    raise RuntimeError(
+                        'destination metadata verification found a missing '
+                        'record')
+                if _metadata_signature(
+                    source_metadata,
+                ) != _metadata_signature(copied_metadata):
+                    raise RuntimeError(
+                        'destination metadata does not match its source '
+                        f'record: {copied_metadata.echoframe_key.hex()}')
+                if not _payloads_match(source_payload, copied_payload):
+                    key = copied_metadata.echoframe_key.hex()
+                    raise RuntimeError(
+                        'destination payload does not exactly match its '
+                        f'source record: {key}')
+
+            destination_keys.extend(batch_keys)
+            finished = min(start + len(batch), n_total)
+            _update_move_progress(progress, finished, progress_label)
+        completed = True
+    finally:
+        final_label = (
+            f'[{label}] embeddings copied and verified'
+            if completed else f'[{label}] embedding copy stopped'
+        )
+        _finish_move_progress(progress, final_label)
     return destination_keys
 
 
@@ -297,6 +333,39 @@ def _selected_by_shard(selected):
     return dict(output)
 
 
+def _count_remaining_selected(
+    source, selected, label='source', verbose=False,
+):
+    remaining_count = 0
+    n_total = len(selected)
+    progress_label = f'[{label}] verifying source deletions'
+    progress = _move_progress_bar(n_total, progress_label, verbose)
+    completed = False
+    try:
+        for start in range(
+            0, n_total, _source_verification_batch_size,
+        ):
+            batch = selected[start:start + _source_verification_batch_size]
+            echoframe_keys = [item.echoframe_key for item in batch]
+            metadatas = source.load_many_metadata(
+                echoframe_keys, keep_missing=True)
+            if len(metadatas) != len(echoframe_keys):
+                raise RuntimeError(
+                    'source returned an unexpected number of metadata '
+                    'records during deletion verification')
+            remaining_count += sum(item is not None for item in metadatas)
+            finished = min(start + len(batch), n_total)
+            _update_move_progress(progress, finished, progress_label)
+        completed = True
+    finally:
+        final_label = (
+            f'[{label}] source deletions checked'
+            if completed else f'[{label}] source-deletion check stopped'
+        )
+        _finish_move_progress(progress, final_label)
+    return remaining_count
+
+
 def _delete_and_compact(
     source, all_metadatas, selected, label, verbose,
 ):
@@ -310,33 +379,45 @@ def _delete_and_compact(
     affected_shards = sorted(by_shard)
     compacted_shards = []
     deleted_count = 0
-    for index, shard_id in enumerate(affected_shards, start=1):
-        items = by_shard[shard_id]
-        source.index.delete_many(items)
-        deleted_count += len(items)
-        compacted = source.compact_shards(
-            shard_ids=[shard_id],
-            min_garbage_bytes=0,
-            min_garbage_ratio=0,
-        )
-        compacted_shards.extend(compacted)
-        if verbose:
-            print(
-                f'[{label}] compacted source shard '
-                f'{index:,}/{len(affected_shards):,}; deleted '
-                f'{deleted_count:,}/{len(selected):,} embeddings',
-                flush=True,
+    progress_label = f'[{label}] compacting affected source shards'
+    progress = _move_progress_bar(
+        len(affected_shards), progress_label, verbose)
+    completed = False
+    try:
+        for index, shard_id in enumerate(affected_shards, start=1):
+            items = by_shard[shard_id]
+            source.index.delete_many(items)
+            deleted_count += len(items)
+            compacted = source.compact_shards(
+                shard_ids=[shard_id],
+                min_garbage_bytes=0,
+                min_garbage_ratio=0,
             )
+            compacted_shards.extend(compacted)
+            current_label = (
+                f'[{label}] compacting; '
+                f'{deleted_count:,}/{len(selected):,} deleted'
+            )
+            _update_move_progress(progress, index, current_label)
+        completed = True
+    finally:
+        final_label = (
+            f'[{label}] affected source shards compacted'
+            if completed else f'[{label}] source compaction stopped'
+        )
+        _finish_move_progress(progress, final_label)
 
-    remaining = [
-        item for item in source.metadatas
-        if item.output_type == 'hidden_state'
-        and item.phraser_key in {
-            selected_item.phraser_key for selected_item in selected}
-    ]
-    if remaining:
+    remaining_count = _count_remaining_selected(
+        source, selected, label=label, verbose=verbose)
+    if remaining_count:
         raise RuntimeError(
-            f'{len(remaining):,} selected embeddings remain in the source')
+            f'{remaining_count:,} selected embeddings remain in the source')
+    if verbose:
+        print(
+            f'[{label}] selected source entries deleted; '
+            'verifying source-store integrity',
+            flush=True,
+        )
     integrity = source.verify_integrity()
     if not integrity.get('ok', False):
         raise RuntimeError(
@@ -345,6 +426,8 @@ def _delete_and_compact(
     if integrity.get('unreferenced_shard_files'):
         raise RuntimeError(
             'source contains unreferenced shard files after compaction')
+    if verbose:
+        print(f'[{label}] source-store integrity verified', flush=True)
     return {
         'deleted_count': deleted_count,
         'affected_shard_count': len(affected_shards),
