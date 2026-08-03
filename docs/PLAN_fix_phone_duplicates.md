@@ -12,8 +12,8 @@
 - Require `overwrite=True` when the output already exists.
 - Read each requested count from the JSON file and select half that number,
   for 1,286 replacements in total.
-- Consider only Phraser audios whose path contains the exact `comp-k` or
-  `comp-o` path component.
+- Consider only Phraser audios whose path contains both an exact `comp-k` or
+  `comp-o` component and the exact Netherlandic Dutch `nl` component.
 - Consider only phones with the requested exact label and a duration inside
   that label's hard-coded inclusive range from
   `notes/phone_duration_stats.md`.
@@ -30,7 +30,8 @@
 
 ### Tests
 
-- Filter only exact `comp-k` and `comp-o` path components.
+- Filter only exact `comp-k`/`comp-o` paths containing the exact `nl` language
+  component.
 - Enforce inclusive minimum and maximum duration bounds.
 - Exclude existing and repeated candidate keys.
 - Produce deterministic samples for a fixed seed.

@@ -50,16 +50,22 @@ def configure_small_inventory(monkeypatch, total, per_label, bounds):
     monkeypatch.setattr(fix_phone_duplicate, '_duration_bounds', bounds)
 
 
-def test_filter_component_audios_requires_exact_path_component():
-    comp_k = make_audio('/corpus/comp-k/speaker/one.wav')
-    comp_o = make_audio('corpus/comp-o/two.wav')
-    nested = make_audio('/comp-k/comp-o/three.wav')
-    similar = make_audio('/corpus/comp-k-extra/four.wav')
-    suffix = make_audio('/corpus/my-comp-o/five.wav')
-    wrong_case = make_audio('/corpus/comp-K/six.wav')
+def test_filter_component_audios_requires_component_and_nl_path():
+    comp_k = make_audio('/corpus/comp-k/nl/speaker/one.wav')
+    comp_o = make_audio('corpus/comp-o/nl/two.wav')
+    nested = make_audio('/comp-k/comp-o/nl/three.wav')
+    similar = make_audio('/corpus/comp-k-extra/nl/four.wav')
+    suffix = make_audio('/corpus/my-comp-o/nl/five.wav')
+    wrong_case = make_audio('/corpus/comp-K/nl/six.wav')
+    flemish = make_audio('/corpus/comp-k/vl/seven.wav')
+    language_variant = make_audio('/corpus/comp-o/nl-BE/eight.wav')
+    language_similar = make_audio('/corpus/comp-k/my-nl/nine.wav')
 
     result = fix_phone_duplicate.filter_component_audios(
-        [similar, comp_k, suffix, comp_o, wrong_case, nested],
+        [
+            similar, comp_k, suffix, comp_o, wrong_case, nested, flemish,
+            language_variant, language_similar,
+        ],
         show_progress=False,
     )
 
@@ -69,7 +75,7 @@ def test_filter_component_audios_requires_exact_path_component():
 def test_candidate_duration_bounds_are_inclusive(monkeypatch):
     configure_small_inventory(monkeypatch, 0, 0, {'a': (10, 20)})
     phones = SimpleNamespace(store=SimpleNamespace(audios=[make_audio(
-        '/corpus/comp-k/audio.wav',
+        '/corpus/comp-k/nl/audio.wav',
         [
             make_phraser_phone('a', make_key(1), end=9),
             make_phraser_phone('a', make_key(2), end=10),
@@ -94,11 +100,11 @@ def test_candidates_exclude_current_and_repeated_keys(monkeypatch):
     repeated_key = make_key(2)
     unique_key = make_key(3)
     phones = SimpleNamespace(store=SimpleNamespace(audios=[
-        make_audio('/corpus/comp-k/one.wav', [
+        make_audio('/corpus/comp-k/nl/one.wav', [
             make_phraser_phone('a', current_key),
             make_phraser_phone('a', repeated_key),
         ]),
-        make_audio('/corpus/comp-o/two.wav', [
+        make_audio('/corpus/comp-o/nl/two.wav', [
             make_phraser_phone('a', repeated_key),
             make_phraser_phone('a', unique_key),
         ]),
@@ -168,7 +174,7 @@ def test_collection_and_sampling_report_progress(monkeypatch):
     )
     phone = make_phraser_phone('a', make_key(1))
     phones = SimpleNamespace(store=SimpleNamespace(audios=[
-        make_audio('/corpus/comp-k/audio.wav', [phone]),
+        make_audio('/corpus/comp-k/nl/audio.wav', [phone]),
     ]))
 
     candidates = fix_phone_duplicate._collect_candidate_phones(
@@ -301,11 +307,11 @@ def test_save_writes_records_in_duplicate_metadata_order(
     replacement_a2 = make_key(11)
     replacement_b = make_key(12)
     phones = make_phones(tmp_path, current_keys, labels, [
-        make_audio('/corpus/comp-k/a.wav', [
+        make_audio('/corpus/comp-k/nl/a.wav', [
             make_phraser_phone('a', replacement_a1),
             make_phraser_phone('b', replacement_b),
         ]),
-        make_audio('/corpus/comp-o/b.wav', [
+        make_audio('/corpus/comp-o/nl/b.wav', [
             make_phraser_phone('a', replacement_a2),
         ]),
     ])
@@ -346,7 +352,7 @@ def test_save_validates_final_label_balance_before_writing(
         tmp_path,
         [current_key, current_key, make_key(2), make_key(3)],
         ['a', 'a', 'a', 'a'],
-        [make_audio('/corpus/comp-k/a.wav', [
+        [make_audio('/corpus/comp-k/nl/a.wav', [
             make_phraser_phone('a', make_key(10)),
         ])],
     )

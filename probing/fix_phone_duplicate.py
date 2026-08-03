@@ -18,6 +18,7 @@ _phraser_key_len = 22
 _phones_per_label = 13_500
 _total_phone_count = 418_500
 _components = {'comp-k', 'comp-o'}
+_language_component = 'nl'
 
 # Inclusive bounds in milliseconds, copied from
 # notes/phone_duration_stats.md. Only labels that need replacements are
@@ -65,7 +66,9 @@ def _load_replacement_counts(path):
 
 
 def _is_component_audio(audio):
-    return bool(_components.intersection(Path(audio.filename).parts))
+    parts = set(Path(audio.filename).parts)
+    has_component = bool(_components.intersection(parts))
+    return has_component and _language_component in parts
 
 
 def _show_progress(items, prefix, enabled):
@@ -75,7 +78,7 @@ def _show_progress(items, prefix, enabled):
 
 
 def filter_component_audios(audios, show_progress=True):
-    '''Return audios stored below the exact comp-k or comp-o component.'''
+    '''Return Netherlandic Dutch audios from exact comp-k/comp-o components.'''
     audios = _show_progress(
         audios, prefix='Filtering component audios: ', enabled=show_progress)
     return [audio for audio in audios if _is_component_audio(audio)]
