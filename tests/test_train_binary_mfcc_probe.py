@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 import sys
 
@@ -140,12 +141,13 @@ def test_load_mfcc_vectors_uses_center_frame_and_reports_missing():
 
 
 @pytest.mark.parametrize('standardize', [False, True])
-def test_train_binary_mfcc_probe_end_to_end(standardize):
+def test_train_binary_mfcc_probe_end_to_end(standardize, tmp_path):
     phones, store = _make_separable_dataset(np.random.default_rng(0))
 
     result = tbp.train_binary_mfcc_probe(
         phones, 'p', store=store, n_samples=30, standardize=standardize,
-        verbose=False, save_probes=False, save_predictions=False)
+        verbose=False, save_probes=False, save_predictions=False,
+        results_dir=tmp_path)
 
     assert result['representation'] == 'mfcc'
     assert result['frame'] == 'center'
@@ -154,6 +156,12 @@ def test_train_binary_mfcc_probe_end_to_end(standardize):
     assert result['mean_accuracy'] > .9
     probe_type = Pipeline if standardize else LogisticRegression
     assert all(isinstance(probe, probe_type) for probe in result['probes'])
+    results_path = Path(result['results_path'])
+    assert results_path.name == 'results.json'
+    saved = json.loads(results_path.read_text(encoding='utf-8'))
+    assert saved['kind'] == 'binary_mfcc_probe_results'
+    assert saved['results']['p']['mean_accuracy'] == result['mean_accuracy']
+    assert 'probes' not in saved['results']['p']
 
 
 def test_train_binary_mfcc_probe_scale_flag_changes_run_identity():
@@ -164,6 +172,7 @@ def test_train_binary_mfcc_probe_scale_flag_changes_run_identity():
         'verbose': False,
         'save_probes': False,
         'save_predictions': False,
+        'save_results': False,
     }
 
     raw = tbp.train_binary_mfcc_probe(
@@ -176,7 +185,7 @@ def test_train_binary_mfcc_probe_scale_flag_changes_run_identity():
     assert scaled['standardize'] is True
 
 
-def test_train_binary_mfcc_probes_trains_each_phraser_label():
+def test_train_binary_mfcc_probes_trains_each_phraser_label(tmp_path):
     phones, store = _make_separable_dataset(
         np.random.default_rng(0), n_target=30, n_other_each=30)
 
@@ -188,6 +197,8 @@ def test_train_binary_mfcc_probes_trains_each_phraser_label():
         verbose=False,
         save_probes=False,
         save_predictions=False,
+        probe_save_dir=tmp_path / 'probes',
+        results_dir=tmp_path,
     )
 
     assert list(results) == ['p', 't']
@@ -196,6 +207,13 @@ def test_train_binary_mfcc_probes_trains_each_phraser_label():
         for result in results.values()
     )
     assert len(store.load_many_frames_calls) == 2
+    results_path = tmp_path / 'mfcc' / 'mfcc_probe_results.json'
+    saved = json.loads(results_path.read_text(encoding='utf-8'))
+    assert saved['target_phonemes'] == ['p', 't']
+    assert set(saved['results']) == {'p', 't'}
+    assert {
+        result['results_path'] for result in results.values()
+    } == {str(results_path.resolve())}
 
 
 def test_train_binary_mfcc_probe_opens_default_store(monkeypatch):
@@ -209,7 +227,7 @@ def test_train_binary_mfcc_probe_opens_default_store(monkeypatch):
     monkeypatch.setattr(tbp.echoframe, 'Store', fake_store_constructor)
     tbp.train_binary_mfcc_probe(
         phones, 'p', n_samples=30, verbose=False, save_probes=False,
-        save_predictions=False)
+        save_predictions=False, save_results=False)
 
     assert opened_roots == [str(tbp.default_mfcc_store_root)]
     assert str(tbp.default_mfcc_store_root).endswith(
@@ -222,3 +240,13 @@ def test_train_binary_mfcc_probe_rejects_unknown_frame():
     with pytest.raises(ValueError, match='frame must be one of'):
         tbp.train_binary_mfcc_probe(
             phones, 'p', store=store, frame='middle')
+
+
+def test_save_mfcc_probe_results_rejects_mismatched_target(tmp_path):
+    result = {
+        'target_phoneme': 't',
+    }
+
+    with pytest.raises(ValueError, match='does not match'):
+        tbp.save_mfcc_probe_results(
+            {'p': result}, results_dir=tmp_path, verbose=False)

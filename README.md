@@ -487,12 +487,38 @@ checkout). The primary/default feature is the center frame of the current
 	from probing.train_binary_mfcc_probe import train_binary_mfcc_probe
 
 	result = train_binary_mfcc_probe(phones, target_phoneme='p')
+	result['mean_accuracy'], result['std_accuracy']
+	result['results_path']
 
 The MFCC equivalent for every label is:
 
 	from probing.train_binary_mfcc_probe import train_binary_mfcc_probes
 
 	results = train_binary_mfcc_probes(phones)
+
+Each single-target call atomically writes a JSON-safe `results.json` beside
+that run's fold predictions. The all-label trainer writes one consolidated
+`data/probe_results/mfcc/mfcc_probe_results.json` after every target has
+finished. Both files contain fold accuracies and aggregate metrics, but omit
+the fitted estimators already stored by the fold cache. Set
+`save_results=False` to disable these summary files, or pass `results_path`
+to the plural trainer to select the consolidated file location.
+
+Probe reports and saved MFCC summaries can be normalized and plotted through
+`probing.plot`:
+
+	from probing.plot import (
+	    collect_probe_accuracies,
+	    load_probe_report,
+	    plot_checkpoint_accuracy,
+	    plot_phone_checkpoint_heatmap,
+	)
+
+	report = load_probe_report(
+	    'data/phone_probes/phone_binary_probe_report.json')
+	records = collect_probe_accuracies(report)
+	plot_checkpoint_accuracy(records, layer=9)
+	plot_phone_checkpoint_heatmap(records, layer=9)
 
 Both plural trainers take their default target list from
 `phones.label_to_phraser_phone`. Before opening the feature store, they
