@@ -333,99 +333,40 @@ To train one binary embedding probe run for every Phraser phone label:
 
 	results = train_binary_embedding_probes(phones, layer=9)
 
-The recommended checkpoint sweep uses path-based subprocess workers, so it
-can be called without constructing a `Phones` object or supplying arguments:
+To train probes across the available wav2vec2 checkpoints:
 
 ```python
-from probing.phone_binary_probe import run_phone_binary_probe_sweep
+from probing.train_binary_embedding_probe import (
+    train_binary_embedding_probe_checkpoint_sweep,
+)
 
-report = run_phone_binary_probe_sweep()
+report = train_binary_embedding_probe_checkpoint_sweep(
+    phones,
+    overwrite=False,
+)
 ```
 
-The equivalent command-line call is:
+The sweep discovers `wav2vec2_checkpoint-0` and
+`wav2vec2_nl1_checkpoint-<step>` stores below
+`data/echoframe_model_stores`. It probes layers 1–12 for the random checkpoint
+and checkpoint 200000, and layer 9 for other checkpoints.
 
-```console
-python -m probing.phone_binary_probe sweep
-```
+The sweep runs sequentially in the current process. For each model and layer,
+it checks embedding metadata for every phone without loading embedding arrays.
+Incomplete inventories are skipped. Store, inventory-check, and training
+failures are recorded, and the sweep continues with the next model or layer.
+Each model-specific Echoframe store is closed before the next model is opened.
 
-The sweep discovers only `wav2vec2_checkpoint-0` and
-`wav2vec2_nl1_checkpoint-*` directories under
-`data/echoframe_model_stores`. It trains layers 1–12 for the random
-checkpoint and checkpoint 200000, and layer 9 for every other checkpoint.
-It launches one direct subprocess per phone/model/layer task; that worker
-handles all folds. `jobs=31` is the default concurrency limit, and any
-positive value can be supplied in Python or with `--jobs`:
+The returned report contains `runs`, `status_counts`, and `errors`. Completed
+runs contain compact per-phone metrics, including mean and standard-deviation
+accuracy, sample and missing counts, and cache status. The sweep does not write
+a consolidated embedding report; persist the returned dictionary explicitly
+when needed.
 
-```python
-report = run_phone_binary_probe_sweep(jobs=48, overwrite=False)
-```
-
-```console
-python -m probing.phone_binary_probe sweep --jobs 48 --overwrite
-```
-
-Before launching workers, the sweep completes a metadata preflight for all
-discovered stores and required layers. It shows one progress bar over model
-stores and another over the current store's metadata records. Results are
-atomically cached in
-`data/echoframe_model_stores/phone_binary_probe_metadata_status.json`.
-Matching complete records are reused; incomplete, failed, or stale records
-are checked again. Pass `force_metadata_check=True` or
-`--force-metadata-check` to ignore complete cached records as well. A
-standalone check is also available:
-
-```console
-python -m probing.phone_binary_probe check-metadata
-```
-
-Each worker writes isolated status and log files below a unique
-`/tmp/diphone-phone-probes-<run-id>/` directory. Its output is captured there
-while the parent reports finished/active/trained/already-complete/failed
-counts, elapsed time, and ETA. Failures include the task identity and log
-tail, do not stop later tasks, and are incorporated into the final report;
-the temporary directory is removed afterward.
-
-To run one task directly, provide its required phone, model, and layer; all
-paths retain the Netherlandic defaults:
-
-```console
-python -m probing.phone_binary_probe train \
-    --phone p --model-name wav2vec2_nl1_checkpoint-200000 --layer 9
-```
-
-The worker honors the existing run manifest and fold completion markers.
-Without `--overwrite`, a complete task is reported as already complete and a
-partial run trains only its missing or invalid folds. With `--overwrite`, all
-folds are retrained. Each process opens the Phraser database once and attaches
-that handle to its Echoframe store, avoiding a second open of the same LMDB in
-one process.
-
-The sweep atomically replaces
-`data/phone_probes/phone_binary_probe_report.json`. The same report can be
-rebuilt from the metadata cache and persisted probe artifacts without
-training or loading embeddings:
-
-```python
-from probing.phone_binary_probe import build_phone_binary_probe_report
-
-report = build_phone_binary_probe_report()
-```
-
-```console
-python -m probing.phone_binary_probe report
-```
-
-A successful or already-complete worker writes a settings-specific
-`selected_run_<hash>.json` pointer beside its run directories. Report-only
-mode follows that pointer, accepts one matching historical run when no
-pointer exists, and reports multiple pointerless matches as ambiguous. A
-custom `probe_save_dir` owns its own report and selected-run pointers.
-
-The older
-`train_binary_embedding_probe_checkpoint_sweep(Phones(), ...)` API remains
-available as a sequential, in-process lower-level alternative. The path-based
-subprocess sweep currently supports the Netherlandic phone inventory only;
-Flemish probe training is not included.
+Probe and prediction artifacts retain the run-manifest and per-fold cache
+behavior described below. A repeated sweep reuses valid completed folds unless
+`overwrite=True`. The caller owns the `Phones` object and its Phraser store and
+should close that store after the complete workflow.
 
 Sampling: the target phoneme gets `n_embeds` phones
 (default `None` - every available target-phoneme phone, not an arbitrary
@@ -503,22 +444,6 @@ finished. Both files contain fold accuracies and aggregate metrics, but omit
 the fitted estimators already stored by the fold cache. Set
 `save_results=False` to disable these summary files, or pass `results_path`
 to the plural trainer to select the consolidated file location.
-
-Probe reports and saved MFCC summaries can be normalized and plotted through
-`probing.plot`:
-
-	from probing.plot import (
-	    collect_probe_accuracies,
-	    load_probe_report,
-	    plot_checkpoint_accuracy,
-	    plot_phone_checkpoint_heatmap,
-	)
-
-	report = load_probe_report(
-	    'data/phone_probes/phone_binary_probe_report.json')
-	records = collect_probe_accuracies(report)
-	plot_checkpoint_accuracy(records, layer=9)
-	plot_phone_checkpoint_heatmap(records, layer=9)
 
 Both plural trainers take their default target list from
 `phones.label_to_phraser_phone`. Before opening the feature store, they
