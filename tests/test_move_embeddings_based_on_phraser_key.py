@@ -1,3 +1,4 @@
+import inspect
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -5,8 +6,10 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 from echoframe import EchoframeMetadata, Store
+from phraser import SEGMENT_KEY_LENGTH
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import locations
 from scripts import move_embeddings_based_on_phraser_key as mover
 
 
@@ -14,7 +17,7 @@ MODEL_NAME = 'wav2vec2_nl1_checkpoint-1000'
 
 
 def make_key(value):
-    return value.to_bytes(22, byteorder='big')
+    return value.to_bytes(SEGMENT_KEY_LENGTH, byteorder='big')
 
 
 def save_output(
@@ -238,7 +241,7 @@ def test_move_requires_a_new_destination_before_opening_source(
     ('keys', 'message'),
     [
         ([make_key(1), make_key(1)], 'globally unique'),
-        ([b'\x00' * 22], 'non-placeholder'),
+        ([bytes(SEGMENT_KEY_LENGTH)], 'non-placeholder'),
     ],
 )
 def test_move_rejects_invalid_key_lists_before_opening_a_store(
@@ -292,10 +295,13 @@ def test_load_flemish_keys_uses_the_binary_loader_and_validator(monkeypatch):
 
 
 def test_default_roots_are_the_dutch_and_flemish_model_store_roots():
-    assert mover.default_netherlandic_stores_root.name == (
-        'echoframe_model_stores')
-    assert mover.default_flemish_stores_root.name == (
-        'echoframe_model_flemish_stores')
+    move_parameters = inspect.signature(mover.move_flemish_data).parameters
+    assert (
+        move_parameters['netherlandic_root'].default
+        == locations.echoframe_model_stores)
+    assert (
+        move_parameters['flemish_root'].default
+        == locations.echoframe_model_flemish_stores)
 
 
 def test_source_discovery_and_destination_mapping_are_model_specific(

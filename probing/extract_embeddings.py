@@ -6,13 +6,8 @@ from urllib.parse import quote
 import echoframe
 from echoframe.batch_segment_features import compute_embeddings_batch
 
-from probing.metadata import _data_dir
+import locations
 
-default_model_paths_file = _data_dir / 'model_paths.json'
-default_store_root = _data_dir / 'echoframe_store'
-default_model_stores_root = _data_dir / 'echoframe_model_stores'
-default_flemish_model_stores_root = (
-    _data_dir / 'echoframe_model_flemish_stores')
 default_model_name = 'wav2vec2_nl1_checkpoint-200000'
 default_phraser_source_id = 'cgn-awd'
 
@@ -43,7 +38,7 @@ def _ensure_model_registered(store, model_name, model_paths_file):
     )
 
 
-def model_store_path(model_name, stores_root=default_model_stores_root):
+def model_store_path(model_name, stores_root=locations.echoframe_model_stores):
     '''Return the dedicated Echoframe store path for one model.'''
     if not isinstance(model_name, str) or not model_name.strip():
         raise ValueError('model_name must be a non-empty string')
@@ -53,8 +48,8 @@ def model_store_path(model_name, stores_root=default_model_stores_root):
 
 def open_model_store(
     model_name,
-    stores_root=default_model_stores_root,
-    model_paths_file=default_model_paths_file,
+    stores_root=locations.echoframe_model_stores,
+    model_paths_file=locations.model_paths_file,
     max_shard_size_bytes=100_000_000,
 ):
     '''Open or create and register the dedicated store for one model.'''
@@ -72,8 +67,8 @@ def extract_phone_embeddings(
     layers=[9],
     collar=2000,
     store=None,
-    store_root=default_store_root,
-    model_paths_file=default_model_paths_file,
+    store_root=locations.echoframe_store,
+    model_paths_file=locations.model_paths_file,
     phraser_source_id=default_phraser_source_id,
     gpu=False,
     batch_size=120,
@@ -135,8 +130,8 @@ def extract_phone_embeddings_for_models(
     model_names,
     layers=[9],
     collar=2000,
-    store_root=default_model_stores_root,
-    model_paths_file=default_model_paths_file,
+    store_root=locations.echoframe_model_stores,
+    model_paths_file=locations.model_paths_file,
     phraser_source_id=default_phraser_source_id,
     gpu=False,
     batch_size=120,
@@ -173,8 +168,8 @@ def extract_flemish_phone_embeddings_for_models(
     model_names,
     layers=[9],
     collar=2000,
-    store_root=default_flemish_model_stores_root,
-    model_paths_file=default_model_paths_file,
+    store_root=locations.echoframe_model_flemish_stores,
+    model_paths_file=locations.model_paths_file,
     phraser_source_id=default_phraser_source_id,
     gpu=False,
     batch_size=120,

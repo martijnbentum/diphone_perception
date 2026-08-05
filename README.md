@@ -269,6 +269,13 @@ from the store cache and CUDA memory before the next model is loaded:
 Probe functions can open the matching checkpoint store by passing
 `store_root=model_store_path(model_name)`.
 
+Embedding extraction is incremental at the model / phone / layer level.
+`compute_embeddings_batch` checks the requested store before inference, keeps
+existing phone-layer outputs, and computes only missing outputs. Repeating a
+single-model or multi-model extraction therefore fills missing embeddings
+without recomputing outputs already present under the same model, layer, and
+collar settings.
+
 The Flemish inventory has a parallel multi-model entry point whose stores
 default to `data/echoframe_model_flemish_stores` while retaining the
 `cgn-awd` Phraser source ID:
@@ -363,10 +370,11 @@ accuracy, sample and missing counts, and cache status. The sweep does not write
 a consolidated embedding report; persist the returned dictionary explicitly
 when needed.
 
-Probe and prediction artifacts retain the run-manifest and per-fold cache
-behavior described below. A repeated sweep reuses valid completed folds unless
-`overwrite=True`. The caller owns the `Phones` object and its Phraser store and
-should close that store after the complete workflow.
+Probe and prediction artifacts retain the run-manifest cache behavior described
+below. A repeated sweep reuses complete target-phoneme runs independently for
+each model and layer unless `overwrite=True`. The caller owns the `Phones`
+object and its Phraser store and should close that store after the complete
+workflow.
 
 Sampling: the target phoneme gets `n_embeds` phones
 (default `None` - every available target-phoneme phone, not an arbitrary
@@ -391,25 +399,34 @@ replacements.
 fitted probe / per-example predictions under `probe_save_dir`
 (`data/phone_probes`) / `results_dir` (`data/probe_results`).
 
-Skip / overwrite / gap-filling: before (re)training a fold, its probe and
-predictions are looked up under a hashed run manifest. Its identity includes
-the model, target, layer, collar, sampling and split settings, selected phone
-keys and labels, available echoframe metadata, and classifier settings. A
-500ms run therefore cannot satisfy a 2000ms request, and changing the data
-or training settings creates a separate run.
+Skip / overwrite / cache reuse: probes and predictions are stored under a
+hashed run manifest. Its identity includes the model, target, layer, collar,
+sampling and split settings, selected phone keys and labels, available
+echoframe metadata, and classifier settings. A 500ms run therefore cannot
+satisfy a 2000ms request, and changing the data or training settings creates a
+separate run.
 
-Each fold is reusable only when its completion marker exists and the probe
-and predictions checksums match. Artifacts are replaced atomically and the
-marker is written last, so an interrupted write is retrained rather than
-trusted. A partially complete run reuses valid folds and fills its gaps.
-Pass `overwrite=True` to retrain every fold. Reuse only runs when both save
-flags are `True`; otherwise every fold trains normally.
+A target-phoneme run is reusable only when every fold has a completion marker
+and matching probe and prediction checksums. Artifacts are replaced atomically
+and each marker is written after its artifacts. If any fold is missing or
+invalid, the complete target-phoneme run is retrained; valid folds from that
+incomplete run are not reused. Pass `overwrite=True` to retrain even a complete
+run. Reuse only runs when both save flags are `True`; otherwise every fold
+trains normally.
+
+The plural target trainer and checkpoint sweep still resume at their outer
+boundaries. Within each model/layer combination, complete target-phoneme runs
+are reused and targets without a complete run are trained again. Every
+model/layer combination is reconsidered on the next sweep. An incomplete
+embedding inventory is skipped by the probe sweep rather than filled there;
+rerun embedding extraction to fill missing phone-layer outputs, then rerun the
+sweep.
 
 The returned dict's `probes`/`accuracies` are always in memory regardless
 of the save settings; `result['skipped']` is `True` only when the whole
 call was served from disk without loading embedding payloads. `run_id`
-identifies the manifest, while `cache_status` is `hit`, `partial`, `miss`,
-`refresh`, or `disabled`.
+identifies the manifest, while `cache_status` is `hit`, `miss`, `refresh`, or
+`disabled`.
 
 Probe training raises if multiple metadata phones have the same Phraser key.
 It does not deduplicate them, because deciding which metadata row is correct
@@ -473,10 +490,12 @@ The recommendation threshold can be changed with `std_ratio_threshold`.
 
 e) Shared probe utilities
 
-`probe_utils.py` contains the representation-independent sampling,
-cross-validation, fold-local scaling, cache, persistence, and scale-inspection
-code. Representation-specific key construction and feature loading stay in
-their two trainer modules.
+The shared code is divided by responsibility: `probe_utils.py` contains
+sampling, sweep progress, validation, and scale inspection;
+`probe_training.py` contains cross-validation and fold-local scaling; and
+`probe_run.py` contains run identity, cache validation, and persistence.
+Representation-specific key construction and feature loading stay in their two
+trainer modules.
 
 f) Import convention
 

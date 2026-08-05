@@ -4,12 +4,9 @@ from pathlib import Path
 import echoframe
 import numpy as np
 
-from probing import probe_utils
-from probing.extract_mfcc import default_store_root
+import locations
+from probing import probe_run, probe_training, probe_utils
 
-default_probe_save_dir = probe_utils.default_probe_save_dir
-default_results_dir = probe_utils.default_results_dir
-default_mfcc_store_root = default_store_root
 _frame_modes = {'center', 'mean', 'first', 'last'}
 _mfcc_results_schema_version = 1
 _mfcc_results_filename = 'mfcc_probe_results.json'
@@ -93,14 +90,14 @@ def save_mfcc_probe_results(
     results,
     *,
     output_path=None,
-    results_dir=default_results_dir,
+    results_dir=locations.probe_results,
     frame='center',
     n_samples=None,
     n_splits=5,
     random_state=42,
     standardize=False,
     save_probes=True,
-    probe_save_dir=default_probe_save_dir,
+    probe_save_dir=locations.phone_probes,
     save_predictions=True,
     overwrite=False,
     verbose=True,
@@ -123,7 +120,7 @@ def save_mfcc_probe_results(
         if not isinstance(value, bool):
             raise TypeError(f'{name} must be a boolean')
     _validate_frame(frame)
-    probe_utils.validate_probe_arguments(n_splits, standardize)
+    probe_training.validate_training_options(n_splits, standardize)
     compact_results = {
         target: _compact_mfcc_probe_result(target, result)
         for target, result in results.items()
@@ -162,7 +159,7 @@ def save_mfcc_probe_results(
         'target_phonemes': list(compact_results),
         'results': compact_results,
     }
-    probe_utils._write_json(output_path, report)
+    probe_run.write_json(output_path, report)
     if verbose:
         print(
             f'MFCC probe results: {len(compact_results)} target(s); '
@@ -176,16 +173,16 @@ def train_binary_mfcc_probe(
     phones,
     target_phoneme,
     store=None,
-    store_root=default_mfcc_store_root,
+    store_root=locations.echoframe_mfcc_store,
     frame='center',
     n_samples=None,
     n_splits=5,
     random_state=42,
     standardize=False,
     save_probes=True,
-    probe_save_dir=default_probe_save_dir,
+    probe_save_dir=locations.phone_probes,
     save_predictions=True,
-    results_dir=default_results_dir,
+    results_dir=locations.probe_results,
     save_results=True,
     overwrite=False,
     verbose=True,
@@ -199,7 +196,7 @@ def train_binary_mfcc_probe(
     training fold through an sklearn Pipeline.
     '''
     probe_utils.validate_target_phoneme(target_phoneme)
-    probe_utils.validate_probe_arguments(n_splits, standardize)
+    probe_training.validate_training_options(n_splits, standardize)
     if not isinstance(save_results, bool):
         raise TypeError('save_results must be a boolean')
     _validate_frame(frame)
@@ -215,10 +212,10 @@ def train_binary_mfcc_probe(
         'frame': frame,
         'dimensions': '13 static + 13 delta + 13 delta-delta',
     }
-    manifest = probe_utils.build_probe_run_manifest(
+    manifest = probe_run.build_probe_run_manifest(
         store, selected, echoframe_keys, 'mfcc', feature_parameters,
         target_phoneme, n_samples, n_splits, random_state, standardize)
-    run_id = probe_utils.hash_run_manifest(manifest)
+    run_id = probe_run.hash_run_manifest(manifest)
     probe_run_directory = _run_directory(
         probe_save_dir, target_phoneme, frame, run_id)
     predictions_run_directory = _run_directory(
@@ -233,7 +230,7 @@ def train_binary_mfcc_probe(
         'feature_name': 'mfcc',
         'frame': frame,
     }
-    result = probe_utils.run_binary_probe(
+    result = probe_run.run(
         load_vectors=load_vectors,
         manifest=manifest,
         probe_run_directory=probe_run_directory,
@@ -273,16 +270,16 @@ def train_binary_mfcc_probes(
     phones,
     target_phonemes=None,
     store=None,
-    store_root=default_mfcc_store_root,
+    store_root=locations.echoframe_mfcc_store,
     frame='center',
     n_samples=None,
     n_splits=5,
     random_state=42,
     standardize=False,
     save_probes=True,
-    probe_save_dir=default_probe_save_dir,
+    probe_save_dir=locations.phone_probes,
     save_predictions=True,
-    results_dir=default_results_dir,
+    results_dir=locations.probe_results,
     save_results=True,
     results_path=None,
     overwrite=False,
@@ -294,7 +291,7 @@ def train_binary_mfcc_probes(
     phones.label_to_phraser_phone are used. The Phraser label inventory
     must contain exactly the same number of items for every label.
     '''
-    probe_utils.validate_probe_arguments(n_splits, standardize)
+    probe_training.validate_training_options(n_splits, standardize)
     if not isinstance(save_results, bool):
         raise TypeError('save_results must be a boolean')
     _validate_frame(frame)

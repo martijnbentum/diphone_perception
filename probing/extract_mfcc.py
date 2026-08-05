@@ -2,9 +2,8 @@ import echoframe
 from echoframe.acoustic_features import store_mfcc_batch
 from phraser.audio.batch import mfcc_batch
 
-from probing.metadata import _data_dir
+import locations
 
-default_store_root = _data_dir / 'echoframe_mfcc_store'
 default_phraser_source_id = 'cgn-awd'
 
 
@@ -56,7 +55,7 @@ def _missing_mfcc_segments(segments, store):
 def extract_phone_mfcc(
     phones,
     store=None,
-    store_root=default_store_root,
+    store_root=locations.echoframe_mfcc_store,
     phraser_source_id=default_phraser_source_id,
     workers=None,
     recordings_per_batch=30,

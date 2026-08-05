@@ -1,6 +1,29 @@
 from pathlib import Path
 
 base = Path(__file__).resolve().parent.parent
+data = base / 'data'
+
+metadata_file = data / 'metadata.csv'
+sentence_file = data / 'news_books_sentences_zs.tsv'
+phraser_key_file = data / 'phraser_phone_keys.bin'
+duplicate_replacement_phraser_key_file = (
+    data / 'duplicate_replacement_phraser_phone_keys.bin')
+flemish_phraser_phone_key_file = data / 'flemish_phraser_phone_keys.bin'
+duplicate_phone_counts_file = data / 'duplicate_phone_counts.json'
+model_paths_file = data / 'model_paths.json'
+
+echoframe_store = data / 'echoframe_store'
+echoframe_mfcc_store = data / 'echoframe_mfcc_store'
+echoframe_model_stores = data / 'echoframe_model_stores'
+echoframe_model_flemish_stores = data / 'echoframe_model_flemish_stores'
+phone_probes = data / 'phone_probes'
+probe_results = data / 'probe_results'
+
+wav2vec2_random_checkpoint_name = 'wav2vec2_checkpoint-0'
+wav2vec2_nl1_checkpoint_pattern = r'^wav2vec2_nl1_checkpoint-(\d+)$'
+wav2vec2_all_layer_checkpoint_names = {
+    wav2vec2_random_checkpoint_name, 'wav2vec2_nl1_checkpoint-200000'}
+wav2vec2_all_probe_layers = tuple(range(1, 13))
 
 original = base / 'original'
 gated = base / 'gated'
@@ -16,6 +39,7 @@ gate_timestamps = base / 'tone_timestamps.csv'
 model_responses = Path('model_responses')
 
 cgn = Path('/vol/bigdata/corpora2/CGN2/')
+cgn_lmdb = Path('/vol/mlusers/mbentum/phraser/data/cgn_awd_lmdb')
 
 st_phonetics= Path('/vol/mlusers/mbentum/st_phonetics/')
 news_books_cgn_sentences = st_phonetics / 'news_books_sentences_zs.tsv'

@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import locations
 from probing import extract_embeddings
 
 
@@ -357,15 +358,15 @@ def test_extract_phone_embeddings_for_models_rejects_string_model_names():
 # -- Flemish embedding extraction ------------------------------------------
 
 def test_flemish_model_store_root_and_batch_defaults():
-    assert (
-        extract_embeddings.default_flemish_model_stores_root
-        == extract_embeddings._data_dir / 'echoframe_model_flemish_stores'
-    )
+    store_root_default = inspect.signature(
+        extract_embeddings.extract_flemish_phone_embeddings_for_models,
+    ).parameters['store_root'].default
+    assert store_root_default == locations.echoframe_model_flemish_stores
     assert extract_embeddings.model_store_path(
         'owner/model',
-        extract_embeddings.default_flemish_model_stores_root,
+        locations.echoframe_model_flemish_stores,
     ) == (
-        extract_embeddings.default_flemish_model_stores_root
+        locations.echoframe_model_flemish_stores
         / 'owner%2Fmodel'
     )
     functions = (

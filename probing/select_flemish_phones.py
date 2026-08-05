@@ -1,15 +1,11 @@
 import random
 from pathlib import Path
 
+from phraser import SEGMENT_KEY_LENGTH
 from progressbar import progressbar
 
+import locations
 
-_data_dir = Path(__file__).resolve().parent.parent.parent / 'data'
-flemish_phraser_phone_key_file = (
-    _data_dir / 'flemish_phraser_phone_keys.bin'
-)
-
-_phraser_key_len = 22
 _components = {'comp-k', 'comp-o'}
 _language_component = 'vl'
 
@@ -82,9 +78,9 @@ def filter_flemish_audios(audios, show_progress=True):
 
 
 def _valid_key(key, description):
-    if not isinstance(key, bytes) or len(key) != _phraser_key_len:
+    if not isinstance(key, bytes) or len(key) != SEGMENT_KEY_LENGTH:
         raise ValueError(
-            f'{description} must be a {_phraser_key_len}-byte value'
+            f'{description} must be a {SEGMENT_KEY_LENGTH}-byte value'
         )
 
 
@@ -179,7 +175,7 @@ def _validate_selected_keys(selected):
 
 def save_flemish_phraser_phone_keys(
     store,
-    path=flemish_phraser_phone_key_file,
+    path=locations.flemish_phraser_phone_key_file,
     seed=42,
     overwrite=False,
     show_progress=True,

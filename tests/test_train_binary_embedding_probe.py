@@ -9,7 +9,7 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import Pipeline
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from probing import probe_utils
+from probing import probe_run, probe_utils
 from probing import train_binary_embedding_probe as tbp
 
 
@@ -319,11 +319,12 @@ def _make_separable_dataset(rng, n_target, n_other_each, other_labels, dim=4):
 
 
 def _fold_paths(probe_dir, results_dir, result, fold_idx):
-    probe_run = tbp._run_directory(
+    probe_run_directory = tbp._run_directory(
         probe_dir, 'model-a', 'p', 9, result['collar'], result['run_id'])
-    predictions_run = tbp._run_directory(
+    predictions_run_directory = tbp._run_directory(
         results_dir, 'model-a', 'p', 9, result['collar'], result['run_id'])
-    return probe_utils.fold_paths(probe_run, predictions_run, fold_idx)
+    return probe_run.fold_paths(probe_run_directory,
+        predictions_run_directory, fold_idx)
 
 
 def test_train_binary_embedding_probe_end_to_end():
@@ -831,7 +832,9 @@ def test_train_binary_embedding_probe_overwrite_forces_retrain(tmp_path):
     assert len(store.phraser_keys_to_embeddings_calls) == calls_after_first + 1
 
 
-def test_train_binary_embedding_probe_fills_gaps_for_partially_saved_folds(tmp_path):
+def test_train_binary_embedding_probe_retrains_all_partially_saved_folds(
+    tmp_path,
+):
     rng = np.random.default_rng(0)
     phones, store = _make_separable_dataset(
         rng, n_target=30, n_other_each=15, other_labels=['a', 't'])
@@ -843,13 +846,13 @@ def test_train_binary_embedding_probe_fills_gaps_for_partially_saved_folds(tmp_p
         probe_save_dir=probe_dir, results_dir=results_dir)
 
     # Make fold 0 distinguishable, while preserving its valid completion
-    # marker, then remove the other four folds to create a partial run.
+    # marker, then remove the other four folds to create an incomplete run.
     probe_path, _, marker_path = _fold_paths(
         probe_dir, results_dir, first, 0)
     joblib.dump(_Marker('fold0-stub'), probe_path)
-    marker = probe_utils._read_json(marker_path)
-    marker['probe_sha256'] = probe_utils._sha256_file(probe_path)
-    probe_utils._write_json(marker_path, marker)
+    marker = probe_run.read_json(marker_path)
+    marker['probe_sha256'] = probe_run._sha256_file(probe_path)
+    probe_run.write_json(marker_path, marker)
     for fold_idx in range(1, 5):
         for path in _fold_paths(probe_dir, results_dir, first, fold_idx):
             path.unlink()
@@ -860,12 +863,10 @@ def test_train_binary_embedding_probe_fills_gaps_for_partially_saved_folds(tmp_p
         probe_save_dir=probe_dir, results_dir=results_dir)
 
     assert result['skipped'] is False
-    assert result['cache_status'] == 'partial'
-    assert result['probes'][0].tag == 'fold0-stub'  # reused, not retrained
-    for probe in result['probes'][1:]:
-        assert isinstance(probe, LogisticRegression)  # freshly trained
-    # the other 4 folds got written to disk this run
-    for fold_idx in range(1, 5):
+    assert result['cache_status'] == 'miss'
+    assert all(
+        isinstance(probe, LogisticRegression) for probe in result['probes'])
+    for fold_idx in range(5):
         assert all(path.exists() for path in _fold_paths(
             probe_dir, results_dir, first, fold_idx))
 
@@ -882,7 +883,7 @@ def test_train_binary_embedding_probe_retrains_fold_with_orphaned_probe_file(tmp
         probe_save_dir=probe_dir, results_dir=results_dir)
 
     # Fold 0 has a leftover probe but neither predictions nor a completion
-    # marker, so it must be retrained while the other folds remain reusable.
+    # marker, so the incomplete run must be retrained in full.
     probe_path, pred_path, marker_path = _fold_paths(
         probe_dir, results_dir, first, 0)
     joblib.dump(_Marker('orphan'), probe_path)
@@ -895,7 +896,7 @@ def test_train_binary_embedding_probe_retrains_fold_with_orphaned_probe_file(tmp
         probe_save_dir=probe_dir, results_dir=results_dir)
 
     assert isinstance(result['probes'][0], LogisticRegression)  # not the orphan
-    assert result['cache_status'] == 'partial'
+    assert result['cache_status'] == 'miss'
     assert pred_path.exists()
     assert marker_path.exists()
 
@@ -919,14 +920,14 @@ def test_train_binary_embedding_probe_retrains_fold_with_bad_checksum(tmp_path):
         n_embeds=30, n_splits=5, random_state=42, verbose=False,
         probe_save_dir=probe_dir, results_dir=results_dir)
 
-    assert result['cache_status'] == 'partial'
-    assert probe_utils._load_cached_fold(
+    assert result['cache_status'] == 'miss'
+    assert probe_run._load_cached_fold(
         _fold_paths(probe_dir, results_dir, result, 0),
         result['run_id'], 0) is not None
-    marker = probe_utils._read_json(marker_path)
+    marker = probe_run.read_json(marker_path)
     assert (
         marker['predictions_sha256']
-        == probe_utils._sha256_file(pred_path)
+        == probe_run._sha256_file(pred_path)
     )
 
 
@@ -944,7 +945,7 @@ def test_failed_overwrite_invalidates_completion_marker(tmp_path, monkeypatch):
     def fail_to_save(*args):
         raise RuntimeError('interrupted prediction write')
 
-    monkeypatch.setattr(probe_utils, '_save_predictions', fail_to_save)
+    monkeypatch.setattr(probe_run, '_save_predictions', fail_to_save)
     with pytest.raises(RuntimeError, match='interrupted'):
         tbp.train_binary_embedding_probe(
             phones, 'p', store=store, model_name='model-a', layer=9,
@@ -952,7 +953,7 @@ def test_failed_overwrite_invalidates_completion_marker(tmp_path, monkeypatch):
             probe_save_dir=probe_dir, results_dir=results_dir, overwrite=True)
 
     assert not paths[2].exists()
-    assert probe_utils._load_cached_fold(
+    assert probe_run._load_cached_fold(
         paths, first['run_id'], 0) is None
 
 

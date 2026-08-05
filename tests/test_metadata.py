@@ -1,14 +1,13 @@
-import sys
 import warnings
 from collections import Counter
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 from phone_mapper import cgn
+from phraser import SEGMENT_KEY_LENGTH
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'probing'))
-import metadata
+import locations
+from probing import metadata
 
 
 def make_sentence_row(**overrides):
@@ -231,11 +230,11 @@ class StubBulkStore(StubStore):
 
 
 def make_phraser_key(value):
-    return value.to_bytes(22, byteorder='big')
+    return value.to_bytes(SEGMENT_KEY_LENGTH, byteorder='big')
 
 
 def write_phraser_keys(path, keys):
-    placeholder = bytes(22)
+    placeholder = bytes(SEGMENT_KEY_LENGTH)
     path.write_bytes(b''.join(
         placeholder if key is None else key for key in keys))
 
@@ -368,9 +367,15 @@ def test_phraser_phone_raises_without_store_or_parent():
 # -- FlemishPhones ---------------------------------------------------------
 
 def configure_small_flemish_inventory(monkeypatch):
-    monkeypatch.setattr(metadata, 'flemish_phone_labels', ('d', 'f'))
-    monkeypatch.setattr(metadata, 'flemish_phones_per_label', 2)
-    monkeypatch.setattr(metadata, 'flemish_phone_count', 4)
+    monkeypatch.setattr(
+        metadata.select_flemish_phones,
+        'flemish_phone_labels',
+        ('d', 'f'),
+    )
+    monkeypatch.setattr(
+        metadata.select_flemish_phones, 'flemish_phones_per_label', 2)
+    monkeypatch.setattr(
+        metadata.select_flemish_phones, 'flemish_phone_count', 4)
 
 
 def make_flemish_inventory(labels=('d', 'd', 'f', 'f')):
@@ -383,7 +388,7 @@ def make_flemish_inventory(labels=('d', 'd', 'f', 'f')):
 def test_flemish_phones_defaults_to_selected_key_file():
     phones = metadata.FlemishPhones(store='unused')
 
-    assert phones.phraser_key_path == metadata.flemish_phraser_phone_key_file
+    assert phones.phraser_key_path == locations.flemish_phraser_phone_key_file
 
 
 def test_flemish_phones_store_lazy_loads_cgn(monkeypatch):
@@ -612,7 +617,7 @@ def test_phones_phoneme_counts(tmp_path):
 def test_phones_store_lazy_loads_cgn(monkeypatch):
     calls = {'n': 0}
 
-    def fake_load_cgn(path=metadata.cgn_lmdb):
+    def fake_load_cgn(path=locations.cgn_lmdb):
         calls['n'] += 1
         return 'cgn-store'
 
@@ -633,8 +638,8 @@ def test_phones_save_and_load_phraser_keys_roundtrip(tmp_path):
         path=metadata_path, sentence_path=sentence_path, phraser_key_path=key_path)
     d_phone, e_phone, f_phone = phones_obj.phones
 
-    d_key = b'\x01' * 22
-    e_key = b'\x02' * 22
+    d_key = b'\x01' * SEGMENT_KEY_LENGTH
+    e_key = b'\x02' * SEGMENT_KEY_LENGTH
     stub_audio = StubAudio([
         StubPhraserPhone('d', d_phone.start, d_phone.end, d_key),
         StubPhraserPhone(e_ipa, e_phone.start, e_phone.end, e_key),
@@ -660,8 +665,14 @@ def test_phones_phraser_phones_raises_when_incomplete(tmp_path):
     d_phone, e_phone, f_phone = phones_obj.phones
 
     stub_audio = StubAudio([
-        StubPhraserPhone('d', d_phone.start, d_phone.end, b'\x01' * 22),
-        StubPhraserPhone(e_ipa, e_phone.start, e_phone.end, b'\x02' * 22),
+        StubPhraserPhone(
+            'd', d_phone.start, d_phone.end,
+            b'\x01' * SEGMENT_KEY_LENGTH,
+        ),
+        StubPhraserPhone(
+            e_ipa, e_phone.start, e_phone.end,
+            b'\x02' * SEGMENT_KEY_LENGTH,
+        ),
         # deliberately no stub phone for 'f' -> phraser_phones must raise
     ])
     phones_obj._store = StubBulkStore(stub_audio)
@@ -681,9 +692,9 @@ def test_phones_phraser_phones_builds_then_reuses_key_file(tmp_path):
         path=metadata_path, sentence_path=sentence_path, phraser_key_path=key_path)
     d_phone, e_phone, f_phone = phones_obj.phones
 
-    d_key = b'\x01' * 22
-    e_key = b'\x02' * 22
-    f_key = b'\x03' * 22
+    d_key = b'\x01' * SEGMENT_KEY_LENGTH
+    e_key = b'\x02' * SEGMENT_KEY_LENGTH
+    f_key = b'\x03' * SEGMENT_KEY_LENGTH
     stub_audio = StubAudio([
         StubPhraserPhone('d', d_phone.start, d_phone.end, d_key),
         StubPhraserPhone(e_ipa, e_phone.start, e_phone.end, e_key),
@@ -800,7 +811,7 @@ def test_custom_key_path_does_not_use_default_replacement_history(
     write_phraser_keys(key_path, [duplicate_key, duplicate_key])
     write_phraser_keys(default_replacement_path, [replacement_key])
     monkeypatch.setattr(
-        metadata, 'duplicate_replacement_phraser_key_file',
+        locations, 'duplicate_replacement_phraser_key_file',
         default_replacement_path,
     )
 
@@ -998,9 +1009,9 @@ def test_phones_label_to_phraser_phone_groups_by_label(tmp_path):
         path=metadata_path, sentence_path=sentence_path, phraser_key_path=key_path)
     d_phone, e_phone, f_phone = phones_obj.phones
 
-    d_key = b'\x01' * 22
-    e_key = b'\x02' * 22
-    f_key = b'\x03' * 22
+    d_key = b'\x01' * SEGMENT_KEY_LENGTH
+    e_key = b'\x02' * SEGMENT_KEY_LENGTH
+    f_key = b'\x03' * SEGMENT_KEY_LENGTH
     stub_audio = StubAudio([
         StubPhraserPhone('d', d_phone.start, d_phone.end, d_key),
         StubPhraserPhone(e_ipa, e_phone.start, e_phone.end, e_key),

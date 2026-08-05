@@ -1,8 +1,11 @@
+import inspect
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from phraser import SEGMENT_KEY_LENGTH
 
+import locations
 from probing import select_flemish_phones
 
 
@@ -38,7 +41,7 @@ def configure_small_inventory(
 
 def read_keys(path):
     data = path.read_bytes()
-    size = select_flemish_phones._phraser_key_len
+    size = SEGMENT_KEY_LENGTH
     assert len(data) % size == 0
     return [
         data[index:index + size]
@@ -58,10 +61,10 @@ def test_default_path_labels_and_duration_bounds_are_complete():
     assert select_flemish_phones._duration_bounds['ə'] == (46, 1077)
     assert select_flemish_phones.flemish_phones_per_label == 5_000
     assert select_flemish_phones.flemish_phone_count == 155_000
-    assert (
-        select_flemish_phones.flemish_phraser_phone_key_file.name
-        == 'flemish_phraser_phone_keys.bin'
-    )
+    path_default = inspect.signature(
+        select_flemish_phones.save_flemish_phraser_phone_keys,
+    ).parameters['path'].default
+    assert path_default == locations.flemish_phraser_phone_key_file
 
 
 def test_filter_flemish_audios_requires_component_and_vl_path():

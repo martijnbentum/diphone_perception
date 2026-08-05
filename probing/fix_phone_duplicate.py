@@ -3,18 +3,13 @@ import random
 from collections import Counter
 from pathlib import Path
 
+from phraser import SEGMENT_KEY_LENGTH
 from progressbar import progressbar
 
+import locations
 from probing.metadata import load_phraser_keys
 
 
-_data_dir = Path(__file__).resolve().parent.parent.parent / 'data'
-duplicate_phone_counts_file = _data_dir / 'duplicate_phone_counts.json'
-duplicate_replacement_phraser_phone_key_file = (
-    _data_dir / 'duplicate_replacement_phraser_phone_keys.bin'
-)
-
-_phraser_key_len = 22
 _phones_per_label = 13_500
 _total_phone_count = 418_500
 _components = {'comp-k', 'comp-o'}
@@ -85,9 +80,9 @@ def filter_component_audios(audios, show_progress=True):
 
 
 def _valid_key(key, description):
-    if not isinstance(key, bytes) or len(key) != _phraser_key_len:
+    if not isinstance(key, bytes) or len(key) != SEGMENT_KEY_LENGTH:
         raise ValueError(
-            f'{description} must be a {_phraser_key_len}-byte value'
+            f'{description} must be a {SEGMENT_KEY_LENGTH}-byte value'
         )
 
 
@@ -219,8 +214,8 @@ def _validate_final_keys(current_keys, metadata_phones, duplicates,
 
 def save_duplicate_replacement_phraser_keys(
     phones,
-    path=duplicate_replacement_phraser_phone_key_file,
-    counts_path=duplicate_phone_counts_file,
+    path=locations.duplicate_replacement_phraser_key_file,
+    counts_path=locations.duplicate_phone_counts_file,
     seed=42,
     overwrite=False,
     show_progress=True,

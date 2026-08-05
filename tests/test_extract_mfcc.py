@@ -1,9 +1,11 @@
+import inspect
 import sys
 from pathlib import Path
 
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import locations
 from probing import extract_mfcc
 
 
@@ -27,6 +29,14 @@ class FakeStore:
             if metadata is not None or keep_missing:
                 metadatas.append(metadata)
         return metadatas
+
+
+def test_default_store_root_uses_locations():
+    store_root = inspect.signature(
+        extract_mfcc.extract_phone_mfcc,
+    ).parameters['store_root'].default
+
+    assert store_root == locations.echoframe_mfcc_store
 
 
 class FakeAudio:

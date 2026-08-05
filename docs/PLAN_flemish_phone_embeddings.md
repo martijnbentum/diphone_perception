@@ -33,8 +33,8 @@
 
 ### Requirements
 
-- Add `default_flemish_model_stores_root` at
-  `data/echoframe_model_flemish_stores`.
+- Use `locations.echoframe_model_flemish_stores` at
+  `data/echoframe_model_flemish_stores` as the default store root.
 - Add `extract_flemish_phone_embeddings_for_models(...)`, mirroring
   `extract_phone_embeddings_for_models(...)` and accepting a `FlemishPhones`
   instance.

@@ -6,21 +6,15 @@ from pathlib import Path
 
 import numpy as np
 from echoframe import EchoframeMetadata, Store
+from phraser import SEGMENT_KEY_LENGTH
 from progressbar import (
     Bar, ETA, Percentage, ProgressBar, SimpleProgress, Variable,
 )
 
+import locations
 from probing import metadata
-from probing.extract_embeddings import (
-    default_flemish_model_stores_root,
-    default_model_stores_root,
-)
 
 
-default_netherlandic_stores_root = default_model_stores_root
-default_flemish_stores_root = default_flemish_model_stores_root
-default_flemish_phraser_key_path = (
-    metadata.flemish_phraser_phone_key_file)
 default_batch_size = 100
 _source_verification_batch_size = 10_000
 
@@ -65,17 +59,18 @@ def _validate_phraser_keys(phraser_keys):
         raise TypeError('phraser_keys must be a list')
     if not phraser_keys:
         raise ValueError('phraser_keys must not be empty')
+    placeholder = bytes(SEGMENT_KEY_LENGTH)
     invalid = [
         index for index, key in enumerate(phraser_keys)
         if not isinstance(key, bytes)
-        or len(key) != metadata._phraser_key_len
-        or key == metadata._phraser_key_placeholder
+        or len(key) != SEGMENT_KEY_LENGTH
+        or key == placeholder
     ]
     if invalid:
         examples = ', '.join(map(str, invalid[:5]))
         raise ValueError(
             'every Phraser key must be a non-placeholder '
-            f'{metadata._phraser_key_len}-byte value; invalid indices: '
+            f'{SEGMENT_KEY_LENGTH}-byte value; invalid indices: '
             f'{examples}')
     if len(set(phraser_keys)) != len(phraser_keys):
         raise ValueError('phraser_keys must be globally unique')
@@ -83,7 +78,7 @@ def _validate_phraser_keys(phraser_keys):
 
 
 def load_flemish_phraser_keys(
-    path=default_flemish_phraser_key_path,
+    path=locations.flemish_phraser_phone_key_file,
 ):
     '''Load and validate the selected Flemish Phraser-key inventory.'''
     keys = metadata.load_phraser_keys(path)
@@ -92,7 +87,7 @@ def load_flemish_phraser_keys(
 
 
 def netherlandic_source_paths(
-    root=default_netherlandic_stores_root,
+    root=locations.echoframe_model_stores,
 ):
     '''Return every model-specific store directory below the Dutch root.'''
     root = _resolved_path(root)
@@ -107,7 +102,7 @@ def netherlandic_source_paths(
 
 def flemish_destination_path(
     netherlandic_source_path,
-    root=default_flemish_stores_root,
+    root=locations.echoframe_model_flemish_stores,
 ):
     '''Map one Dutch model-store path to its Flemish destination path.'''
     source_path = Path(netherlandic_source_path).expanduser()
@@ -619,9 +614,9 @@ def _print_flemish_report(report):
 
 
 def move_flemish_data(
-    phraser_key_path=default_flemish_phraser_key_path,
-    netherlandic_root=default_netherlandic_stores_root,
-    flemish_root=default_flemish_stores_root,
+    phraser_key_path=locations.flemish_phraser_phone_key_file,
+    netherlandic_root=locations.echoframe_model_stores,
+    flemish_root=locations.echoframe_model_flemish_stores,
     batch_size=default_batch_size,
     verbose=True,
 ):

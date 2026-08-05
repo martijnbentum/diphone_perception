@@ -1,16 +1,32 @@
+import inspect
 import json
 import sys
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from phraser import SEGMENT_KEY_LENGTH
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import locations
 from probing import fix_phone_duplicate
 
 
 def make_key(index):
     return f'key-{index:018d}'.encode()
+
+
+def test_default_paths_use_locations():
+    parameters = inspect.signature(
+        fix_phone_duplicate.save_duplicate_replacement_phraser_keys,
+    ).parameters
+
+    assert (
+        parameters['path'].default
+        == locations.duplicate_replacement_phraser_key_file)
+    assert (
+        parameters['counts_path'].default
+        == locations.duplicate_phone_counts_file)
 
 
 def make_phraser_phone(label, key, start=0, end=10):
@@ -38,7 +54,7 @@ def write_counts(tmp_path, counts):
 
 
 def read_keys(path):
-    size = fix_phone_duplicate._phraser_key_len
+    size = SEGMENT_KEY_LENGTH
     data = path.read_bytes()
     assert len(data) % size == 0
     return [data[index:index + size] for index in range(0, len(data), size)]

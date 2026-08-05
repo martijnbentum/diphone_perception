@@ -8,6 +8,7 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import Pipeline
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import locations
 from probing import train_binary_mfcc_probe as tbp
 
 
@@ -229,9 +230,7 @@ def test_train_binary_mfcc_probe_opens_default_store(monkeypatch):
         phones, 'p', n_samples=30, verbose=False, save_probes=False,
         save_predictions=False, save_results=False)
 
-    assert opened_roots == [str(tbp.default_mfcc_store_root)]
-    assert str(tbp.default_mfcc_store_root).endswith(
-        'data/echoframe_mfcc_store')
+    assert opened_roots == [str(locations.echoframe_mfcc_store)]
 
 
 def test_train_binary_mfcc_probe_rejects_unknown_frame():
