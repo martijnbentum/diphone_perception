@@ -34,7 +34,6 @@ duplicate_replacement_phraser_key_file = (
     _data_dir / 'duplicate_replacement_phraser_phone_keys.bin')
 cgn_lmdb = Path('/vol/mlusers/mbentum/phraser/data/cgn_awd_lmdb')
 _boundary_tokens = ('SOS', 'EOS')
-_bool = {'True': True, 'False': False}
 _phraser_key_len = 22
 _phraser_key_placeholder = b'\x00' * _phraser_key_len
 _phraser_phones_per_label = 13_500
@@ -128,7 +127,7 @@ class Phone:
         self.next_phoneme_ipa = _sampa_to_ipa(self.next_phoneme_sampa)
 
         self.speaker_id = row['speaker_id']
-        self.overlap = _bool[row['overlap']]
+        self.overlap = {'True': True, 'False': False}[row['overlap']]
         self.comp = row['comp']
         self.ipa_phoneme = row['ipa_phoneme']
 
