@@ -28,9 +28,9 @@ def _phone_result(root):
 
 # -- manifests_match ---------------------------------------------------
 
-def test_manifests_match_ignores_data_and_version_fields():
-    a = _manifest(selected_samples_hash='abc', feature_set_hash='def')
-    b = _manifest(selected_samples_hash='xyz', feature_set_hash='uvw',
+def test_manifests_match_ignores_selection_and_version_fields():
+    a = _manifest(selected_sample_count=30, selected_samples_hash='abc')
+    b = _manifest(selected_sample_count=29, selected_samples_hash='xyz',
         cache_schema_version=3, trainer_version=3)
 
     assert result.manifests_match(a, b) is True
@@ -39,6 +39,13 @@ def test_manifests_match_ignores_data_and_version_fields():
 def test_manifests_match_detects_identity_field_difference():
     a = _manifest(random_state=42)
     b = _manifest(random_state=7)
+
+    assert result.manifests_match(a, b) is False
+
+
+def test_manifests_match_detects_feature_set_hash_difference():
+    a = _manifest(feature_set_hash='def')
+    b = _manifest(feature_set_hash='uvw')
 
     assert result.manifests_match(a, b) is False
 

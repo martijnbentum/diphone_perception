@@ -13,15 +13,17 @@ from probing.extract_embeddings import default_model_name
 
 _identity_manifest_fields = (
     'representation', 'feature_parameters', 'target_phoneme', 'n_samples',
-    'n_splits', 'random_state', 'classifier')
+    'n_splits', 'random_state', 'classifier', 'feature_set_hash')
 
 
 def manifests_match(a, b):
     '''Whether two run manifests agree on every experiment-identity field.
 
-    Fields such as data hashes and code-version markers are excluded, since
-    those can legitimately shift between runs (e.g. embedding availability)
-    without describing a different experiment.
+    feature_set_hash is included because it tracks embedding availability
+    per key, so a run that becomes possible once missing embeddings arrive
+    is still treated as a different run. Fields such as the selected-sample
+    hash/count and code-version markers are excluded, since those don't
+    change without one of the checked fields also changing.
     '''
     return all(a.get(field) == b.get(field)
         for field in _identity_manifest_fields)
