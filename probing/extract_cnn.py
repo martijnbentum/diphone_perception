@@ -8,18 +8,10 @@ default_phraser_source_id = 'cgn-awd'
 default_collar = 500
 
 
-def extract_phone_cnn(
-    phones,
-    store,
-    model_name=default_model_name,
-    collar=default_collar,
-    model_paths_file=locations.model_paths_file,
-    phraser_source_id=default_phraser_source_id,
-    gpu=False,
-    batch_size=120,
-    tags=None,
-    verbose=True,
-):
+def extract_phone_cnn(phones, store, model_name=default_model_name,
+    collar=default_collar, model_paths_file=locations.model_paths_file,
+    phraser_source_id=default_phraser_source_id, gpu=False, batch_size=120,
+    tags=None, verbose=True):
     '''Compute and store CNN frontend features for every phone in `phones`
     into an already-open echoframe Store, via echoframe's
     compute_cnn_features_batch (stores every CNN frame overlapping each
@@ -61,18 +53,11 @@ def extract_phone_cnn(
     return store
 
 
-def extract_phone_cnn_for_models(
-    phones,
-    model_names,
-    collar=default_collar,
-    store_root=locations.echoframe_model_cnn_stores,
+def extract_phone_cnn_for_models(phones, model_names,
+    collar=default_collar, store_root=locations.echoframe_model_cnn_stores,
     model_paths_file=locations.model_paths_file,
-    phraser_source_id=default_phraser_source_id,
-    gpu=False,
-    batch_size=120,
-    tags=None,
-    verbose=True,
-):
+    phraser_source_id=default_phraser_source_id, gpu=False, batch_size=120,
+    tags=None, verbose=True):
     '''Compute phone CNN features in a dedicated store for every model.
 
     Accepts the extraction options from `extract_phone_cnn`, replacing
@@ -98,18 +83,12 @@ def extract_phone_cnn_for_models(
     )
 
 
-def extract_flemish_phone_cnn_for_models(
-    flemish_phones,
-    model_names,
+def extract_flemish_phone_cnn_for_models(flemish_phones, model_names,
     collar=default_collar,
     store_root=locations.echoframe_model_cnn_flemish_stores,
     model_paths_file=locations.model_paths_file,
-    phraser_source_id=default_phraser_source_id,
-    gpu=False,
-    batch_size=120,
-    tags=None,
-    verbose=True,
-):
+    phraser_source_id=default_phraser_source_id, gpu=False, batch_size=120,
+    tags=None, verbose=True):
     '''Compute Flemish phone CNN features in a dedicated store per model.
 
     The model stores are opened below ``store_root``. The validated
@@ -134,18 +113,8 @@ def extract_flemish_phone_cnn_for_models(
     )
 
 
-def _extract_phone_cnn_for_models(
-    phones,
-    model_names,
-    collar,
-    store_root,
-    model_paths_file,
-    phraser_source_id,
-    gpu,
-    batch_size,
-    tags,
-    verbose,
-):
+def _extract_phone_cnn_for_models(phones, model_names, collar, store_root,
+    model_paths_file, phraser_source_id, gpu, batch_size, tags, verbose):
     '''Run the shared dedicated-store lifecycle for a phone inventory.'''
     if isinstance(model_names, str):
         raise TypeError('model_names must be an iterable, not a string')
