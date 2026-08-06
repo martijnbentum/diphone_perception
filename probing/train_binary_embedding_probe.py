@@ -8,6 +8,7 @@ import numpy as np
 
 import locations
 from probing import probe_run, probe_training, probe_utils
+from probing import result as probe_result
 from probing.extract_embeddings import default_model_name
 
 _default_inventory_batch_size = 1_000
@@ -49,8 +50,10 @@ def train_binary_embedding_probe(phones, target_phoneme, store=None,
     run_id = probe_run.hash_run_manifest(manifest)
     probe_run_directory = _run_directory(probe_save_dir, model_name,
         target_phoneme, layer, collar, run_id)
-    predictions_run_directory = _run_directory(results_dir, model_name,
-        target_phoneme, layer, collar, run_id)
+    phone_result = probe_result.PhoneResult.embedding(target_phoneme,
+        model_name, layer, collar, n_samples=n_embeds, n_splits=n_splits,
+        random_state=random_state, standardize=standardize,
+        root=results_dir)
 
     def load_vectors():
         return _load_middle_frame_vectors(store, selected, model_name, layer,
@@ -61,8 +64,7 @@ def train_binary_embedding_probe(phones, target_phoneme, store=None,
         'layer': layer, 'collar': collar}
     return probe_run.run(load_vectors=load_vectors,
         manifest=manifest, probe_run_directory=probe_run_directory,
-        predictions_run_directory=predictions_run_directory,
-        result_fields=result_fields,
+        phone_result=phone_result, result_fields=result_fields,
         display_name=f'{target_phoneme} layer {layer}', n_splits=n_splits,
         random_state=random_state, standardize=standardize,
         save_probes=save_probes, save_predictions=save_predictions,

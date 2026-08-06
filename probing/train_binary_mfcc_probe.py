@@ -6,6 +6,7 @@ import numpy as np
 
 import locations
 from probing import probe_run, probe_training, probe_utils
+from probing import result as probe_result
 
 _frame_modes = {'center', 'mean', 'first', 'last'}
 _mfcc_results_schema_version = 1
@@ -218,8 +219,9 @@ def train_binary_mfcc_probe(
     run_id = probe_run.hash_run_manifest(manifest)
     probe_run_directory = _run_directory(
         probe_save_dir, target_phoneme, frame, run_id)
-    predictions_run_directory = _run_directory(
-        results_dir, target_phoneme, frame, run_id)
+    phone_result = probe_result.PhoneResult.mfcc(target_phoneme, frame,
+        n_samples=n_samples, n_splits=n_splits, random_state=random_state,
+        standardize=standardize, root=results_dir)
 
     def load_vectors():
         return _load_mfcc_vectors(store, selected, frame=frame)
@@ -234,7 +236,7 @@ def train_binary_mfcc_probe(
         load_vectors=load_vectors,
         manifest=manifest,
         probe_run_directory=probe_run_directory,
-        predictions_run_directory=predictions_run_directory,
+        phone_result=phone_result,
         result_fields=result_fields,
         display_name=f'{target_phoneme} MFCC {frame} frame',
         n_splits=n_splits,
@@ -246,7 +248,7 @@ def train_binary_mfcc_probe(
         verbose=verbose,
     )
     if save_results:
-        output_path = predictions_run_directory / _run_results_filename
+        output_path = phone_result.path / _run_results_filename
         report = save_mfcc_probe_results(
             {target_phoneme: result},
             output_path=output_path,
