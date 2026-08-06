@@ -21,28 +21,28 @@ def write_model_paths(tmp_path, entries):
     return path
 
 
-# -- _find_model_entry ------------------------------------------------------
+# -- find_model_entry --------------------------------------------------------
 
 def test_find_model_entry_returns_match(tmp_path):
     path = write_model_paths(tmp_path, MODEL_PATHS)
-    entry = model_store._find_model_entry('model-a', path)
+    entry = model_store.find_model_entry('model-a', path)
     assert entry == MODEL_PATHS[0]
 
 
 def test_find_model_entry_raises_when_missing(tmp_path):
     path = write_model_paths(tmp_path, MODEL_PATHS)
     with pytest.raises(ValueError, match='not found'):
-        model_store._find_model_entry('missing-model', path)
+        model_store.find_model_entry('missing-model', path)
 
 
 def test_find_model_entry_raises_when_multiple_matches(tmp_path):
     duplicated = MODEL_PATHS + [MODEL_PATHS[0]]
     path = write_model_paths(tmp_path, duplicated)
     with pytest.raises(ValueError, match='multiple entries'):
-        model_store._find_model_entry('model-a', path)
+        model_store.find_model_entry('model-a', path)
 
 
-# -- _ensure_model_registered ------------------------------------------------
+# -- ensure_model_registered --------------------------------------------------
 
 class FakeStore:
     def __init__(self, registered=None):
@@ -64,7 +64,7 @@ def test_ensure_model_registered_skips_when_already_registered(tmp_path):
     path = write_model_paths(tmp_path, MODEL_PATHS)
     store = FakeStore(registered={'model-a': object()})
 
-    model_store._ensure_model_registered(store, 'model-a', path)
+    model_store.ensure_model_registered(store, 'model-a', path)
 
     assert store.register_model_calls == []
 
@@ -73,7 +73,7 @@ def test_ensure_model_registered_registers_from_file(tmp_path):
     path = write_model_paths(tmp_path, MODEL_PATHS)
     store = FakeStore()
 
-    model_store._ensure_model_registered(store, 'model-a', path)
+    model_store.ensure_model_registered(store, 'model-a', path)
 
     assert store.register_model_calls == [dict(
         model_name='model-a', local_path='/models/a', huggingface_id=None,
@@ -84,7 +84,7 @@ def test_ensure_model_registered_passes_huggingface_id(tmp_path):
     path = write_model_paths(tmp_path, MODEL_PATHS)
     store = FakeStore()
 
-    model_store._ensure_model_registered(store, 'model-b', path)
+    model_store.ensure_model_registered(store, 'model-b', path)
 
     assert store.register_model_calls == [dict(
         model_name='model-b', local_path=None,

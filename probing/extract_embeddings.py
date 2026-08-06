@@ -2,13 +2,7 @@ import echoframe
 from echoframe.batch_segment_features import compute_embeddings_batch
 
 import locations
-from probing.model_store import (
-    _ensure_model_registered,
-    _find_model_entry,
-    _release_cuda_memory,
-    model_store_path,
-    open_model_store,
-)
+from probing import model_store
 
 default_model_name = 'wav2vec2_nl1_checkpoint-200000'
 default_phraser_source_id = 'cgn-awd'
@@ -57,7 +51,7 @@ def extract_phone_embeddings(
     '''
     if store is None:
         store = echoframe.Store(str(store_root))
-    _ensure_model_registered(store, model_name, model_paths_file)
+    model_store.ensure_model_registered(store, model_name, model_paths_file)
     store.attach_phraser_store(phraser_source_id, phones.store)
 
     segments = phones.phraser_phones
@@ -163,7 +157,7 @@ def _extract_phone_embeddings_for_models(
 
     store_paths = {}
     for model_name in model_names:
-        store = open_model_store(
+        store = model_store.open_model_store(
             model_name,
             stores_root=store_root,
             model_paths_file=model_paths_file,
@@ -182,7 +176,8 @@ def _extract_phone_embeddings_for_models(
                 tags=tags,
                 verbose=verbose,
             )
-            store_paths[model_name] = model_store_path(model_name, store_root)
+            store_paths[model_name] = model_store.model_store_path(
+                model_name, store_root)
         finally:
             try:
                 store.remove_cached_model()
@@ -191,5 +186,5 @@ def _extract_phone_embeddings_for_models(
                     store.close()
                 finally:
                     if gpu:
-                        _release_cuda_memory()
+                        model_store.release_cuda_memory()
     return store_paths

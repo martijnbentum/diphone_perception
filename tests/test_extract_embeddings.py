@@ -7,7 +7,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import locations
-from probing import extract_embeddings
+from probing import extract_embeddings, model_store
 
 
 MODEL_PATHS = [
@@ -22,29 +22,6 @@ def write_model_paths(tmp_path, entries):
     path.write_text(json.dumps(entries))
     return path
 
-
-# -- _find_model_entry ------------------------------------------------------
-
-def test_find_model_entry_returns_match(tmp_path):
-    path = write_model_paths(tmp_path, MODEL_PATHS)
-    entry = extract_embeddings._find_model_entry('model-a', path)
-    assert entry == MODEL_PATHS[0]
-
-
-def test_find_model_entry_raises_when_missing(tmp_path):
-    path = write_model_paths(tmp_path, MODEL_PATHS)
-    with pytest.raises(ValueError, match='not found'):
-        extract_embeddings._find_model_entry('missing-model', path)
-
-
-def test_find_model_entry_raises_when_multiple_matches(tmp_path):
-    duplicated = MODEL_PATHS + [MODEL_PATHS[0]]
-    path = write_model_paths(tmp_path, duplicated)
-    with pytest.raises(ValueError, match='multiple entries'):
-        extract_embeddings._find_model_entry('model-a', path)
-
-
-# -- _ensure_model_registered ------------------------------------------------
 
 class FakeStore:
     def __init__(self, registered=None):
@@ -72,83 +49,6 @@ class FakeStore:
 
     def close(self):
         self.close_calls += 1
-
-
-def test_ensure_model_registered_skips_when_already_registered(tmp_path):
-    path = write_model_paths(tmp_path, MODEL_PATHS)
-    store = FakeStore(registered={'model-a': object()})
-
-    extract_embeddings._ensure_model_registered(store, 'model-a', path)
-
-    assert store.register_model_calls == []
-
-
-def test_ensure_model_registered_registers_from_file(tmp_path):
-    path = write_model_paths(tmp_path, MODEL_PATHS)
-    store = FakeStore()
-
-    extract_embeddings._ensure_model_registered(store, 'model-a', path)
-
-    assert store.register_model_calls == [dict(
-        model_name='model-a', local_path='/models/a', huggingface_id=None,
-        language='Dutch', size='base')]
-
-
-def test_ensure_model_registered_passes_huggingface_id(tmp_path):
-    path = write_model_paths(tmp_path, MODEL_PATHS)
-    store = FakeStore()
-
-    extract_embeddings._ensure_model_registered(store, 'model-b', path)
-
-    assert store.register_model_calls == [dict(
-        model_name='model-b', local_path=None,
-        huggingface_id='facebook/wav2vec2-base', language=None, size=None)]
-
-
-# -- per-model stores --------------------------------------------------------
-
-def test_model_store_path_uses_model_name(tmp_path):
-    result = extract_embeddings.model_store_path('model-a', tmp_path)
-
-    assert result == tmp_path / 'model-a'
-
-
-def test_model_store_path_escapes_path_separators(tmp_path):
-    result = extract_embeddings.model_store_path('owner/model', tmp_path)
-
-    assert result == tmp_path / 'owner%2Fmodel'
-
-
-@pytest.mark.parametrize('model_name', ['', '   ', None, 42])
-def test_model_store_path_rejects_invalid_model_name(tmp_path, model_name):
-    with pytest.raises(ValueError, match='non-empty string'):
-        extract_embeddings.model_store_path(model_name, tmp_path)
-
-
-def test_open_model_store_opens_and_registers_dedicated_store(
-    tmp_path, monkeypatch):
-    path = write_model_paths(tmp_path, MODEL_PATHS)
-    opened = []
-
-    def fake_store_constructor(root, max_shard_size_bytes):
-        store = FakeStore()
-        opened.append((root, max_shard_size_bytes, store))
-        return store
-
-    monkeypatch.setattr(extract_embeddings.echoframe, 'Store',
-        fake_store_constructor)
-
-    result = extract_embeddings.open_model_store(
-        'model-a', stores_root=tmp_path / 'stores', model_paths_file=path,
-        max_shard_size_bytes=1234)
-
-    root, max_shard_size_bytes, store = opened[0]
-    assert result is store
-    assert root == str(tmp_path / 'stores' / 'model-a')
-    assert max_shard_size_bytes == 1234
-    assert store.register_model_calls == [dict(
-        model_name='model-a', local_path='/models/a', huggingface_id=None,
-        language='Dutch', size='base')]
 
 
 # -- extract_phone_embeddings ------------------------------------------------
@@ -273,11 +173,11 @@ def test_extract_phone_embeddings_for_models_opens_extracts_and_closes(
     def fake_extract_phone_embeddings(phones, **kwargs):
         extract_calls.append((phones, kwargs))
 
-    monkeypatch.setattr(extract_embeddings, 'open_model_store',
+    monkeypatch.setattr(model_store, 'open_model_store',
         fake_open_model_store)
     monkeypatch.setattr(extract_embeddings, 'extract_phone_embeddings',
         fake_extract_phone_embeddings)
-    monkeypatch.setattr(extract_embeddings, '_release_cuda_memory',
+    monkeypatch.setattr(model_store, 'release_cuda_memory',
         lambda: cuda_release_calls.append(True))
 
     path = tmp_path / 'model_paths.json'
@@ -329,7 +229,7 @@ def test_extract_phone_embeddings_for_models_cleans_up_after_failure(
     store = FakeStore()
     cuda_release_calls = []
 
-    monkeypatch.setattr(extract_embeddings, 'open_model_store',
+    monkeypatch.setattr(model_store, 'open_model_store',
         lambda *args, **kwargs: store)
 
     def fail_extraction(*args, **kwargs):
@@ -337,7 +237,7 @@ def test_extract_phone_embeddings_for_models_cleans_up_after_failure(
 
     monkeypatch.setattr(extract_embeddings, 'extract_phone_embeddings',
         fail_extraction)
-    monkeypatch.setattr(extract_embeddings, '_release_cuda_memory',
+    monkeypatch.setattr(model_store, 'release_cuda_memory',
         lambda: cuda_release_calls.append(True))
 
     with pytest.raises(RuntimeError, match='extraction failed'):
@@ -362,7 +262,7 @@ def test_flemish_model_store_root_and_batch_defaults():
         extract_embeddings.extract_flemish_phone_embeddings_for_models,
     ).parameters['store_root'].default
     assert store_root_default == locations.echoframe_model_flemish_stores
-    assert extract_embeddings.model_store_path(
+    assert model_store.model_store_path(
         'owner/model',
         locations.echoframe_model_flemish_stores,
     ) == (
@@ -392,7 +292,7 @@ def test_extract_flemish_phone_embeddings_for_models_lifecycle(
         return stores[model_name]
 
     monkeypatch.setattr(
-        extract_embeddings, 'open_model_store', fake_open_model_store)
+        model_store, 'open_model_store', fake_open_model_store)
     monkeypatch.setattr(
         extract_embeddings, 'extract_phone_embeddings',
         lambda phones, **kwargs: extract_calls.append((phones, kwargs)),
@@ -454,7 +354,7 @@ def test_extract_flemish_phone_embeddings_for_models_cleans_up_after_failure(
         raise RuntimeError('extraction failed')
 
     monkeypatch.setattr(
-        extract_embeddings, 'open_model_store',
+        model_store, 'open_model_store',
         lambda *args, **kwargs: store,
     )
     monkeypatch.setattr(

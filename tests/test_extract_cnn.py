@@ -1,4 +1,5 @@
 import inspect
+import json
 import sys
 from pathlib import Path
 
@@ -6,7 +7,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import locations
-from probing import extract_cnn
+from probing import extract_cnn, model_store
 
 
 MODEL_PATHS = [
@@ -17,7 +18,6 @@ MODEL_PATHS = [
 
 
 def write_model_paths(tmp_path, entries):
-    import json
     path = tmp_path / 'model_paths.json'
     path.write_text(json.dumps(entries))
     return path
@@ -57,9 +57,9 @@ class FakePhones:
         self.store = store
 
 
-# -- extract_phone_cnn_features ----------------------------------------------
+# -- extract_phone_cnn --------------------------------------------------------
 
-def test_extract_phone_cnn_features_registers_model_and_computes(
+def test_extract_phone_cnn_registers_model_and_computes(
     tmp_path, monkeypatch):
     path = write_model_paths(tmp_path, MODEL_PATHS)
     store = FakeStore()
@@ -77,7 +77,7 @@ def test_extract_phone_cnn_features_registers_model_and_computes(
     monkeypatch.setattr(extract_cnn, 'compute_cnn_features_batch',
         fake_compute_cnn_features_batch)
 
-    result = extract_cnn.extract_phone_cnn_features(
+    result = extract_cnn.extract_phone_cnn(
         phones, store, model_name='model-a', collar=500,
         model_paths_file=path, gpu=False, batch_size=16,
         tags=['exp-a'], verbose=False)
@@ -93,7 +93,7 @@ def test_extract_phone_cnn_features_registers_model_and_computes(
         verbose=False)]
 
 
-def test_extract_phone_cnn_features_skips_registration_when_already_registered(
+def test_extract_phone_cnn_skips_registration_when_already_registered(
     tmp_path, monkeypatch):
     path = write_model_paths(tmp_path, MODEL_PATHS)
     store = FakeStore(registered={'model-a': object()})
@@ -102,14 +102,14 @@ def test_extract_phone_cnn_features_skips_registration_when_already_registered(
     monkeypatch.setattr(extract_cnn, 'compute_cnn_features_batch',
         lambda *a, **k: None)
 
-    extract_cnn.extract_phone_cnn_features(
+    extract_cnn.extract_phone_cnn(
         phones, store, model_name='model-a', model_paths_file=path,
         verbose=False)
 
     assert store.register_model_calls == []
 
 
-def test_extract_phone_cnn_features_uses_default_collar_and_model(
+def test_extract_phone_cnn_uses_default_collar_and_model(
     tmp_path, monkeypatch):
     entries = MODEL_PATHS + [{
         'model_name': extract_cnn.default_model_name,
@@ -123,7 +123,7 @@ def test_extract_phone_cnn_features_uses_default_collar_and_model(
     monkeypatch.setattr(extract_cnn, 'compute_cnn_features_batch',
         lambda *a, **k: calls.append((a, k)))
 
-    extract_cnn.extract_phone_cnn_features(
+    extract_cnn.extract_phone_cnn(
         phones, store, model_paths_file=path, verbose=False)
 
     (segments, model_name, store_arg), kwargs = calls[0]
@@ -131,9 +131,9 @@ def test_extract_phone_cnn_features_uses_default_collar_and_model(
     assert kwargs['collar'] == 500
 
 
-# -- extract_phone_cnn_features_for_models -----------------------------------
+# -- extract_phone_cnn_for_models ---------------------------------------------
 
-def test_extract_phone_cnn_features_for_models_opens_extracts_and_closes(
+def test_extract_phone_cnn_for_models_opens_extracts_and_closes(
     tmp_path, monkeypatch):
     stores = {name: FakeStore() for name in ('model-a', 'model-b')}
     open_calls = []
@@ -144,19 +144,19 @@ def test_extract_phone_cnn_features_for_models_opens_extracts_and_closes(
         open_calls.append((model_name, stores_root, model_paths_file))
         return stores[model_name]
 
-    def fake_extract_phone_cnn_features(phones, store, **kwargs):
+    def fake_extract_phone_cnn(phones, store, **kwargs):
         extract_calls.append((phones, store, kwargs))
 
-    monkeypatch.setattr(extract_cnn, 'open_model_store',
+    monkeypatch.setattr(model_store, 'open_model_store',
         fake_open_model_store)
-    monkeypatch.setattr(extract_cnn, 'extract_phone_cnn_features',
-        fake_extract_phone_cnn_features)
-    monkeypatch.setattr(extract_cnn, '_release_cuda_memory',
+    monkeypatch.setattr(extract_cnn, 'extract_phone_cnn',
+        fake_extract_phone_cnn)
+    monkeypatch.setattr(model_store, 'release_cuda_memory',
         lambda: cuda_release_calls.append(True))
 
     path = tmp_path / 'model_paths.json'
     phones = object()
-    result = extract_cnn.extract_phone_cnn_features_for_models(
+    result = extract_cnn.extract_phone_cnn_for_models(
         phones,
         ['model-a', 'model-b'],
         collar=500,
@@ -195,24 +195,23 @@ def test_extract_phone_cnn_features_for_models_opens_extracts_and_closes(
     }
 
 
-def test_extract_phone_cnn_features_for_models_cleans_up_after_failure(
+def test_extract_phone_cnn_for_models_cleans_up_after_failure(
     tmp_path, monkeypatch):
     store = FakeStore()
     cuda_release_calls = []
 
-    monkeypatch.setattr(extract_cnn, 'open_model_store',
+    monkeypatch.setattr(model_store, 'open_model_store',
         lambda *args, **kwargs: store)
 
     def fail_extraction(*args, **kwargs):
         raise RuntimeError('extraction failed')
 
-    monkeypatch.setattr(extract_cnn, 'extract_phone_cnn_features',
-        fail_extraction)
-    monkeypatch.setattr(extract_cnn, '_release_cuda_memory',
+    monkeypatch.setattr(extract_cnn, 'extract_phone_cnn', fail_extraction)
+    monkeypatch.setattr(model_store, 'release_cuda_memory',
         lambda: cuda_release_calls.append(True))
 
     with pytest.raises(RuntimeError, match='extraction failed'):
-        extract_cnn.extract_phone_cnn_features_for_models(
+        extract_cnn.extract_phone_cnn_for_models(
             object(), ['model-a'], store_root=tmp_path, gpu=True)
 
     assert store.remove_cached_model_calls == 1
@@ -220,27 +219,26 @@ def test_extract_phone_cnn_features_for_models_cleans_up_after_failure(
     assert cuda_release_calls == [True]
 
 
-def test_extract_phone_cnn_features_for_models_rejects_string_model_names():
+def test_extract_phone_cnn_for_models_rejects_string_model_names():
     with pytest.raises(TypeError, match='iterable, not a string'):
-        extract_cnn.extract_phone_cnn_features_for_models(
-            object(), 'model-a')
+        extract_cnn.extract_phone_cnn_for_models(object(), 'model-a')
 
 
 # -- Flemish CNN extraction ---------------------------------------------------
 
 def test_flemish_model_store_root_and_batch_defaults():
     store_root_default = inspect.signature(
-        extract_cnn.extract_flemish_phone_cnn_features_for_models,
+        extract_cnn.extract_flemish_phone_cnn_for_models,
     ).parameters['store_root'].default
     assert store_root_default == locations.echoframe_model_cnn_flemish_stores
     default_root = inspect.signature(
-        extract_cnn.extract_phone_cnn_features_for_models,
+        extract_cnn.extract_phone_cnn_for_models,
     ).parameters['store_root'].default
     assert default_root == locations.echoframe_model_cnn_stores
     functions = (
-        extract_cnn.extract_phone_cnn_features,
-        extract_cnn.extract_phone_cnn_features_for_models,
-        extract_cnn.extract_flemish_phone_cnn_features_for_models,
+        extract_cnn.extract_phone_cnn,
+        extract_cnn.extract_phone_cnn_for_models,
+        extract_cnn.extract_flemish_phone_cnn_for_models,
     )
     assert all(
         inspect.signature(function).parameters['batch_size'].default == 120
@@ -252,7 +250,7 @@ def test_flemish_model_store_root_and_batch_defaults():
     )
 
 
-def test_extract_flemish_phone_cnn_features_for_models_lifecycle(
+def test_extract_flemish_phone_cnn_for_models_lifecycle(
     tmp_path, monkeypatch):
     stores = {name: FakeStore() for name in ('model-a', 'model-b')}
     open_calls = []
@@ -263,9 +261,9 @@ def test_extract_flemish_phone_cnn_features_for_models_lifecycle(
         return stores[model_name]
 
     monkeypatch.setattr(
-        extract_cnn, 'open_model_store', fake_open_model_store)
+        model_store, 'open_model_store', fake_open_model_store)
     monkeypatch.setattr(
-        extract_cnn, 'extract_phone_cnn_features',
+        extract_cnn, 'extract_phone_cnn',
         lambda phones, store, **kwargs: extract_calls.append(
             (phones, store, kwargs)),
     )
@@ -273,7 +271,7 @@ def test_extract_flemish_phone_cnn_features_for_models_lifecycle(
     model_paths_file = tmp_path / 'model_paths.json'
     flemish_phones = object()
     store_root = tmp_path / 'flemish-stores'
-    result = extract_cnn.extract_flemish_phone_cnn_features_for_models(
+    result = extract_cnn.extract_flemish_phone_cnn_for_models(
         flemish_phones,
         ['model-a', 'model-b'],
         collar=500,
@@ -312,7 +310,7 @@ def test_extract_flemish_phone_cnn_features_for_models_lifecycle(
     }
 
 
-def test_extract_flemish_phone_cnn_features_for_models_cleans_up_after_failure(
+def test_extract_flemish_phone_cnn_for_models_cleans_up_after_failure(
     tmp_path, monkeypatch):
     store = FakeStore()
 
@@ -320,23 +318,20 @@ def test_extract_flemish_phone_cnn_features_for_models_cleans_up_after_failure(
         raise RuntimeError('extraction failed')
 
     monkeypatch.setattr(
-        extract_cnn, 'open_model_store',
+        model_store, 'open_model_store',
         lambda *args, **kwargs: store,
     )
-    monkeypatch.setattr(
-        extract_cnn, 'extract_phone_cnn_features',
-        fail_extraction,
-    )
+    monkeypatch.setattr(extract_cnn, 'extract_phone_cnn', fail_extraction)
 
     with pytest.raises(RuntimeError, match='extraction failed'):
-        extract_cnn.extract_flemish_phone_cnn_features_for_models(
+        extract_cnn.extract_flemish_phone_cnn_for_models(
             object(), ['model-a'], store_root=tmp_path)
 
     assert store.remove_cached_model_calls == 1
     assert store.close_calls == 1
 
 
-def test_extract_flemish_phone_cnn_features_rejects_string_model_names():
+def test_extract_flemish_phone_cnn_rejects_string_model_names():
     with pytest.raises(TypeError, match='iterable, not a string'):
-        extract_cnn.extract_flemish_phone_cnn_features_for_models(
+        extract_cnn.extract_flemish_phone_cnn_for_models(
             object(), 'model-a')
