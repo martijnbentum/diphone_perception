@@ -1,7 +1,7 @@
 import hashlib
 import json
 import tempfile
-from collections import Counter
+from collections import Counter, namedtuple
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -13,39 +13,36 @@ from probing import result as probe_result
 _cache_schema_version = 2
 _trainer_version = 2
 
+TrainingOutcome = namedtuple('TrainingOutcome',
+    ['classifiers', 'accuracies', 'mean_accuracy', 'std_accuracy',
+        'n_samples', 'n_missing'])
+
 
 def run(*, load_vectors, manifest, probe_run_directory,
-    phone_result, result_fields, display_name, n_splits, random_state,
+    phone_result, display_name, n_splits, random_state,
     standardize, save_probes, save_predictions, overwrite, verbose):
-    '''Run shared cache, cross-validation, fitting, and persistence logic.
+    '''Train and persist fold classifiers and predictions.
 
     load_vectors:               callback returning features and labels
     manifest:                   canonical identity of the probe run
     probe_run_directory:        directory containing fitted fold probes
     phone_result:               identity and storage for fold predictions
-    result_fields:              representation details added to the result
     n_splits:                   number of cross-validation folds
+
+    Returns a TrainingOutcome describing what was trained, or None when
+    every fold result was already stored and training was skipped.
     '''
     probe_training.validate_training_options(n_splits, standardize)
-    run_id = hash_run_manifest(manifest)
     if save_predictions: phone_result.check_manifest(manifest)
-    result_complete = save_predictions and phone_result.complete
-    if result_complete and not overwrite:
+    if save_predictions and phone_result.complete and not overwrite:
         if verbose:
             print(f'{display_name}: all {n_splits} results already stored '
                 f'under {phone_result.path} - skipping '
                 '(pass overwrite=True to retrain)')
-        accuracies = phone_result.accuracies
-        result = dict(result_fields)
-        result.update({'run_id': run_id, 'cache_status': 'hit',
-            'standardize': standardize, 'accuracies': accuracies,
-            'mean_accuracy': phone_result.mean_accuracy,
-            'std_accuracy': phone_result.std_accuracy, 'probes': [],
-            'n_samples': None, 'n_missing': None, 'skipped': True})
-        return result
+        return None
 
+    run_id = hash_run_manifest(manifest)
     if save_probes: _write_run_manifest(probe_run_directory, manifest)
-    existing_fold_count = len(phone_result.folds) if save_predictions else 0
 
     X, y, true_labels, missing = load_vectors()
     if verbose:
@@ -76,30 +73,26 @@ def run(*, load_vectors, manifest, probe_run_directory,
             fold = probe_result.Fold(phone_result, fold_number)
             fold.save_results(predictions)
 
-    accuracies = probes.accuracies
-    classifiers = probes.classifiers
-    mean_accuracy = probes.mean_accuracy
-    std_accuracy = probes.std_accuracy
     if verbose:
-        print(f'{display_name}: mean={mean_accuracy:.4f} '
-            f'std={std_accuracy:.4f}')
+        print(f'{display_name}: mean={probes.mean_accuracy:.4f} '
+            f'std={probes.std_accuracy:.4f}')
 
-    if not save_predictions:
-        cache_status = 'disabled'
-    elif overwrite:
-        cache_status = 'refresh'
-    elif existing_fold_count:
-        cache_status = 'partial'
-    else:
-        cache_status = 'miss'
+    return TrainingOutcome(probes.classifiers, probes.accuracies,
+        probes.mean_accuracy, probes.std_accuracy, len(X), len(missing))
 
-    result = dict(result_fields)
-    result.update({'run_id': run_id, 'cache_status': cache_status,
-        'standardize': standardize, 'accuracies': accuracies,
-        'mean_accuracy': mean_accuracy, 'std_accuracy': std_accuracy,
-        'probes': classifiers, 'n_samples': len(X),
-        'n_missing': len(missing), 'skipped': False})
-    return result
+
+def classify_cache_status(save_predictions, complete_before, overwrite,
+    existing_fold_count):
+    '''Classify a probe_run.run() call relative to previously stored results.
+
+    Callers snapshot complete_before/existing_fold_count from phone_result
+    before calling run(), since run() mutates that state as a side effect.
+    '''
+    if not save_predictions: return 'disabled'
+    if complete_before and not overwrite: return 'hit'
+    if overwrite: return 'refresh'
+    if existing_fold_count: return 'partial'
+    return 'miss'
 
 
 def build_probe_run_manifest(store, selected, echoframe_keys, representation,

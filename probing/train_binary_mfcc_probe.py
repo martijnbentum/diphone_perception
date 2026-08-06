@@ -222,22 +222,17 @@ def train_binary_mfcc_probe(
     phone_result = probe_result.PhoneResult.mfcc(target_phoneme, frame,
         n_samples=n_samples, n_splits=n_splits, random_state=random_state,
         standardize=standardize, root=results_dir)
+    existing_fold_count = len(phone_result.folds) if save_predictions else 0
+    complete_before = save_predictions and phone_result.complete
 
     def load_vectors():
         return _load_mfcc_vectors(store, selected, frame=frame)
 
-    result_fields = {
-        'representation': 'mfcc',
-        'target_phoneme': target_phoneme,
-        'feature_name': 'mfcc',
-        'frame': frame,
-    }
-    result = probe_run.run(
+    outcome = probe_run.run(
         load_vectors=load_vectors,
         manifest=manifest,
         probe_run_directory=probe_run_directory,
         phone_result=phone_result,
-        result_fields=result_fields,
         display_name=f'{target_phoneme} MFCC {frame} frame',
         n_splits=n_splits,
         random_state=random_state,
@@ -247,6 +242,23 @@ def train_binary_mfcc_probe(
         overwrite=overwrite,
         verbose=verbose,
     )
+
+    cache_status = probe_run.classify_cache_status(save_predictions,
+        complete_before, overwrite, existing_fold_count)
+    result = {'representation': 'mfcc', 'target_phoneme': target_phoneme,
+        'feature_name': 'mfcc', 'frame': frame, 'run_id': run_id,
+        'cache_status': cache_status, 'standardize': standardize}
+    if outcome is None:
+        result.update({'accuracies': phone_result.accuracies,
+            'mean_accuracy': phone_result.mean_accuracy,
+            'std_accuracy': phone_result.std_accuracy, 'probes': [],
+            'n_samples': None, 'n_missing': None, 'skipped': True})
+    else:
+        result.update({'accuracies': outcome.accuracies,
+            'mean_accuracy': outcome.mean_accuracy,
+            'std_accuracy': outcome.std_accuracy,
+            'probes': outcome.classifiers, 'n_samples': outcome.n_samples,
+            'n_missing': outcome.n_missing, 'skipped': False})
     if save_results:
         output_path = phone_result.path / _run_results_filename
         report = save_mfcc_probe_results(

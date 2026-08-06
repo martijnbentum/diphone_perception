@@ -54,21 +54,39 @@ def train_binary_embedding_probe(phones, target_phoneme, store=None,
         model_name, layer, collar, n_samples=n_embeds, n_splits=n_splits,
         random_state=random_state, standardize=standardize,
         root=results_dir)
+    existing_fold_count = len(phone_result.folds) if save_predictions else 0
+    complete_before = save_predictions and phone_result.complete
 
     def load_vectors():
         return _load_middle_frame_vectors(store, selected, model_name, layer,
             collar)
 
-    result_fields = {'representation': 'embedding',
-        'target_phoneme': target_phoneme, 'model_name': model_name,
-        'layer': layer, 'collar': collar}
-    return probe_run.run(load_vectors=load_vectors,
+    outcome = probe_run.run(load_vectors=load_vectors,
         manifest=manifest, probe_run_directory=probe_run_directory,
-        phone_result=phone_result, result_fields=result_fields,
+        phone_result=phone_result,
         display_name=f'{target_phoneme} layer {layer}', n_splits=n_splits,
         random_state=random_state, standardize=standardize,
         save_probes=save_probes, save_predictions=save_predictions,
         overwrite=overwrite, verbose=verbose)
+
+    cache_status = probe_run.classify_cache_status(save_predictions,
+        complete_before, overwrite, existing_fold_count)
+    result_fields = {'representation': 'embedding',
+        'target_phoneme': target_phoneme, 'model_name': model_name,
+        'layer': layer, 'collar': collar, 'run_id': run_id,
+        'cache_status': cache_status, 'standardize': standardize}
+    if outcome is None:
+        result_fields.update({'accuracies': phone_result.accuracies,
+            'mean_accuracy': phone_result.mean_accuracy,
+            'std_accuracy': phone_result.std_accuracy, 'probes': [],
+            'n_samples': None, 'n_missing': None, 'skipped': True})
+        return result_fields
+    result_fields.update({'accuracies': outcome.accuracies,
+        'mean_accuracy': outcome.mean_accuracy,
+        'std_accuracy': outcome.std_accuracy, 'probes': outcome.classifiers,
+        'n_samples': outcome.n_samples, 'n_missing': outcome.n_missing,
+        'skipped': False})
+    return result_fields
 
 
 def train_binary_embedding_probes(phones, target_phonemes=None, store=None,
