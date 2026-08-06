@@ -1,10 +1,8 @@
-import echoframe
-from echoframe.batch_segment_features import compute_embeddings_batch
+from echoframe.batch_cnn_features import compute_cnn_features_batch
 
 import locations
 from probing.model_store import (
     _ensure_model_registered,
-    _find_model_entry,
     _release_cuda_memory,
     model_store_path,
     open_model_store,
@@ -12,15 +10,14 @@ from probing.model_store import (
 
 default_model_name = 'wav2vec2_nl1_checkpoint-200000'
 default_phraser_source_id = 'cgn-awd'
+default_collar = 500
 
 
-def extract_phone_embeddings(
+def extract_phone_cnn_features(
     phones,
+    store,
     model_name=default_model_name,
-    layers=[9],
-    collar=2000,
-    store=None,
-    store_root=locations.echoframe_store,
+    collar=default_collar,
     model_paths_file=locations.model_paths_file,
     phraser_source_id=default_phraser_source_id,
     gpu=False,
@@ -28,53 +25,51 @@ def extract_phone_embeddings(
     tags=None,
     verbose=True,
 ):
-    '''Compute and store wav2vec2 hidden-state embeddings for every phone in
-    `phones` into an echoframe Store, via vanilla compute_embeddings_batch
-    (stores every frame overlapping each phone's own span, for each layer).
+    '''Compute and store CNN frontend features for every phone in `phones`
+    into an already-open echoframe Store, via echoframe's
+    compute_cnn_features_batch (stores every CNN frame overlapping each
+    phone's own span).
 
     phones:             probing.metadata.Phones - phones.phraser_phones must
                          be complete (raises otherwise)
+    store:              open echoframe.Store to write into. CNN features are
+                         always written to a per-model store (see
+                         extract_phone_cnn_features_for_models), so unlike
+                         extract_phone_embeddings there is no store_root
+                         convenience path here
     model_name:          registered echoframe model_name; looked up in
                          model_paths_file and registered on first use
-    layers:              list of hidden_state layer indices to store
     collar:              ms of audio context padded around each phone before
-                         running the model (does not affect what is stored;
-                         only widens the model's input window)
-    store:               existing echoframe.Store to write into; if None,
-                         one is opened at store_root
-    store_root:          path for a new echoframe.Store, used only when
-                         store is None
+                         running the CNN (does not affect what is stored;
+                         only widens the CNN's input window)
     model_paths_file:    JSON file of {model_name, local_path/huggingface_id,
                          language, size} records
     phraser_source_id:   label to register phones.store under in this store
     gpu:                 whether to run the model on GPU
-    batch_size:          segments per forward-pass batch. compute_embeddings_batch
+    batch_size:          segments per forward-pass batch. compute_cnn_features_batch
                          loads every segment's audio into one batch when this
                          is left None and gpu=False - an explicit default
                          avoids loading all of phones' audio into memory at once
     tags:                optional tags stored on new metadata
     verbose:             print batch progress
     '''
-    if store is None:
-        store = echoframe.Store(str(store_root))
     _ensure_model_registered(store, model_name, model_paths_file)
     store.attach_phraser_store(phraser_source_id, phones.store)
 
     segments = phones.phraser_phones
-    compute_embeddings_batch(
-        segments, layers, model_name, store,
+    compute_cnn_features_batch(
+        segments, model_name, store,
         collar=collar, gpu=gpu, tags=tags, batch_size=batch_size,
         verbose=verbose,
     )
     return store
 
 
-def extract_phone_embeddings_for_models(
+def extract_phone_cnn_features_for_models(
     phones,
     model_names,
-    layers=[9],
-    collar=2000,
-    store_root=locations.echoframe_model_stores,
+    collar=default_collar,
+    store_root=locations.echoframe_model_cnn_stores,
     model_paths_file=locations.model_paths_file,
     phraser_source_id=default_phraser_source_id,
     gpu=False,
@@ -82,20 +77,20 @@ def extract_phone_embeddings_for_models(
     tags=None,
     verbose=True,
 ):
-    '''Compute phone embeddings in a dedicated store for every model.
+    '''Compute phone CNN features in a dedicated store for every model.
 
-    Accepts the extraction options from `extract_phone_embeddings`, replacing
-    `model_name` with `model_names` and managing each model's store. Stores are
-    opened below `store_root`, then the cached model is unloaded and the store
-    is closed after each extraction. When `gpu` is true, unreferenced CUDA
-    allocations are also released before the next model is loaded.
+    Accepts the extraction options from `extract_phone_cnn_features`,
+    replacing `model_name` with `model_names` and managing each model's
+    store. Stores are opened below `store_root`, then the cached model is
+    unloaded and the store is closed after each extraction. When `gpu` is
+    true, unreferenced CUDA allocations are also released before the next
+    model is loaded.
 
     Returns a dictionary mapping each model name to its store path.
     '''
-    return _extract_phone_embeddings_for_models(
+    return _extract_phone_cnn_features_for_models(
         phones,
         model_names,
-        layers=layers,
         collar=collar,
         store_root=store_root,
         model_paths_file=model_paths_file,
@@ -107,12 +102,11 @@ def extract_phone_embeddings_for_models(
     )
 
 
-def extract_flemish_phone_embeddings_for_models(
+def extract_flemish_phone_cnn_features_for_models(
     flemish_phones,
     model_names,
-    layers=[9],
-    collar=2000,
-    store_root=locations.echoframe_model_flemish_stores,
+    collar=default_collar,
+    store_root=locations.echoframe_model_cnn_flemish_stores,
     model_paths_file=locations.model_paths_file,
     phraser_source_id=default_phraser_source_id,
     gpu=False,
@@ -120,7 +114,7 @@ def extract_flemish_phone_embeddings_for_models(
     tags=None,
     verbose=True,
 ):
-    '''Compute Flemish phone embeddings in a dedicated store per model.
+    '''Compute Flemish phone CNN features in a dedicated store per model.
 
     The model stores are opened below ``store_root``. The validated inventory
     exposed by ``flemish_phones.phraser_phones`` is extracted through the same
@@ -129,10 +123,9 @@ def extract_flemish_phone_embeddings_for_models(
 
     Returns a dictionary mapping each model name to its store path.
     '''
-    return _extract_phone_embeddings_for_models(
+    return _extract_phone_cnn_features_for_models(
         flemish_phones,
         model_names,
-        layers=layers,
         collar=collar,
         store_root=store_root,
         model_paths_file=model_paths_file,
@@ -144,10 +137,9 @@ def extract_flemish_phone_embeddings_for_models(
     )
 
 
-def _extract_phone_embeddings_for_models(
+def _extract_phone_cnn_features_for_models(
     phones,
     model_names,
-    layers,
     collar,
     store_root,
     model_paths_file,
@@ -169,12 +161,11 @@ def _extract_phone_embeddings_for_models(
             model_paths_file=model_paths_file,
         )
         try:
-            extract_phone_embeddings(
+            extract_phone_cnn_features(
                 phones,
+                store,
                 model_name=model_name,
-                layers=layers,
                 collar=collar,
-                store=store,
                 model_paths_file=model_paths_file,
                 phraser_source_id=phraser_source_id,
                 gpu=gpu,
