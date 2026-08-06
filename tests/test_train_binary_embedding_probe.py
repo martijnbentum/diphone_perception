@@ -329,19 +329,6 @@ def _phone_result(target_phoneme, model_name, layer, collar, results_dir,
         random_state=random_state, standardize=standardize, root=results_dir)
 
 
-def _stored_run_id(phone_result):
-    '''Recompute a run_id from a persisted manifest.
-
-    The stored manifest carries extra actual_n_samples/actual_n_missing
-    keys added after training, so they are stripped before hashing to match
-    the run_id produced from the original pre-training manifest.
-    '''
-    manifest = dict(phone_result.run)
-    manifest.pop('actual_n_samples', None)
-    manifest.pop('actual_n_missing', None)
-    return probe_run.hash_run_manifest(manifest)
-
-
 def test_train_binary_embedding_probe_end_to_end(tmp_path):
     rng = np.random.default_rng(0)
     phones, store = _make_separable_dataset(
@@ -429,9 +416,9 @@ def test_train_binary_embedding_probe_standardization_is_fold_local(tmp_path):
         standardize=True, verbose=False, probe_save_dir=probe_dir,
         results_dir=tmp_path / 'results-scaled')
 
-    raw_run_id = _stored_run_id(_phone_result('p', 'model-a', 9, 2000,
+    raw_run_id = probe_run.stored_run_id(_phone_result('p', 'model-a', 9, 2000,
         tmp_path / 'results-raw', standardize=False))
-    scaled_run_id = _stored_run_id(_phone_result('p', 'model-a', 9, 2000,
+    scaled_run_id = probe_run.stored_run_id(_phone_result('p', 'model-a', 9, 2000,
         tmp_path / 'results-scaled', standardize=True))
     assert raw_run_id != scaled_run_id
     raw_probes = _load_saved_probes(probe_dir, 'model-a', 'p', 9, 2000,
@@ -841,7 +828,7 @@ def test_train_binary_embedding_probe_skips_when_all_folds_already_saved(
 
     first_result = _phone_result('p', 'model-a', 9, 500, results_dir,
         n_embeds=30)
-    first_run_id = _stored_run_id(first_result)
+    first_run_id = probe_run.stored_run_id(first_result)
     first_accuracies = first_result.accuracies
     first_mean_accuracy = first_result.mean_accuracy
 
@@ -853,7 +840,7 @@ def test_train_binary_embedding_probe_skips_when_all_folds_already_saved(
 
     second_result = _phone_result('p', 'model-a', 9, 500, results_dir,
         n_embeds=30)
-    assert _stored_run_id(second_result) == first_run_id
+    assert probe_run.stored_run_id(second_result) == first_run_id
     # embeddings were never reloaded - proves the fast path skipped loading
     assert len(store.phraser_keys_to_embeddings_calls) == calls_after_first
     assert second_result.accuracies == pytest.approx(first_accuracies)
@@ -894,7 +881,7 @@ def test_train_binary_embedding_probe_does_not_reuse_a_different_collar(
         phones, 'p', store=store, model_name='model-a', layer=9, collar=500,
         n_embeds=30, verbose=True, probe_save_dir=probe_dir,
         results_dir=results_dir)
-    first_run_id = _stored_run_id(_phone_result('p', 'model-a', 9, 500,
+    first_run_id = probe_run.stored_run_id(_phone_result('p', 'model-a', 9, 500,
         results_dir, n_embeds=30))
     capsys.readouterr()
 
@@ -902,7 +889,7 @@ def test_train_binary_embedding_probe_does_not_reuse_a_different_collar(
         phones, 'p', store=store, model_name='model-a', layer=9, collar=2000,
         n_embeds=30, verbose=True, probe_save_dir=probe_dir,
         results_dir=results_dir)
-    second_run_id = _stored_run_id(_phone_result('p', 'model-a', 9, 2000,
+    second_run_id = probe_run.stored_run_id(_phone_result('p', 'model-a', 9, 2000,
         results_dir, n_embeds=30))
 
     assert second_run_id != first_run_id

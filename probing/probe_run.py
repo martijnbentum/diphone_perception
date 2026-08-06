@@ -159,6 +159,19 @@ def hash_run_manifest(manifest):
     return _hash_json(manifest)[:16]
 
 
+def stored_run_id(phone_result):
+    '''Recompute a run_id from a PhoneResult's persisted manifest.
+
+    The stored manifest carries actual_n_samples/actual_n_missing keys
+    appended after training, so they are stripped before hashing to match
+    the run_id produced from the original pre-training manifest.
+    '''
+    manifest = dict(phone_result.run)
+    manifest.pop('actual_n_samples', None)
+    manifest.pop('actual_n_missing', None)
+    return hash_run_manifest(manifest)
+
+
 def fold_paths(probe_run_directory, predictions_run_directory, fold_idx):
     '''Return probe, prediction, and completion paths for one fold.
 

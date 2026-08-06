@@ -10,7 +10,9 @@ from sklearn.pipeline import Pipeline
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import locations
-from probing import probe_run, train_binary_mfcc_probe as tbp
+from probing import probe_run
+from probing import result as probe_result
+from probing import train_binary_mfcc_probe as tbp
 
 
 class FakePhone:
@@ -157,48 +159,59 @@ def test_load_mfcc_vectors_uses_center_frame_and_reports_missing():
 def test_train_binary_mfcc_probe_end_to_end(standardize, tmp_path):
     phones, store = _make_separable_dataset(np.random.default_rng(0))
     probe_dir = tmp_path / 'probes'
+    results_dir = tmp_path
 
-    result = tbp.train_binary_mfcc_probe(
+    tbp.train_binary_mfcc_probe(
         phones, 'p', store=store, n_samples=30, standardize=standardize,
-        verbose=False, save_probes=True, probe_save_dir=probe_dir,
-        save_predictions=False, results_dir=tmp_path)
+        verbose=False, probe_save_dir=probe_dir, results_dir=results_dir)
 
-    assert result['representation'] == 'mfcc'
-    assert result['frame'] == 'center'
-    assert result['n_samples'] == 60
-    assert result['n_missing'] == 0
-    assert result['mean_accuracy'] > .9
+    phone_result = probe_result.PhoneResult.mfcc('p', 'center',
+        n_samples=30, n_splits=5, random_state=42, standardize=standardize,
+        root=results_dir)
+    assert phone_result.run['actual_n_samples'] == 60
+    assert phone_result.run['actual_n_missing'] == 0
+    assert phone_result.mean_accuracy > .9
     probe_type = Pipeline if standardize else LogisticRegression
-    probes = _load_saved_probes(probe_dir, 'p', 'center', result['run_id'],
-        n_splits=5)
+    run_id = probe_run.stored_run_id(phone_result)
+    probes = _load_saved_probes(probe_dir, 'p', 'center', run_id, n_splits=5)
     assert all(isinstance(probe, probe_type) for probe in probes)
-    results_path = Path(result['results_path'])
-    assert results_path.name == 'results.json'
+
+    results_path = phone_result.path / 'results.json'
     saved = json.loads(results_path.read_text(encoding='utf-8'))
     assert saved['kind'] == 'binary_mfcc_probe_results'
-    assert saved['results']['p']['mean_accuracy'] == result['mean_accuracy']
+    assert saved['results']['p']['mean_accuracy'] == pytest.approx(
+        phone_result.mean_accuracy)
     assert 'probes' not in saved['results']['p']
 
 
-def test_train_binary_mfcc_probe_scale_flag_changes_run_identity():
+def test_train_binary_mfcc_probe_scale_flag_changes_run_identity(tmp_path):
+    # Predictions for a given target/frame always land at the same
+    # PhoneResult path regardless of standardize, so raw and scaled results
+    # are written to separate results_dir trees here.
     phones, store = _make_separable_dataset(np.random.default_rng(0))
     arguments = {
         'store': store,
         'n_samples': 30,
         'verbose': False,
-        'save_probes': False,
-        'save_predictions': False,
         'save_results': False,
+        'probe_save_dir': tmp_path / 'probes',
     }
 
-    raw = tbp.train_binary_mfcc_probe(
-        phones, 'p', standardize=False, **arguments)
-    scaled = tbp.train_binary_mfcc_probe(
-        phones, 'p', standardize=True, **arguments)
+    tbp.train_binary_mfcc_probe(
+        phones, 'p', standardize=False, results_dir=tmp_path / 'raw',
+        **arguments)
+    tbp.train_binary_mfcc_probe(
+        phones, 'p', standardize=True, results_dir=tmp_path / 'scaled',
+        **arguments)
 
-    assert raw['run_id'] != scaled['run_id']
-    assert raw['standardize'] is False
-    assert scaled['standardize'] is True
+    raw_result = probe_result.PhoneResult.mfcc('p', 'center', n_samples=30,
+        n_splits=5, random_state=42, standardize=False,
+        root=tmp_path / 'raw')
+    scaled_result = probe_result.PhoneResult.mfcc('p', 'center',
+        n_samples=30, n_splits=5, random_state=42, standardize=True,
+        root=tmp_path / 'scaled')
+    assert probe_run.stored_run_id(raw_result) != probe_run.stored_run_id(
+        scaled_result)
 
 
 def test_train_binary_mfcc_probes_trains_each_phraser_label(tmp_path):
@@ -211,10 +224,9 @@ def test_train_binary_mfcc_probes_trains_each_phraser_label(tmp_path):
         store=store,
         n_samples=30,
         verbose=False,
-        save_probes=False,
-        save_predictions=False,
         probe_save_dir=tmp_path / 'probes',
         results_dir=tmp_path,
+        report=True,
     )
 
     assert list(results) == ['p', 't']
@@ -232,7 +244,25 @@ def test_train_binary_mfcc_probes_trains_each_phraser_label(tmp_path):
     } == {str(results_path.resolve())}
 
 
-def test_train_binary_mfcc_probe_opens_default_store(monkeypatch):
+def test_train_binary_mfcc_probes_returns_none_without_report(tmp_path):
+    phones, store = _make_separable_dataset(
+        np.random.default_rng(0), n_target=30, n_other_each=30)
+
+    results = tbp.train_binary_mfcc_probes(
+        phones,
+        target_phonemes=['p', 't'],
+        store=store,
+        n_samples=30,
+        verbose=False,
+        probe_save_dir=tmp_path / 'probes',
+        results_dir=tmp_path,
+        save_results=False,
+    )
+
+    assert results is None
+
+
+def test_train_binary_mfcc_probe_opens_default_store(tmp_path, monkeypatch):
     phones, store = _make_separable_dataset(np.random.default_rng(0))
     opened_roots = []
 
@@ -242,8 +272,9 @@ def test_train_binary_mfcc_probe_opens_default_store(monkeypatch):
 
     monkeypatch.setattr(tbp.echoframe, 'Store', fake_store_constructor)
     tbp.train_binary_mfcc_probe(
-        phones, 'p', n_samples=30, verbose=False, save_probes=False,
-        save_predictions=False, save_results=False)
+        phones, 'p', n_samples=30, verbose=False, save_results=False,
+        probe_save_dir=tmp_path / 'probes',
+        results_dir=tmp_path / 'results')
 
     assert opened_roots == [str(locations.echoframe_mfcc_store)]
 
