@@ -251,13 +251,13 @@ def train_binary_mfcc_probe(
     if outcome is None:
         result.update({'accuracies': phone_result.accuracies,
             'mean_accuracy': phone_result.mean_accuracy,
-            'std_accuracy': phone_result.std_accuracy, 'probes': [],
+            'std_accuracy': phone_result.std_accuracy,
             'n_samples': None, 'n_missing': None, 'skipped': True})
     else:
         result.update({'accuracies': outcome.accuracies,
             'mean_accuracy': outcome.mean_accuracy,
             'std_accuracy': outcome.std_accuracy,
-            'probes': outcome.classifiers, 'n_samples': outcome.n_samples,
+            'n_samples': outcome.n_samples,
             'n_missing': outcome.n_missing, 'skipped': False})
     if save_results:
         output_path = phone_result.path / _run_results_filename

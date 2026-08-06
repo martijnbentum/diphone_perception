@@ -2,6 +2,7 @@ import sys
 from collections import Counter
 from pathlib import Path
 
+import joblib
 import numpy as np
 import pytest
 from sklearn.linear_model import LogisticRegression
@@ -308,6 +309,18 @@ def _make_separable_dataset(rng, n_target, n_other_each, other_labels, dim=4):
     return phones, store
 
 
+def _load_saved_probes(probe_dir, model_name, target_phoneme, layer, collar,
+    run_id, n_splits):
+    probe_run_directory = tbp._run_directory(probe_dir, model_name,
+        target_phoneme, layer, collar, run_id)
+    probes = []
+    for fold_idx in range(n_splits):
+        probe_path, _, _ = probe_run.fold_paths(probe_run_directory,
+            probe_run_directory, fold_idx)
+        probes.append(joblib.load(probe_path))
+    return probes
+
+
 def test_train_binary_embedding_probe_end_to_end():
     rng = np.random.default_rng(0)
     phones, store = _make_separable_dataset(
@@ -323,7 +336,6 @@ def test_train_binary_embedding_probe_end_to_end():
     assert result['n_samples'] == 60
     assert result['n_missing'] == 0
     assert len(result['accuracies']) == 5
-    assert len(result['probes']) == 5
     assert result['mean_accuracy'] > 0.9  # clusters are well separated
     assert result['skipped'] is False
     assert result['cache_status'] == 'disabled'
@@ -373,26 +385,31 @@ def test_train_binary_embedding_probe_rejects_duplicate_phraser_keys():
             phones, 'p', store=store, verbose=False)
 
 
-def test_train_binary_embedding_probe_standardization_is_fold_local():
+def test_train_binary_embedding_probe_standardization_is_fold_local(tmp_path):
     rng = np.random.default_rng(0)
     phones, store = _make_separable_dataset(
         rng, n_target=30, n_other_each=15, other_labels=['a', 't'])
+    probe_dir = tmp_path / 'probes'
 
     raw = tbp.train_binary_embedding_probe(
         phones, 'p', store=store, model_name='model-a', n_embeds=30,
-        standardize=False, verbose=False, save_probes=False,
-        save_predictions=False)
+        standardize=False, verbose=False, save_probes=True,
+        probe_save_dir=probe_dir, save_predictions=False)
     scaled = tbp.train_binary_embedding_probe(
         phones, 'p', store=store, model_name='model-a', n_embeds=30,
-        standardize=True, verbose=False, save_probes=False,
-        save_predictions=False)
+        standardize=True, verbose=False, save_probes=True,
+        probe_save_dir=probe_dir, save_predictions=False)
 
     assert raw['run_id'] != scaled['run_id']
-    assert all(isinstance(probe, LogisticRegression) for probe in raw['probes'])
-    assert all(isinstance(probe, Pipeline) for probe in scaled['probes'])
+    raw_probes = _load_saved_probes(probe_dir, 'model-a', 'p', 9, 2000,
+        raw['run_id'], n_splits=5)
+    scaled_probes = _load_saved_probes(probe_dir, 'model-a', 'p', 9, 2000,
+        scaled['run_id'], n_splits=5)
+    assert all(isinstance(probe, LogisticRegression) for probe in raw_probes)
+    assert all(isinstance(probe, Pipeline) for probe in scaled_probes)
     assert all(
         hasattr(probe.named_steps['standardscaler'], 'mean_')
-        for probe in scaled['probes']
+        for probe in scaled_probes
     )
     assert scaled['standardize'] is True
 
@@ -787,7 +804,6 @@ def test_train_binary_embedding_probe_skips_when_all_folds_already_saved(tmp_pat
     assert len(store.phraser_keys_to_embeddings_calls) == calls_after_first
     assert second['accuracies'] == pytest.approx(first['accuracies'])
     assert second['mean_accuracy'] == pytest.approx(first['mean_accuracy'])
-    assert all(isinstance(p, LogisticRegression) for p in second['probes'])
 
 
 def test_train_binary_embedding_probe_overwrite_forces_retrain(tmp_path):

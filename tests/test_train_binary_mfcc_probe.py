@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 import sys
 
+import joblib
 import numpy as np
 import pytest
 from sklearn.linear_model import LogisticRegression
@@ -9,7 +10,7 @@ from sklearn.pipeline import Pipeline
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import locations
-from probing import train_binary_mfcc_probe as tbp
+from probing import probe_run, train_binary_mfcc_probe as tbp
 
 
 class FakePhone:
@@ -111,6 +112,17 @@ def _make_separable_dataset(
     return phones, FakeStore(matrices_by_key)
 
 
+def _load_saved_probes(probe_dir, target_phoneme, frame, run_id, n_splits):
+    probe_run_directory = tbp._run_directory(probe_dir, target_phoneme,
+        frame, run_id)
+    probes = []
+    for fold_idx in range(n_splits):
+        probe_path, _, _ = probe_run.fold_paths(probe_run_directory,
+            probe_run_directory, fold_idx)
+        probes.append(joblib.load(probe_path))
+    return probes
+
+
 def test_load_mfcc_vectors_uses_center_frame_and_reports_missing():
     selected = [
         (FakePhone('p'), FakePhraserPhone(0), 'target'),
@@ -144,11 +156,12 @@ def test_load_mfcc_vectors_uses_center_frame_and_reports_missing():
 @pytest.mark.parametrize('standardize', [False, True])
 def test_train_binary_mfcc_probe_end_to_end(standardize, tmp_path):
     phones, store = _make_separable_dataset(np.random.default_rng(0))
+    probe_dir = tmp_path / 'probes'
 
     result = tbp.train_binary_mfcc_probe(
         phones, 'p', store=store, n_samples=30, standardize=standardize,
-        verbose=False, save_probes=False, save_predictions=False,
-        results_dir=tmp_path)
+        verbose=False, save_probes=True, probe_save_dir=probe_dir,
+        save_predictions=False, results_dir=tmp_path)
 
     assert result['representation'] == 'mfcc'
     assert result['frame'] == 'center'
@@ -156,7 +169,9 @@ def test_train_binary_mfcc_probe_end_to_end(standardize, tmp_path):
     assert result['n_missing'] == 0
     assert result['mean_accuracy'] > .9
     probe_type = Pipeline if standardize else LogisticRegression
-    assert all(isinstance(probe, probe_type) for probe in result['probes'])
+    probes = _load_saved_probes(probe_dir, 'p', 'center', result['run_id'],
+        n_splits=5)
+    assert all(isinstance(probe, probe_type) for probe in probes)
     results_path = Path(result['results_path'])
     assert results_path.name == 'results.json'
     saved = json.loads(results_path.read_text(encoding='utf-8'))

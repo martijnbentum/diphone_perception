@@ -78,12 +78,12 @@ def train_binary_embedding_probe(phones, target_phoneme, store=None,
     if outcome is None:
         result_fields.update({'accuracies': phone_result.accuracies,
             'mean_accuracy': phone_result.mean_accuracy,
-            'std_accuracy': phone_result.std_accuracy, 'probes': [],
+            'std_accuracy': phone_result.std_accuracy,
             'n_samples': None, 'n_missing': None, 'skipped': True})
         return result_fields
     result_fields.update({'accuracies': outcome.accuracies,
         'mean_accuracy': outcome.mean_accuracy,
-        'std_accuracy': outcome.std_accuracy, 'probes': outcome.classifiers,
+        'std_accuracy': outcome.std_accuracy,
         'n_samples': outcome.n_samples, 'n_missing': outcome.n_missing,
         'skipped': False})
     return result_fields

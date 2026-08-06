@@ -14,8 +14,8 @@ _cache_schema_version = 2
 _trainer_version = 2
 
 TrainingOutcome = namedtuple('TrainingOutcome',
-    ['classifiers', 'accuracies', 'mean_accuracy', 'std_accuracy',
-        'n_samples', 'n_missing'])
+    ['accuracies', 'mean_accuracy', 'std_accuracy', 'n_samples',
+        'n_missing'])
 
 
 def run(*, load_vectors, manifest, probe_run_directory,
@@ -77,8 +77,8 @@ def run(*, load_vectors, manifest, probe_run_directory,
         print(f'{display_name}: mean={probes.mean_accuracy:.4f} '
             f'std={probes.std_accuracy:.4f}')
 
-    return TrainingOutcome(probes.classifiers, probes.accuracies,
-        probes.mean_accuracy, probes.std_accuracy, len(X), len(missing))
+    return TrainingOutcome(probes.accuracies, probes.mean_accuracy,
+        probes.std_accuracy, len(X), len(missing))
 
 
 def classify_cache_status(save_predictions, complete_before, overwrite,
