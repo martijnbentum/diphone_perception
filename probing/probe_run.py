@@ -73,6 +73,12 @@ def run(*, load_vectors, manifest, probe_run_directory,
             fold = probe_result.Fold(phone_result, fold_number)
             fold.save_results(predictions)
 
+    if save_predictions:
+        manifest_with_counts = dict(manifest)
+        manifest_with_counts['actual_n_samples'] = len(X)
+        manifest_with_counts['actual_n_missing'] = len(missing)
+        phone_result.save_run(manifest_with_counts)
+
     if verbose:
         print(f'{display_name}: mean={probes.mean_accuracy:.4f} '
             f'std={probes.std_accuracy:.4f}')

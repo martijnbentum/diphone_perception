@@ -10,6 +10,7 @@ from sklearn.pipeline import Pipeline
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from probing import probe_run, probe_utils
+from probing import result as probe_result
 from probing import train_binary_embedding_probe as tbp
 
 
@@ -321,38 +322,61 @@ def _load_saved_probes(probe_dir, model_name, target_phoneme, layer, collar,
     return probes
 
 
-def test_train_binary_embedding_probe_end_to_end():
+def _phone_result(target_phoneme, model_name, layer, collar, results_dir,
+    n_embeds=30, n_splits=5, random_state=42, standardize=False):
+    return probe_result.PhoneResult.embedding(target_phoneme, model_name,
+        layer, collar, n_samples=n_embeds, n_splits=n_splits,
+        random_state=random_state, standardize=standardize, root=results_dir)
+
+
+def _stored_run_id(phone_result):
+    '''Recompute a run_id from a persisted manifest.
+
+    The stored manifest carries extra actual_n_samples/actual_n_missing
+    keys added after training, so they are stripped before hashing to match
+    the run_id produced from the original pre-training manifest.
+    '''
+    manifest = dict(phone_result.run)
+    manifest.pop('actual_n_samples', None)
+    manifest.pop('actual_n_missing', None)
+    return probe_run.hash_run_manifest(manifest)
+
+
+def test_train_binary_embedding_probe_end_to_end(tmp_path):
     rng = np.random.default_rng(0)
     phones, store = _make_separable_dataset(
         rng, n_target=30, n_other_each=15, other_labels=['a', 't'])
+    probe_dir, results_dir = tmp_path / 'probes', tmp_path / 'results'
 
-    result = tbp.train_binary_embedding_probe(
+    tbp.train_binary_embedding_probe(
         phones, 'p', store=store, model_name='model-a', layer=9, collar=500,
         n_embeds=30, n_splits=5, random_state=42, verbose=False,
-        save_probes=False, save_predictions=False)
+        probe_save_dir=probe_dir, results_dir=results_dir)
 
-    assert result['target_phoneme'] == 'p'
-    assert result['layer'] == 9
-    assert result['n_samples'] == 60
-    assert result['n_missing'] == 0
-    assert len(result['accuracies']) == 5
-    assert result['mean_accuracy'] > 0.9  # clusters are well separated
-    assert result['skipped'] is False
-    assert result['cache_status'] == 'disabled'
+    phone_result = _phone_result('p', 'model-a', 9, 500, results_dir,
+        n_embeds=30)
+    assert phone_result.run['actual_n_samples'] == 60
+    assert phone_result.run['actual_n_missing'] == 0
+    assert len(phone_result.accuracies) == 5
+    assert phone_result.mean_accuracy > 0.9  # clusters are well separated
 
 
-def test_train_binary_embedding_probe_passes_default_collar_to_echoframe():
+def test_train_binary_embedding_probe_passes_default_collar_to_echoframe(
+    tmp_path):
     rng = np.random.default_rng(0)
     phones, store = _make_separable_dataset(
         rng, n_target=30, n_other_each=15, other_labels=['a', 't'])
+    probe_dir, results_dir = tmp_path / 'probes', tmp_path / 'results'
 
-    result = tbp.train_binary_embedding_probe(
+    tbp.train_binary_embedding_probe(
         phones, 'p', store=store, model_name='model-a', layer=9,
-        n_embeds=30, verbose=False, save_probes=False,
-        save_predictions=False)
+        n_embeds=30, verbose=False, probe_save_dir=probe_dir,
+        results_dir=results_dir)
 
     assert store.phraser_keys_to_embeddings_calls[0]['collar'] == 2000
-    assert result['collar'] == 2000
+    phone_result = _phone_result('p', 'model-a', 9, 2000, results_dir,
+        n_embeds=30)
+    assert phone_result.run['feature_parameters']['collar'] == 2000
 
 
 def test_train_binary_embedding_probe_rejects_too_few_splits():
@@ -386,35 +410,44 @@ def test_train_binary_embedding_probe_rejects_duplicate_phraser_keys():
 
 
 def test_train_binary_embedding_probe_standardization_is_fold_local(tmp_path):
+    # Predictions for a given target/model/layer/collar always land at the
+    # same PhoneResult path regardless of standardize, so raw and scaled
+    # results are written to separate results_dir trees here; only the
+    # shared probe_dir (keyed by run_id, which does vary by standardize) is
+    # what this test actually cares about.
     rng = np.random.default_rng(0)
     phones, store = _make_separable_dataset(
         rng, n_target=30, n_other_each=15, other_labels=['a', 't'])
     probe_dir = tmp_path / 'probes'
 
-    raw = tbp.train_binary_embedding_probe(
+    tbp.train_binary_embedding_probe(
         phones, 'p', store=store, model_name='model-a', n_embeds=30,
-        standardize=False, verbose=False, save_probes=True,
-        probe_save_dir=probe_dir, save_predictions=False)
-    scaled = tbp.train_binary_embedding_probe(
+        standardize=False, verbose=False, probe_save_dir=probe_dir,
+        results_dir=tmp_path / 'results-raw')
+    tbp.train_binary_embedding_probe(
         phones, 'p', store=store, model_name='model-a', n_embeds=30,
-        standardize=True, verbose=False, save_probes=True,
-        probe_save_dir=probe_dir, save_predictions=False)
+        standardize=True, verbose=False, probe_save_dir=probe_dir,
+        results_dir=tmp_path / 'results-scaled')
 
-    assert raw['run_id'] != scaled['run_id']
+    raw_run_id = _stored_run_id(_phone_result('p', 'model-a', 9, 2000,
+        tmp_path / 'results-raw', standardize=False))
+    scaled_run_id = _stored_run_id(_phone_result('p', 'model-a', 9, 2000,
+        tmp_path / 'results-scaled', standardize=True))
+    assert raw_run_id != scaled_run_id
     raw_probes = _load_saved_probes(probe_dir, 'model-a', 'p', 9, 2000,
-        raw['run_id'], n_splits=5)
+        raw_run_id, n_splits=5)
     scaled_probes = _load_saved_probes(probe_dir, 'model-a', 'p', 9, 2000,
-        scaled['run_id'], n_splits=5)
+        scaled_run_id, n_splits=5)
     assert all(isinstance(probe, LogisticRegression) for probe in raw_probes)
     assert all(isinstance(probe, Pipeline) for probe in scaled_probes)
     assert all(
         hasattr(probe.named_steps['standardscaler'], 'mean_')
         for probe in scaled_probes
     )
-    assert scaled['standardize'] is True
 
 
-def test_train_binary_embedding_probes_trains_each_phraser_label(capsys):
+def test_train_binary_embedding_probes_trains_each_phraser_label(
+    tmp_path, capsys):
     rng = np.random.default_rng(0)
     phones, store = _make_separable_dataset(
         rng, n_target=30, n_other_each=30, other_labels=['a', 't'])
@@ -426,20 +459,38 @@ def test_train_binary_embedding_probes_trains_each_phraser_label(capsys):
         model_name='model-a',
         n_embeds=30,
         verbose=True,
-        save_probes=False,
-        save_predictions=False,
+        probe_save_dir=tmp_path / 'probes',
+        results_dir=tmp_path / 'results',
+        report=True,
     )
 
     assert list(results) == ['p', 'a']
-    assert all(
-        result['representation'] == 'embedding'
-        for result in results.values()
-    )
+    assert all('mean_accuracy' in result for result in results.values())
     assert len(store.phraser_keys_to_embeddings_calls) == 2
     output = capsys.readouterr().out
     assert "[embedding probes] 1/2 starting 'p'" in output
     assert '[embedding probes] 2/2 completed' in output
     assert 'ETA ' in output
+
+
+def test_train_binary_embedding_probes_returns_none_without_report(
+    tmp_path):
+    rng = np.random.default_rng(0)
+    phones, store = _make_separable_dataset(
+        rng, n_target=30, n_other_each=30, other_labels=['a', 't'])
+
+    results = tbp.train_binary_embedding_probes(
+        phones,
+        target_phonemes=['p', 'a'],
+        store=store,
+        model_name='model-a',
+        n_embeds=30,
+        verbose=False,
+        probe_save_dir=tmp_path / 'probes',
+        results_dir=tmp_path / 'results',
+    )
+
+    assert results is None
 
 
 def test_train_binary_embedding_probes_rejects_unbalanced_inventory():
@@ -474,8 +525,8 @@ def test_train_binary_embedding_probes_opens_one_shared_store(
         model_name='model-a',
         n_embeds=30,
         verbose=False,
-        save_probes=False,
-        save_predictions=False,
+        probe_save_dir=tmp_path / 'probes',
+        results_dir=tmp_path / 'results',
     )
 
     assert opened_roots == [str(tmp_path / 'store')]
@@ -491,8 +542,6 @@ def make_compact_probe_results():
             'std_accuracy': .1,
             'n_samples': 4,
             'n_missing': 0,
-            'skipped': False,
-            'cache_status': 'miss',
             'probes': [object()],
         },
         'a': {
@@ -500,8 +549,6 @@ def make_compact_probe_results():
             'std_accuracy': .05,
             'n_samples': None,
             'n_missing': None,
-            'skipped': True,
-            'cache_status': 'hit',
             'probes': [object()],
         },
     }
@@ -557,9 +604,7 @@ def test_checkpoint_probe_sweep_trains_and_returns_compact_report(
         n_splits=2,
         random_state=7,
         standardize=True,
-        save_probes=True,
         probe_save_dir=tmp_path / 'probes',
-        save_predictions=True,
         results_dir=tmp_path / 'results',
         overwrite=True,
         metadata_batch_size=25,
@@ -585,12 +630,11 @@ def test_checkpoint_probe_sweep_trains_and_returns_compact_report(
             'n_splits': 2,
             'random_state': 7,
             'standardize': True,
-            'save_probes': True,
             'probe_save_dir': tmp_path / 'probes',
-            'save_predictions': True,
             'results_dir': tmp_path / 'results',
             'overwrite': True,
             'verbose': True,
+            'report': True,
         },
     )]
     assert store.closed is True
@@ -605,8 +649,6 @@ def test_checkpoint_probe_sweep_trains_and_returns_compact_report(
         'std_accuracy': .1,
         'n_samples': 4,
         'n_missing': 0,
-        'skipped': False,
-        'cache_status': 'miss',
     }
     assert run['labels']['a']['n_samples'] == 4
     assert run['labels']['a']['n_missing'] == 0
@@ -738,13 +780,16 @@ def test_train_binary_embedding_probe_opens_store_when_none_given(tmp_path, monk
 
     monkeypatch.setattr(tbp.echoframe, 'Store', fake_store_constructor)
 
-    result = tbp.train_binary_embedding_probe(
+    tbp.train_binary_embedding_probe(
         phones, 'p', model_name='model-a', layer=9, collar=500,
         store_root=tmp_path / 'store', n_embeds=30, verbose=False,
-        save_probes=False, save_predictions=False)
+        probe_save_dir=tmp_path / 'probes',
+        results_dir=tmp_path / 'results')
 
     assert store_roots == [str(tmp_path / 'store')]
-    assert result['n_samples'] == 60
+    phone_result = _phone_result('p', 'model-a', 9, 500,
+        tmp_path / 'results', n_embeds=30)
+    assert phone_result.run['actual_n_samples'] == 60
 
 
 def test_train_binary_embedding_probe_saves_probes_and_predictions(tmp_path):
@@ -758,8 +803,7 @@ def test_train_binary_embedding_probe_saves_probes_and_predictions(tmp_path):
     tbp.train_binary_embedding_probe(
         phones, 'p', store=store, model_name='model-a', layer=9, collar=500,
         n_embeds=30, n_splits=5, random_state=42, verbose=False,
-        save_probes=True, probe_save_dir=probe_dir,
-        save_predictions=True, results_dir=results_dir)
+        probe_save_dir=probe_dir, results_dir=results_dir)
 
     probe_files = sorted((probe_dir / 'model-a' / 'p').rglob('*.joblib'))
     pred_files = sorted((results_dir / 'model-a' / 'p').rglob('*.tsv'))
@@ -772,41 +816,52 @@ def test_train_binary_embedding_probe_saves_probes_and_predictions(tmp_path):
     assert len(list(probe_dir.rglob('run.json'))) == 1
     assert len(list(results_dir.rglob('run.json'))) == 1
 
+    phone_result = _phone_result('p', 'model-a', 9, 500, results_dir,
+        n_embeds=30)
+    assert phone_result.run['actual_n_samples'] == 60
+    assert phone_result.run['actual_n_missing'] == 0
+
 
 # -- skip / overwrite / gap-filling behavior --------------------------------
 
-def test_train_binary_embedding_probe_skips_when_all_folds_already_saved(tmp_path):
+def test_train_binary_embedding_probe_skips_when_all_folds_already_saved(
+    tmp_path, capsys):
     rng = np.random.default_rng(0)
     phones, store = _make_separable_dataset(
         rng, n_target=30, n_other_each=15, other_labels=['a', 't'])
     probe_dir, results_dir = tmp_path / 'probes', tmp_path / 'results'
 
-    first = tbp.train_binary_embedding_probe(
+    tbp.train_binary_embedding_probe(
         phones, 'p', store=store, model_name='model-a', layer=9, collar=500,
-        n_embeds=30, n_splits=5, random_state=42, verbose=False,
+        n_embeds=30, n_splits=5, random_state=42, verbose=True,
         probe_save_dir=probe_dir, results_dir=results_dir)
-    assert first['skipped'] is False
-    assert first['cache_status'] == 'miss'
+    assert 'cache status: miss' in capsys.readouterr().out
     calls_after_first = len(store.phraser_keys_to_embeddings_calls)
     assert calls_after_first == 1
 
-    second = tbp.train_binary_embedding_probe(
-        phones, 'p', store=store, model_name='model-a', layer=9, collar=500,
-        n_embeds=30, n_splits=5, random_state=42, verbose=False,
-        probe_save_dir=probe_dir, results_dir=results_dir)
+    first_result = _phone_result('p', 'model-a', 9, 500, results_dir,
+        n_embeds=30)
+    first_run_id = _stored_run_id(first_result)
+    first_accuracies = first_result.accuracies
+    first_mean_accuracy = first_result.mean_accuracy
 
-    assert second['skipped'] is True
-    assert second['cache_status'] == 'hit'
-    assert second['run_id'] == first['run_id']
-    assert second['n_samples'] is None
-    assert second['n_missing'] is None
+    tbp.train_binary_embedding_probe(
+        phones, 'p', store=store, model_name='model-a', layer=9, collar=500,
+        n_embeds=30, n_splits=5, random_state=42, verbose=True,
+        probe_save_dir=probe_dir, results_dir=results_dir)
+    assert 'cache status: hit' in capsys.readouterr().out
+
+    second_result = _phone_result('p', 'model-a', 9, 500, results_dir,
+        n_embeds=30)
+    assert _stored_run_id(second_result) == first_run_id
     # embeddings were never reloaded - proves the fast path skipped loading
     assert len(store.phraser_keys_to_embeddings_calls) == calls_after_first
-    assert second['accuracies'] == pytest.approx(first['accuracies'])
-    assert second['mean_accuracy'] == pytest.approx(first['mean_accuracy'])
+    assert second_result.accuracies == pytest.approx(first_accuracies)
+    assert second_result.mean_accuracy == pytest.approx(first_mean_accuracy)
 
 
-def test_train_binary_embedding_probe_overwrite_forces_retrain(tmp_path):
+def test_train_binary_embedding_probe_overwrite_forces_retrain(
+    tmp_path, capsys):
     rng = np.random.default_rng(0)
     phones, store = _make_separable_dataset(
         rng, n_target=30, n_other_each=15, other_labels=['a', 't'])
@@ -818,33 +873,38 @@ def test_train_binary_embedding_probe_overwrite_forces_retrain(tmp_path):
         probe_save_dir=probe_dir, results_dir=results_dir)
     calls_after_first = len(store.phraser_keys_to_embeddings_calls)
 
-    second = tbp.train_binary_embedding_probe(
+    tbp.train_binary_embedding_probe(
         phones, 'p', store=store, model_name='model-a', layer=9, collar=500,
-        n_embeds=30, n_splits=5, random_state=42, verbose=False,
+        n_embeds=30, n_splits=5, random_state=42, verbose=True,
         probe_save_dir=probe_dir, results_dir=results_dir, overwrite=True)
 
-    assert second['skipped'] is False
-    assert second['cache_status'] == 'refresh'
+    assert 'cache status: refresh' in capsys.readouterr().out
     # overwrite bypasses the skip check, so embeddings get reloaded
     assert len(store.phraser_keys_to_embeddings_calls) == calls_after_first + 1
 
 
-def test_train_binary_embedding_probe_does_not_reuse_a_different_collar(tmp_path):
+def test_train_binary_embedding_probe_does_not_reuse_a_different_collar(
+    tmp_path, capsys):
     rng = np.random.default_rng(0)
     phones, store = _make_separable_dataset(
         rng, n_target=30, n_other_each=15, other_labels=['a', 't'])
     probe_dir, results_dir = tmp_path / 'probes', tmp_path / 'results'
 
-    first = tbp.train_binary_embedding_probe(
+    tbp.train_binary_embedding_probe(
         phones, 'p', store=store, model_name='model-a', layer=9, collar=500,
-        n_embeds=30, verbose=False, probe_save_dir=probe_dir,
+        n_embeds=30, verbose=True, probe_save_dir=probe_dir,
         results_dir=results_dir)
-    second = tbp.train_binary_embedding_probe(
-        phones, 'p', store=store, model_name='model-a', layer=9, collar=2000,
-        n_embeds=30, verbose=False, probe_save_dir=probe_dir,
-        results_dir=results_dir)
+    first_run_id = _stored_run_id(_phone_result('p', 'model-a', 9, 500,
+        results_dir, n_embeds=30))
+    capsys.readouterr()
 
-    assert second['run_id'] != first['run_id']
-    assert second['cache_status'] == 'miss'
-    assert second['skipped'] is False
+    tbp.train_binary_embedding_probe(
+        phones, 'p', store=store, model_name='model-a', layer=9, collar=2000,
+        n_embeds=30, verbose=True, probe_save_dir=probe_dir,
+        results_dir=results_dir)
+    second_run_id = _stored_run_id(_phone_result('p', 'model-a', 9, 2000,
+        results_dir, n_embeds=30))
+
+    assert second_run_id != first_run_id
+    assert 'cache status: miss' in capsys.readouterr().out
     assert len(store.phraser_keys_to_embeddings_calls) == 2
