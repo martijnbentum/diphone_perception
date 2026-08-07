@@ -1,5 +1,7 @@
 import echoframe
-from echoframe.batch_segment_features import compute_embeddings_batch
+from echoframe.batch_embeddings_cnn_features import (
+    compute_embeddings_and_cnn_features_batch,
+)
 
 import locations
 from probing import model_store
@@ -22,9 +24,15 @@ def extract_phone_embeddings(
     tags=None,
     verbose=True,
 ):
-    '''Compute and store wav2vec2 hidden-state embeddings for every phone in
-    `phones` into an echoframe Store, via vanilla compute_embeddings_batch
-    (stores every frame overlapping each phone's own span, for each layer).
+    '''Compute and store wav2vec2 hidden-state embeddings and CNN frontend
+    features for every phone in `phones` into an echoframe Store, via
+    compute_embeddings_and_cnn_features_batch (stores every frame overlapping
+    each phone's own span, for each requested layer, plus one CNN frame per
+    phone). Routing is per-segment: a phone missing its hidden_state runs a
+    full forward pass, which incidentally produces the CNN features as a
+    byproduct, so CNN is stored "for free" alongside it; a phone that already
+    has its hidden_state but is missing CNN falls back to the cheap CNN-only
+    path instead of rerunning the full model.
 
     phones:             probing.metadata.Phones - phones.phraser_phones must
                          be complete (raises otherwise)
@@ -42,8 +50,9 @@ def extract_phone_embeddings(
                          language, size} records
     phraser_source_id:   label to register phones.store under in this store
     gpu:                 whether to run the model on GPU
-    batch_size:          segments per forward-pass batch. compute_embeddings_batch
-                         loads every segment's audio into one batch when this
+    batch_size:          segments per forward-pass batch.
+                         compute_embeddings_and_cnn_features_batch loads every
+                         segment's audio into one batch when this
                          is left None and gpu=False - an explicit default
                          avoids loading all of phones' audio into memory at once
     tags:                optional tags stored on new metadata
@@ -55,7 +64,7 @@ def extract_phone_embeddings(
     store.attach_phraser_store(phraser_source_id, phones.store)
 
     segments = phones.phraser_phones
-    compute_embeddings_batch(
+    compute_embeddings_and_cnn_features_batch(
         segments, layers, model_name, store,
         collar=collar, gpu=gpu, tags=tags, batch_size=batch_size,
         verbose=verbose,
@@ -76,7 +85,8 @@ def extract_phone_embeddings_for_models(
     tags=None,
     verbose=True,
 ):
-    '''Compute phone embeddings in a dedicated store for every model.
+    '''Compute phone embeddings and CNN features in a dedicated store for
+    every model.
 
     Accepts the extraction options from `extract_phone_embeddings`, replacing
     `model_name` with `model_names` and managing each model's store. Stores are
@@ -114,7 +124,8 @@ def extract_flemish_phone_embeddings_for_models(
     tags=None,
     verbose=True,
 ):
-    '''Compute Flemish phone embeddings in a dedicated store per model.
+    '''Compute Flemish phone embeddings and CNN features in a dedicated store
+    per model.
 
     The model stores are opened below ``store_root``. The validated inventory
     exposed by ``flemish_phones.phraser_phones`` is extracted through the same

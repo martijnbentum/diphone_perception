@@ -16,8 +16,6 @@ echoframe_store = data / 'echoframe_store'
 echoframe_mfcc_store = data / 'echoframe_mfcc_store'
 echoframe_model_stores = data / 'echoframe_model_stores'
 echoframe_model_flemish_stores = data / 'echoframe_model_flemish_stores'
-echoframe_model_cnn_stores = data / 'echoframe_model_cnn_stores'
-echoframe_model_cnn_flemish_stores = data / 'echoframe_model_cnn_flemish_stores'
 phone_probes = data / 'phone_probes'
 probe_results = data / 'probe_results'
 

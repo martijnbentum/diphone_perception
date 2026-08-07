@@ -213,10 +213,21 @@ match its nesting depth under the repo.
 b) extract_embeddings.py
 
 One function, `extract_phone_embeddings(phones, ...)`, that computes and
-stores wav2vec2 hidden-state embeddings for every phone in a Phones instance
-into an `echoframe.Store`, via a vanilla (unmodified)
-`echoframe.batch_segment_features.compute_embeddings_batch` call - every
-frame overlapping each phone's own span is stored, for each requested layer.
+stores wav2vec2 hidden-state embeddings *and* CNN frontend features for
+every phone in a Phones instance into an `echoframe.Store`, via
+`echoframe.batch_embeddings_cnn_features.compute_embeddings_and_cnn_features_batch`
+- every frame overlapping each phone's own span is stored, for each
+requested layer, plus one CNN frame per phone.
+
+Routing is per-segment, not per-call: a phone still missing its
+hidden_state runs a full forward pass through the model, which incidentally
+produces the CNN frontend output as a byproduct, so CNN is stored "for
+free" alongside it in the same pass; a phone that already has its
+hidden_state but is missing CNN falls back to the cheap CNN-only path
+instead of rerunning the full model. This replaces two previously separate
+pipelines (hidden states and CNN features extracted independently, via two
+full passes over the audio when both were needed) with one call into one
+store per model.
 
 	from probing.metadata import Phones
 	from probing.extract_embeddings import extract_phone_embeddings
@@ -239,21 +250,22 @@ Defaults:
   store= is passed in.
 - phraser_source_id='cgn-awd' - label the phones' phraser store is
   registered under in the echoframe store.
-- batch_size=120 - compute_embeddings_batch only auto-computes a batch size
-  when gpu=True; left at None with gpu=False it loads every segment's audio
-  into a single batch before running anything. The default here avoids that
-  for large phone sets.
+- batch_size=120 - compute_embeddings_and_cnn_features_batch only
+  auto-computes a batch size when gpu=True; left at None with gpu=False it
+  loads every segment's audio into a single batch before running anything.
+  The default here avoids that for large phone sets.
 
-Known limitation: no audio-file deduplication. compute_embeddings_batch
-loads and runs the model on each phone independently - it does not group
-phones by source audio file or reuse hidden states across phones from the
-same sentence. With a 2000ms collar, phones spoken close together end up
-with heavily overlapping context windows that are recomputed from scratch
-for each phone. Compute cost therefore scales with phone count, not
-sentence count (unlike the old probing_scripts/extract_embeds.py, which ran
-each sentence through the model once and sliced every phone out of that one
-pass). Not addressed yet - flagged for awareness if extraction throughput
-becomes a problem at scale.
+Known limitation: no audio-file deduplication.
+compute_embeddings_and_cnn_features_batch loads and runs the model on each
+phone independently - it does not group phones by source audio file or
+reuse hidden states across phones from the same sentence. With a 2000ms
+collar, phones spoken close together end up with heavily overlapping
+context windows that are recomputed from scratch for each phone. Compute
+cost therefore scales with phone count, not sentence count (unlike the old
+probing_scripts/extract_embeds.py, which ran each sentence through the
+model once and sliced every phone out of that one pass). Not addressed
+yet - flagged for awareness if extraction throughput becomes a problem at
+scale.
 
 For extracting many training checkpoints,
 `extract_phone_embeddings_for_models(...)` opens or creates one store per
@@ -269,11 +281,12 @@ from the store cache and CUDA memory before the next model is loaded:
 Probe functions can open the matching checkpoint store by passing
 `store_root=model_store_path(model_name)`.
 
-Embedding extraction is incremental at the model / phone / layer level.
-`compute_embeddings_batch` checks the requested store before inference, keeps
-existing phone-layer outputs, and computes only missing outputs. Repeating a
-single-model or multi-model extraction therefore fills missing embeddings
-without recomputing outputs already present under the same model, layer, and
+Embedding and CNN extraction is incremental at the model / phone / layer
+level. `compute_embeddings_and_cnn_features_batch` checks the requested
+store before inference, keeps existing phone-layer/CNN outputs, and
+computes only missing outputs. Repeating a single-model or multi-model
+extraction therefore fills missing embeddings and CNN features without
+recomputing outputs already present under the same model, layer, and
 collar settings.
 
 The Flemish inventory has a parallel multi-model entry point whose stores

@@ -68,14 +68,16 @@ def test_extract_phone_embeddings_registers_model_and_computes(
 
     calls = []
 
-    def fake_compute_embeddings_batch(segments, layers, model_name, store_arg,
+    def fake_compute_embeddings_and_cnn_features_batch(
+        segments, layers, model_name, store_arg,
         collar=None, gpu=None, tags=None, batch_size=None, verbose=None):
         calls.append(dict(segments=segments, layers=layers,
             model_name=model_name, store=store_arg, collar=collar, gpu=gpu,
             tags=tags, batch_size=batch_size, verbose=verbose))
 
-    monkeypatch.setattr(extract_embeddings, 'compute_embeddings_batch',
-        fake_compute_embeddings_batch)
+    monkeypatch.setattr(extract_embeddings,
+        'compute_embeddings_and_cnn_features_batch',
+        fake_compute_embeddings_and_cnn_features_batch)
 
     result = extract_embeddings.extract_phone_embeddings(
         phones, model_name='model-a', layers=[9, 10], collar=500,
@@ -99,8 +101,8 @@ def test_extract_phone_embeddings_skips_registration_when_already_registered(
     store = FakeStore(registered={'model-a': object()})
     phones = FakePhones(['phone-a'], store='cgn-store')
 
-    monkeypatch.setattr(extract_embeddings, 'compute_embeddings_batch',
-        lambda *a, **k: None)
+    monkeypatch.setattr(extract_embeddings,
+        'compute_embeddings_and_cnn_features_batch', lambda *a, **k: None)
 
     extract_embeddings.extract_phone_embeddings(
         phones, model_name='model-a', store=store, model_paths_file=path,
@@ -120,7 +122,8 @@ def test_extract_phone_embeddings_uses_default_layers_and_model(
     phones = FakePhones(['phone-a'], store='cgn-store')
 
     calls = []
-    monkeypatch.setattr(extract_embeddings, 'compute_embeddings_batch',
+    monkeypatch.setattr(extract_embeddings,
+        'compute_embeddings_and_cnn_features_batch',
         lambda *a, **k: calls.append((a, k)))
 
     extract_embeddings.extract_phone_embeddings(
@@ -145,8 +148,8 @@ def test_extract_phone_embeddings_opens_store_when_none_given(
 
     monkeypatch.setattr(extract_embeddings.echoframe, 'Store',
         fake_store_constructor)
-    monkeypatch.setattr(extract_embeddings, 'compute_embeddings_batch',
-        lambda *a, **k: None)
+    monkeypatch.setattr(extract_embeddings,
+        'compute_embeddings_and_cnn_features_batch', lambda *a, **k: None)
 
     result = extract_embeddings.extract_phone_embeddings(
         phones, model_name='model-a', model_paths_file=path,
