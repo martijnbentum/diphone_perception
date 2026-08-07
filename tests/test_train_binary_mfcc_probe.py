@@ -41,14 +41,6 @@ class FakePhones:
         return grouped
 
 
-class FakeMetadata:
-    def __init__(self, key, matrix):
-        self.created_at = '2026-01-01T00:00:00+00:00'
-        self.dataset_path = f'mfcc/{key[2]}'
-        self.shape = matrix.shape
-        self.shard_id = 0
-
-
 class FakeStore:
     def __init__(self, matrices_by_key):
         self.matrices_by_key = matrices_by_key
@@ -58,17 +50,6 @@ class FakeStore:
         self, output_type, feature_name, phraser_key,
     ):
         return output_type, feature_name, phraser_key
-
-    def load_many_metadata(self, keys, keep_missing=False):
-        output = []
-        for key in keys:
-            matrix = self.matrices_by_key.get(key[2])
-            metadata = (
-                None if matrix is None else FakeMetadata(key, matrix)
-            )
-            if metadata is not None or keep_missing:
-                output.append(metadata)
-        return output
 
     def load_many_frames(self, keys, frame='center', keep_missing=False):
         self.load_many_frames_calls.append({
@@ -95,7 +76,7 @@ class FakeStore:
 
 
 def _make_separable_dataset(
-    rng, n_target=30, n_other_each=15, other_labels=('a', 't'), dim=39,
+    rng, n_target=30, n_other_each=30, other_labels=('a', 't'), dim=39,
 ):
     labels = ['p'] * n_target
     for label in other_labels:
@@ -113,9 +94,8 @@ def _make_separable_dataset(
     return phones, FakeStore(matrices_by_key)
 
 
-def _load_saved_probes(probe_dir, target_phoneme, frame, run_id, n_splits):
-    probe_run_directory = tbp._run_directory(probe_dir, target_phoneme,
-        frame, run_id)
+def _load_saved_probes(probe_dir, target_phoneme, frame, n_splits):
+    probe_run_directory = tbp._run_directory(probe_dir, target_phoneme, frame)
     probes = []
     for fold_idx in range(n_splits):
         probe_path, _, _ = probe_run.fold_paths(probe_run_directory,
@@ -124,43 +104,13 @@ def _load_saved_probes(probe_dir, target_phoneme, frame, run_id, n_splits):
     return probes
 
 
-def test_load_mfcc_vectors_uses_center_frame_and_reports_missing():
-    selected = [
-        (FakePhone('p'), FakePhraserPhone(0), 'target'),
-        (FakePhone('p'), FakePhraserPhone(1), 'target'),
-        (FakePhone('a'), FakePhraserPhone(2), 'other'),
-    ]
-    matrices = {
-        0: np.array([[0., 1.], [2., 3.], [4., 5.]]),
-        2: np.array([[6., 7.], [8., 9.], [10., 11.]]),
-    }
-    store = FakeStore(matrices)
-
-    X, y, true_labels, missing = tbp._load_mfcc_vectors(
-        store, selected)
-
-    np.testing.assert_array_equal(X, [[2., 3.], [8., 9.]])
-    assert list(y) == ['target', 'other']
-    assert list(true_labels) == ['p', 'a']
-    assert [phone.phoneme_ipa for phone in missing] == ['p']
-    assert store.load_many_frames_calls == [{
-        'keys': [
-            ('acoustic_feature', 'mfcc', 0),
-            ('acoustic_feature', 'mfcc', 1),
-            ('acoustic_feature', 'mfcc', 2),
-        ],
-        'frame': 'center',
-        'keep_missing': True,
-    }]
-
-
 def test_train_binary_mfcc_probe_end_to_end(tmp_path):
     phones, store = _make_separable_dataset(np.random.default_rng(0))
     probe_dir = tmp_path / 'probes'
     results_dir = tmp_path
 
     tbp.train_binary_mfcc_probe(
-        phones, 'p', store=store,
+        phones, 'p', store=store, expected_target_count=30,
         verbose=False, probe_save_dir=probe_dir, results_dir=results_dir)
 
     phone_result = probe_result.PhoneResult.mfcc('p', 'center',
@@ -168,8 +118,7 @@ def test_train_binary_mfcc_probe_end_to_end(tmp_path):
     assert phone_result.run['actual_n_samples'] == 60
     assert phone_result.run['actual_n_missing'] == 0
     assert phone_result.mean_accuracy > .9
-    run_id = probe_run.stored_run_id(phone_result)
-    probes = _load_saved_probes(probe_dir, 'p', 'center', run_id, n_splits=5)
+    probes = _load_saved_probes(probe_dir, 'p', 'center', n_splits=5)
     assert all(isinstance(probe, LogisticRegression) for probe in probes)
 
     results_path = phone_result.path / 'results.json'
@@ -180,26 +129,60 @@ def test_train_binary_mfcc_probe_end_to_end(tmp_path):
     assert 'probes' not in saved['results']['p']
 
 
-def test_train_binary_mfcc_probes_trains_each_phraser_label(tmp_path):
-    phones, store = _make_separable_dataset(
-        np.random.default_rng(0), n_target=30, n_other_each=30)
+def test_train_binary_mfcc_probe_skips_when_all_folds_already_saved(
+    tmp_path, capsys):
+    phones, store = _make_separable_dataset(np.random.default_rng(0))
+    probe_dir, results_dir = tmp_path / 'probes', tmp_path / 'results'
+
+    tbp.train_binary_mfcc_probe(
+        phones, 'p', store=store, expected_target_count=30, verbose=True,
+        probe_save_dir=probe_dir, results_dir=results_dir)
+    assert 'cache status: miss' in capsys.readouterr().out
+    calls_after_first = len(store.load_many_frames_calls)
+    assert calls_after_first == 1
+
+    first_result = probe_result.PhoneResult.mfcc('p', 'center',
+        root=results_dir)
+    first_mean_accuracy = first_result.mean_accuracy
+
+    tbp.train_binary_mfcc_probe(
+        phones, 'p', store=store, expected_target_count=30, verbose=True,
+        probe_save_dir=probe_dir, results_dir=results_dir)
+    assert 'cache status: hit' in capsys.readouterr().out
+
+    # a true hit touches nothing - zero store calls, not just zero extra
+    assert len(store.load_many_frames_calls) == calls_after_first
+    second_result = probe_result.PhoneResult.mfcc('p', 'center',
+        root=results_dir)
+    assert second_result.mean_accuracy == pytest.approx(first_mean_accuracy)
+
+
+def test_train_binary_mfcc_probes_trains_each_phraser_label(
+    tmp_path, capsys):
+    phones, store = _make_separable_dataset(np.random.default_rng(0))
 
     results = tbp.train_binary_mfcc_probes(
         phones,
         target_phonemes=['p', 't'],
         store=store,
-        verbose=False,
+        expected_target_count=30,
+        verbose=True,
         probe_save_dir=tmp_path / 'probes',
         results_dir=tmp_path,
         report=True,
     )
 
+    # results are reordered to match target_phonemes regardless of which
+    # worker process happens to finish first
     assert list(results) == ['p', 't']
     assert all(
-        result['representation'] == 'mfcc'
-        for result in results.values()
-    )
-    assert len(store.load_many_frames_calls) == 2
+        result['representation'] == 'mfcc' for result in results.values())
+    # one batched load for the whole sweep, not one per label - the
+    # concrete proof the redundant-reload problem is fixed
+    assert len(store.load_many_frames_calls) == 1
+    output = capsys.readouterr().out
+    assert '[mfcc pool] 1/2 completed' in output
+    assert '[mfcc pool] 2/2 completed' in output
     results_path = tmp_path / 'mfcc' / 'mfcc_probe_results.json'
     saved = json.loads(results_path.read_text(encoding='utf-8'))
     assert saved['target_phonemes'] == ['p', 't']
@@ -209,14 +192,61 @@ def test_train_binary_mfcc_probes_trains_each_phraser_label(tmp_path):
     } == {str(results_path.resolve())}
 
 
-def test_train_binary_mfcc_probes_returns_none_without_report(tmp_path):
-    phones, store = _make_separable_dataset(
-        np.random.default_rng(0), n_target=30, n_other_each=30)
+def test_train_binary_mfcc_probes_runs_in_a_process_pool(tmp_path, capsys):
+    phones, store = _make_separable_dataset(np.random.default_rng(0))
 
     results = tbp.train_binary_mfcc_probes(
         phones,
         target_phonemes=['p', 't'],
         store=store,
+        expected_target_count=30,
+        max_workers=2,
+        verbose=True,
+        probe_save_dir=tmp_path / 'probes',
+        results_dir=tmp_path,
+        report=True,
+    )
+
+    assert set(results) == {'p', 't'}
+    assert all('mean_accuracy' in result for result in results.values())
+    output = capsys.readouterr().out
+    assert '[mfcc pool] 1/2 completed' in output
+    assert '[mfcc pool] 2/2 completed' in output
+
+    # results are actually persisted to disk by the worker processes
+    phone_result = probe_result.PhoneResult.mfcc('p', 'center', root=tmp_path)
+    assert phone_result.complete is True
+
+
+def test_train_binary_mfcc_probes_rejects_unknown_target_before_pooling(
+    tmp_path):
+    phones, store = _make_separable_dataset(np.random.default_rng(0))
+
+    with pytest.raises(ValueError,
+        match='not found in label_to_phraser_phone'):
+        tbp.train_binary_mfcc_probes(
+            phones,
+            target_phonemes=['p', 'nonexistent'],
+            store=store,
+            expected_target_count=30,
+            max_workers=2,
+            verbose=False,
+            probe_save_dir=tmp_path / 'probes',
+            results_dir=tmp_path,
+        )
+
+    # failed before the batched matrix load ever touched the store
+    assert store.load_many_frames_calls == []
+
+
+def test_train_binary_mfcc_probes_returns_none_without_report(tmp_path):
+    phones, store = _make_separable_dataset(np.random.default_rng(0))
+
+    results = tbp.train_binary_mfcc_probes(
+        phones,
+        target_phonemes=['p', 't'],
+        store=store,
+        expected_target_count=30,
         verbose=False,
         probe_save_dir=tmp_path / 'probes',
         results_dir=tmp_path,
@@ -236,7 +266,8 @@ def test_train_binary_mfcc_probe_opens_default_store(tmp_path, monkeypatch):
 
     monkeypatch.setattr(tbp.echoframe, 'Store', fake_store_constructor)
     tbp.train_binary_mfcc_probe(
-        phones, 'p', verbose=False, save_results=False,
+        phones, 'p', expected_target_count=30, verbose=False,
+        save_results=False,
         probe_save_dir=tmp_path / 'probes',
         results_dir=tmp_path / 'results')
 

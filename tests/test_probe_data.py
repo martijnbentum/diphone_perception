@@ -122,6 +122,96 @@ def test_build_probe_matrix_rejects_entirely_missing_label():
             expected_target_count=2)
 
 
+class FakeMfccStore:
+    def __init__(self, matrices_by_key):
+        self.matrices_by_key = matrices_by_key
+        self.load_many_frames_calls = []
+
+    def make_echoframe_key(self, output_type, feature_name, phraser_key):
+        return output_type, feature_name, phraser_key
+
+    def load_many_frames(self, keys, frame='center', keep_missing=False):
+        self.load_many_frames_calls.append({
+            'keys': list(keys), 'frame': frame, 'keep_missing': keep_missing})
+        output = []
+        for key in keys:
+            matrix = self.matrices_by_key.get(key[2])
+            vector = None if matrix is None else matrix[len(matrix) // 2]
+            if vector is not None or keep_missing:
+                output.append(vector)
+        return output
+
+
+def test_build_mfcc_probe_matrix_returns_aligned_arrays():
+    phones = FakePhones(['p', 't', 'p', 't'])
+    store = FakeMfccStore({
+        0: np.array([[0., 1.]]), 1: np.array([[1., 0.]]),
+        2: np.array([[2., 2.]]), 3: np.array([[3., 3.]])})
+
+    matrix = probe_data.build_mfcc_probe_matrix(
+        phones, store, expected_target_count=2)
+
+    assert matrix.X.shape == (4, 2)
+    np.testing.assert_array_equal(matrix.X[0], [0., 1.])
+    assert list(matrix.phone_labels) == ['p', 't', 'p', 't']
+    assert matrix.phraser_keys == [0, 1, 2, 3]
+    assert matrix.missing == []
+    call = store.load_many_frames_calls[0]
+    assert call['keys'] == [
+        ('acoustic_feature', 'mfcc', 0), ('acoustic_feature', 'mfcc', 1),
+        ('acoustic_feature', 'mfcc', 2), ('acoustic_feature', 'mfcc', 3)]
+    assert call['frame'] == 'center'
+    assert call['keep_missing'] is True
+
+
+def test_build_mfcc_probe_matrix_tracks_missing_vectors():
+    phones = FakePhones(['p', 'p', 't', 't'])
+    store = FakeMfccStore(
+        {0: np.array([[0., 1.]]), 2: np.array([[2., 2.]])})
+    # key 1 ('p') and key 3 ('t') have no stored MFCC matrix
+
+    matrix = probe_data.build_mfcc_probe_matrix(phones, store,
+        expected_target_count=1)
+
+    assert matrix.X.shape == (2, 2)
+    assert list(matrix.phone_labels) == ['p', 't']
+    assert matrix.phraser_keys == [0, 2]
+    assert matrix.missing == [1, 3]
+
+
+def test_build_mfcc_probe_matrix_rejects_duplicate_phraser_keys():
+    phones = FakePhones(['p', 't'])
+    phones.phraser_phones[1] = phones.phraser_phones[0]
+    store = FakeMfccStore({0: np.array([[0., 1.]])})
+
+    with pytest.raises(ValueError, match='duplicate Phraser key'):
+        probe_data.build_mfcc_probe_matrix(phones, store)
+
+
+def test_build_mfcc_probe_matrix_rejects_label_count_mismatch():
+    phones = FakePhones(['p', 'p', 't'])
+    store = FakeMfccStore({
+        0: np.array([[0., 1.]]), 1: np.array([[1., 1.]]),
+        2: np.array([[2., 2.]])})
+
+    with pytest.raises(ValueError,
+        match=r"expected 2 tokens per label.*'t': 1"):
+        probe_data.build_mfcc_probe_matrix(phones, store,
+            expected_target_count=2)
+
+
+def test_build_mfcc_probe_matrix_rejects_entirely_missing_label():
+    phones = FakePhones(['p', 'p', 't'])
+    store = FakeMfccStore(
+        {0: np.array([[0., 1.]]), 1: np.array([[1., 1.]])})
+    # 't' (key 2) has no stored MFCC matrix at all
+
+    with pytest.raises(ValueError,
+        match=r"expected 2 tokens per label.*'t': 0"):
+        probe_data.build_mfcc_probe_matrix(phones, store,
+            expected_target_count=2)
+
+
 def test_token_counts_counts_labels():
     counts = probe_data.token_counts(['p', 't', 'p', 'k', 'p'])
     assert counts == {'p': 3, 't': 1, 'k': 1}

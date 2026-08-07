@@ -1,17 +1,20 @@
+import multiprocessing
+import os
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 
 import echoframe
-import numpy as np
 
 import locations
-from probing import probe_run, probe_utils
+from probing import probe_data, probe_run, probe_utils
 from probing import result as probe_result
 
 _frame_modes = {'center', 'mean', 'first', 'last'}
 _mfcc_results_schema_version = 1
 _mfcc_results_filename = 'mfcc_probe_results.json'
 _run_results_filename = 'results.json'
+_pool_probe_matrix = None
 
 
 def _validate_frame(frame):
@@ -20,38 +23,8 @@ def _validate_frame(frame):
             f'frame must be one of {sorted(_frame_modes)}, got {frame!r}')
 
 
-def _mfcc_echoframe_keys(store, selected):
-    return [
-        store.make_echoframe_key(
-            'acoustic_feature', feature_name='mfcc',
-            phraser_key=phraser_phone.key)
-        for _, phraser_phone, _ in selected
-    ]
-
-
-def _load_mfcc_vectors(store, selected, frame='center'):
-    '''Batch-load one frame reduction from each stored phone MFCC matrix.'''
-    _validate_frame(frame)
-    keys = _mfcc_echoframe_keys(store, selected)
-    vectors = store.load_many_frames(
-        keys, frame=frame, keep_missing=True)
-
-    X, y, true_labels, missing = [], [], [], []
-    pairs = zip(selected, vectors, strict=True)
-    for (phone, _, binary_label), vector in pairs:
-        if vector is None:
-            missing.append(phone)
-            continue
-        X.append(np.asarray(vector))
-        y.append(binary_label)
-        true_labels.append(phone.phoneme_ipa)
-    return np.array(X), np.array(y), np.array(true_labels), missing
-
-
-def _run_directory(root, target_phoneme, frame, run_id):
-    return (
-        Path(root) / 'mfcc' / target_phoneme / f'frame-{frame}' / run_id
-    )
+def _run_directory(root, target_phoneme, frame):
+    return Path(root) / 'mfcc' / target_phoneme / f'frame-{frame}'
 
 
 def _utc_timestamp():
@@ -73,7 +46,6 @@ def _compact_mfcc_probe_result(target_phoneme, result):
         'target_phoneme': target_phoneme,
         'feature_name': result.get('feature_name', 'mfcc'),
         'frame': result['frame'],
-        'run_id': result['run_id'],
         'accuracies': accuracies,
         'mean_accuracy': float(result['mean_accuracy']),
         'std_accuracy': float(result['std_accuracy']),
@@ -89,10 +61,8 @@ def _phone_report(target_phoneme, frame, results_dir):
     phone_result = probe_result.PhoneResult.mfcc(target_phoneme, frame,
         root=results_dir)
     run = phone_result.run or {}
-    run_id = probe_run.stored_run_id(phone_result) if phone_result.run else (
-        None)
     return {'representation': 'mfcc', 'target_phoneme': target_phoneme,
-        'feature_name': 'mfcc', 'frame': frame, 'run_id': run_id,
+        'feature_name': 'mfcc', 'frame': frame,
         'accuracies': phone_result.accuracies,
         'mean_accuracy': phone_result.mean_accuracy,
         'std_accuracy': phone_result.std_accuracy,
@@ -173,6 +143,8 @@ def train_binary_mfcc_probe(
     store=None,
     store_root=locations.echoframe_mfcc_store,
     frame='center',
+    expected_target_count=13500,
+    probe_matrix=None,
     probe_save_dir=locations.phone_probes,
     results_dir=locations.probe_results,
     save_results=True,
@@ -187,53 +159,66 @@ def train_binary_mfcc_probe(
     available target-phoneme phone is used. Fitted probes and fold
     predictions are always saved. Nothing is returned; read results back
     afterward through probing.result.PhoneResult.
+
+    A true cache hit (all folds already stored, not overwriting) touches
+    neither the store nor probe_matrix at all.
+
+    phones:                phone inventory paired with Phraser phones
+    target_phoneme:        label used as the positive class
+    store:                 optional open Echoframe store
+    frame:                 MFCC frame reduction
+    expected_target_count:  every phone label must have exactly this many
+                            loaded tokens; raises otherwise
+    probe_matrix:           optional preloaded probe_data.ProbeMatrix,
+                            shared across labels by train_binary_mfcc_probes
+    save_results:          whether to write a consolidated JSON report for
+                           this one label after training
     '''
     probe_utils.validate_target_phoneme(target_phoneme)
     if not isinstance(save_results, bool):
         raise TypeError('save_results must be a boolean')
     _validate_frame(frame)
-    probe_utils.validate_unique_phraser_keys(phones)
-    selected = probe_utils.select_phones(phones, target_phoneme)
 
-    if store is None:
-        store = echoframe.Store(str(store_root))
-    echoframe_keys = _mfcc_echoframe_keys(store, selected)
-    feature_parameters = {
-        'feature_name': 'mfcc',
-        'frame': frame,
-        'dimensions': '13 static + 13 delta + 13 delta-delta',
-    }
-    manifest = probe_run.build_probe_run_manifest(
-        store, selected, echoframe_keys, 'mfcc', feature_parameters,
-        target_phoneme)
-    run_id = probe_run.hash_run_manifest(manifest)
-    probe_run_directory = _run_directory(
-        probe_save_dir, target_phoneme, frame, run_id)
     phone_result = probe_result.PhoneResult.mfcc(target_phoneme, frame,
         root=results_dir)
     existing_fold_count = len(phone_result.folds)
     complete_before = phone_result.complete
-
-    def load_vectors():
-        return _load_mfcc_vectors(store, selected, frame=frame)
-
-    probe_run.run(
-        load_vectors=load_vectors,
-        manifest=manifest,
-        probe_run_directory=probe_run_directory,
-        phone_result=phone_result,
-        display_name=f'{target_phoneme} MFCC {frame} frame',
-        save_probes=True,
-        save_predictions=True,
-        overwrite=overwrite,
-        verbose=verbose,
-    )
-
     cache_status = probe_run.classify_cache_status(True, complete_before,
         overwrite, existing_fold_count)
-    if verbose:
-        print(f'{target_phoneme} MFCC {frame} frame: cache status: '
-            f'{cache_status}', flush=True)
+
+    if cache_status == 'hit':
+        if verbose:
+            print(f'{target_phoneme} MFCC {frame} frame: cache status: hit',
+                flush=True)
+    else:
+        if probe_matrix is None:
+            if store is None:
+                store = echoframe.Store(str(store_root))
+            probe_matrix = probe_data.build_mfcc_probe_matrix(phones, store,
+                frame=frame, expected_target_count=expected_target_count)
+
+        probe_run_directory = _run_directory(probe_save_dir, target_phoneme,
+            frame)
+
+        def load_vectors():
+            return probe_data.select_balanced_vectors(probe_matrix,
+                target_phoneme)
+
+        outcome = probe_run.run(load_vectors=load_vectors,
+            probe_run_directory=probe_run_directory, phone_result=phone_result,
+            display_name=f'{target_phoneme} MFCC {frame} frame',
+            save_probes=True, save_predictions=True,
+            overwrite=overwrite, verbose=verbose)
+
+        description = probe_data.describe_probe_run(probe_matrix.phone_labels,
+            target_phoneme, 'mfcc', expected_target_count)
+        description['actual_n_samples'] = outcome.n_samples
+        description['actual_n_missing'] = outcome.n_missing
+        phone_result.save_run(description)
+
+        if verbose:
+            print(f'{target_phoneme} MFCC {frame} frame: cache status: '
+                f'{cache_status}', flush=True)
 
     if save_results:
         report = _phone_report(target_phoneme, frame, results_dir)
@@ -255,6 +240,8 @@ def train_binary_mfcc_probes(
     store=None,
     store_root=locations.echoframe_mfcc_store,
     frame='center',
+    expected_target_count=13500,
+    max_workers=None,
     probe_save_dir=locations.phone_probes,
     results_dir=locations.probe_results,
     save_results=True,
@@ -265,43 +252,57 @@ def train_binary_mfcc_probes(
 ):
     '''Train one binary MFCC probe run for each target phoneme.
 
-    When target_phonemes is None, all labels in
-    phones.label_to_phraser_phone are used. The Phraser label inventory
-    must contain exactly the same number of items for every label.
+    Loads one MFCC frame reduction for the whole label inventory once
+    (probe_data.build_mfcc_probe_matrix) and reuses that matrix for every
+    label, instead of each label re-fetching its own selected subset. All
+    labels are used when target_phonemes is omitted. The Phraser label
+    inventory must contain exactly the same number of items for every
+    label.
 
-    report:  when True, reconstruct each label's accuracy metrics from disk
-             after training and return them keyed by target phoneme; when
-             False, return None
+    phones:                phone inventory paired with Phraser phones
+    target_phonemes:       optional ordered subset of labels to probe
+    store:                 optional open Echoframe store shared across
+                           labels
+    frame:                 MFCC frame reduction
+    expected_target_count:  passed to probe_data.build_mfcc_probe_matrix
+    max_workers:            trains that many labels concurrently in
+                            worker processes, each reusing the one
+                            preloaded probe_matrix (sent once per worker
+                            process, not once per label). Defaults to
+                            min(number of targets, os.cpu_count()), so a
+                            small target_phonemes subset or a small
+                            machine never over-spawns. Pass 1 to force a
+                            single worker process (still out-of-process,
+                            just not concurrent). A failure in any label
+                            cancels the remaining queued labels and
+                            re-raises immediately.
+    save_results:          whether to write a consolidated JSON report
+                           after training
+    report:                when True, reconstruct each label's accuracy
+                           metrics from disk after training and return
+                           them keyed by target phoneme; when False,
+                           return None
     '''
     if not isinstance(save_results, bool):
         raise TypeError('save_results must be a boolean')
     _validate_frame(frame)
     targets = probe_utils.prepare_balanced_probe_targets(
         phones, target_phonemes)
-    probe_utils.validate_unique_phraser_keys(phones)
+
+    if max_workers is None:
+        max_workers = max(1, min(len(targets), os.cpu_count() or 1))
 
     owns_store = store is None
     if store is None:
         store = echoframe.Store(str(store_root))
 
-    def train_one(target_phoneme):
-        train_binary_mfcc_probe(
-            phones,
-            target_phoneme,
-            store=store,
-            frame=frame,
-            probe_save_dir=probe_save_dir,
-            results_dir=results_dir,
-            save_results=False,
-            overwrite=overwrite,
-            verbose=verbose,
-        )
-        if not (report or save_results): return None
-        return _phone_report(target_phoneme, frame, results_dir)
+    probe_matrix = probe_data.build_mfcc_probe_matrix(phones, store,
+        frame=frame, expected_target_count=expected_target_count)
 
     try:
-        results = probe_utils.run_probe_sweep(
-            targets, train_one, 'MFCC', verbose=verbose)
+        results = _train_labels_in_pool(targets, probe_matrix, frame,
+            expected_target_count, probe_save_dir, results_dir, overwrite,
+            verbose, max_workers)
         if save_results:
             output = save_mfcc_probe_results(
                 results,
@@ -318,3 +319,60 @@ def train_binary_mfcc_probes(
     finally:
         if owns_store:
             store.close()
+
+
+def _init_pool_worker(probe_matrix):
+    '''Store the shared ProbeMatrix once per worker process, sent through
+    ProcessPoolExecutor's initializer rather than as a per-task argument.
+    '''
+    global _pool_probe_matrix
+    _pool_probe_matrix = probe_matrix
+
+
+def _train_one_label_in_pool(target_phoneme, frame, expected_target_count,
+    probe_save_dir, results_dir, overwrite):
+    '''Run inside a worker process. Reads the matrix _init_pool_worker
+    already stored in this process instead of receiving it as an
+    argument. Never touches phones or a store.
+    '''
+    train_binary_mfcc_probe(None, target_phoneme, frame=frame,
+        expected_target_count=expected_target_count,
+        probe_matrix=_pool_probe_matrix, probe_save_dir=probe_save_dir,
+        results_dir=results_dir, save_results=False, overwrite=overwrite,
+        verbose=False)
+    return target_phoneme, _phone_report(target_phoneme, frame, results_dir)
+
+
+def _train_labels_in_pool(targets, probe_matrix, frame, expected_target_count,
+    probe_save_dir, results_dir, overwrite, verbose, max_workers):
+    '''Train every target phoneme concurrently, sharing one preloaded
+    ProbeMatrix once per worker process via an initializer.
+
+    Progress is reported in completion order, but the returned dict is
+    reordered to match `targets` - completion order depends on OS
+    scheduling and isn't reproducible run to run.
+    '''
+    context = multiprocessing.get_context('spawn')
+    completed_reports = {}
+    total = len(targets)
+    completed = 0
+    with ProcessPoolExecutor(max_workers=max_workers, mp_context=context,
+        initializer=_init_pool_worker, initargs=(probe_matrix,)) as executor:
+        futures = {
+            executor.submit(_train_one_label_in_pool, target_phoneme, frame,
+                expected_target_count, probe_save_dir, results_dir,
+                overwrite): target_phoneme
+            for target_phoneme in targets}
+        try:
+            for future in as_completed(futures):
+                target_phoneme, label_report = future.result()
+                completed_reports[target_phoneme] = label_report
+                completed += 1
+                if verbose:
+                    print(f'[mfcc pool] {completed}/{total} completed '
+                        f'{target_phoneme!r}', flush=True)
+        except BaseException:
+            executor.shutdown(cancel_futures=True)
+            raise
+    return {target_phoneme: completed_reports[target_phoneme]
+        for target_phoneme in targets}

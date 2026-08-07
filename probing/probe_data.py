@@ -56,17 +56,59 @@ def build_probe_matrix(phones, store, model_name, layer, collar=2000,
 
     matrix = ProbeMatrix(np.array(X), np.array(phone_labels), kept_keys,
         missing)
+    _check_expected_target_count(phones, matrix.phone_labels,
+        expected_target_count)
+    return matrix
 
+
+def build_mfcc_probe_matrix(phones, store, frame='center',
+    expected_target_count=13500):
+    '''Load one MFCC frame reduction per phone into aligned arrays.
+
+    phones:                phone inventory paired with Phraser phones
+    store:                 open Echoframe MFCC store
+    frame:                 MFCC frame reduction ('center', 'mean', 'first',
+                           or 'last')
+    expected_target_count:  every phone label must have exactly this many
+                            loaded tokens; raises otherwise
+
+    Returns a ProbeMatrix whose X and phone_labels are aligned row for
+    row. Phones with no stored MFCC matrix are omitted from both and their
+    Phraser keys are returned separately as missing.
+    '''
+    probe_utils.validate_unique_phraser_keys(phones)
+    keys = [
+        store.make_echoframe_key('acoustic_feature', feature_name='mfcc',
+            phraser_key=phraser_phone.key)
+        for phraser_phone in phones.phraser_phones]
+    vectors = store.load_many_frames(keys, frame=frame, keep_missing=True)
+
+    X, phone_labels, kept_keys, missing = [], [], [], []
+    pairs = zip(phones.phones, phones.phraser_phones, vectors, strict=True)
+    for phone, phraser_phone, vector in pairs:
+        if vector is None:
+            missing.append(phraser_phone.key)
+            continue
+        X.append(np.asarray(vector))
+        phone_labels.append(phone.phoneme_ipa)
+        kept_keys.append(phraser_phone.key)
+
+    matrix = ProbeMatrix(np.array(X), np.array(phone_labels), kept_keys,
+        missing)
+    _check_expected_target_count(phones, matrix.phone_labels,
+        expected_target_count)
+    return matrix
+
+
+def _check_expected_target_count(phones, phone_labels, expected_target_count):
     all_labels = {phone.phoneme_ipa for phone in phones.phones}
-    counts = token_counts(matrix.phone_labels)
+    counts = token_counts(phone_labels)
     mismatched = {label: counts.get(label, 0) for label in all_labels
         if counts.get(label, 0) != expected_target_count}
     if mismatched:
         message = f'expected {expected_target_count} tokens per label; '
         message += f'mismatched counts: {mismatched}'
         raise ValueError(message)
-
-    return matrix
 
 
 def token_counts(phone_labels):

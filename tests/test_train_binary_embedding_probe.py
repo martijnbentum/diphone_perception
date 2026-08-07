@@ -809,7 +809,7 @@ def test_train_binary_embedding_probe_skips_when_all_folds_already_saved(
     assert calls_after_first == 1
 
     first_result = _phone_result('p', 'model-a', 9, 500, results_dir)
-    first_run_id = probe_run.stored_run_id(first_result)
+    first_run = dict(first_result.run)
     first_accuracies = first_result.accuracies
     first_mean_accuracy = first_result.mean_accuracy
 
@@ -820,7 +820,7 @@ def test_train_binary_embedding_probe_skips_when_all_folds_already_saved(
     assert 'cache status: hit' in capsys.readouterr().out
 
     second_result = _phone_result('p', 'model-a', 9, 500, results_dir)
-    assert probe_run.stored_run_id(second_result) == first_run_id
+    assert second_result.run == first_run
     # a true hit touches nothing - zero store calls, not just zero extra
     assert len(store.phraser_keys_to_embeddings_calls) == calls_after_first
     assert second_result.accuracies == pytest.approx(first_accuracies)

@@ -397,12 +397,11 @@ replacements.
 fitted probe / per-example predictions under `probe_save_dir`
 (`data/phone_probes`) / `results_dir` (`data/probe_results`).
 
-Skip / overwrite / cache reuse: probes and predictions are stored under a
-hashed run manifest. Its identity includes the model, target, layer, collar,
-sampling and split settings, selected phone keys and labels, available
-echoframe metadata, and classifier settings. A 500ms run therefore cannot
-satisfy a 2000ms request, and changing the data or training settings creates a
-separate run.
+Skip / overwrite / cache reuse: probes and predictions are identified by
+their representation-specific parameters (model, target phoneme, layer, and
+collar for embeddings) via `probing.result.PhoneResult`. A 500ms run
+therefore cannot satisfy a 2000ms request, and changing those parameters
+creates a separate run.
 
 A target-phoneme run is reusable only when every fold has a completion marker
 and matching probe and prediction checksums. Artifacts are replaced atomically
@@ -420,11 +419,8 @@ embedding inventory is skipped by the probe sweep rather than filled there;
 rerun embedding extraction to fill missing phone-layer outputs, then rerun the
 sweep.
 
-The returned dict's `probes`/`accuracies` are always in memory regardless
-of the save settings; `result['skipped']` is `True` only when the whole
-call was served from disk without loading embedding payloads. `run_id`
-identifies the manifest, while `cache_status` is `hit`, `miss`, `refresh`, or
-`disabled`.
+A true cache hit (all folds already stored, not overwriting) touches
+neither the store nor the preloaded embedding matrix at all.
 
 Probe training raises if multiple metadata phones have the same Phraser key.
 It does not deduplicate them, because deciding which metadata row is correct
