@@ -1,77 +1,89 @@
+import multiprocessing
 import re
 import warnings
 from collections import Counter
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
 import echoframe
 import numpy as np
 
 import locations
-from probing import probe_run, probe_training, probe_utils
+from probing import probe_data, probe_run, probe_utils
 from probing import result as probe_result
 from probing.extract_embeddings import default_model_name
 
 _default_inventory_batch_size = 1_000
+_pool_probe_matrix = None
 
 
 def train_binary_embedding_probe(phones, target_phoneme, store=None,
     store_root=locations.echoframe_store, model_name=default_model_name,
-    layer=9, collar=2000, n_embeds=None, n_splits=5, random_state=42,
-    standardize=False, probe_save_dir=locations.phone_probes,
+    layer=9, collar=2000, expected_target_count=13500, probe_matrix=None,
+    probe_save_dir=locations.phone_probes,
     results_dir=locations.probe_results, overwrite=False, verbose=True):
     '''Train and persist a binary target-vs-other probe on middle-frame
     embeddings.
 
-    Standardization is fitted independently inside each cross-validation
-    training fold. Raw features are retained by default. Fitted probes and
-    fold predictions are always saved. Nothing is returned; read results
-    back afterward through probing.result.PhoneResult.
+    Every available target-phoneme phone is used. Fitted probes and fold
+    predictions are always saved. Nothing is returned; read results back
+    afterward through probing.result.PhoneResult.
 
-    phones:          phone inventory paired with Phraser phones
-    target_phoneme:  label used as the positive class
-    store:           optional open Echoframe store
-    model_name:      model identifier stored with each embedding
-    layer:           hidden-state layer to probe
+    A true cache hit (all folds already stored, not overwriting) touches
+    neither the store nor probe_matrix at all.
+
+    phones:                phone inventory paired with Phraser phones
+    target_phoneme:        label used as the positive class
+    store:                 optional open Echoframe store
+    model_name:            model identifier stored with each embedding
+    layer:                 hidden-state layer to probe
+    expected_target_count:  passed to probe_data.build_probe_matrix when
+                            probe_matrix is not supplied
+    probe_matrix:           optional preloaded probe_data.ProbeMatrix,
+                            shared across labels by train_binary_embedding_probes
     '''
     probe_utils.validate_target_phoneme(target_phoneme)
-    probe_training.validate_training_options(n_splits, standardize)
-    probe_utils.validate_unique_phraser_keys(phones)
-    selected = probe_utils.select_phones(phones, target_phoneme, n_embeds,
-        seed=random_state)
 
-    if store is None:
-        store_root = str(store_root)
-        store = echoframe.Store(store_root)
-    echoframe_keys = _embedding_echoframe_keys(store, selected, model_name,
-        layer, collar)
-    feature_parameters = {'model_name': model_name, 'layer': layer,
-        'collar': collar, 'frame': 'middle'}
-    manifest = probe_run.build_probe_run_manifest(store, selected,
-        echoframe_keys, 'embedding', feature_parameters, target_phoneme,
-        n_embeds, n_splits, random_state, standardize)
-    run_id = probe_run.hash_run_manifest(manifest)
-    probe_run_directory = _run_directory(probe_save_dir, model_name,
-        target_phoneme, layer, collar, run_id)
     phone_result = probe_result.PhoneResult.embedding(target_phoneme,
-        model_name, layer, collar, n_samples=n_embeds, n_splits=n_splits,
-        random_state=random_state, standardize=standardize,
-        root=results_dir)
+        model_name, layer, collar, root=results_dir)
     existing_fold_count = len(phone_result.folds)
     complete_before = phone_result.complete
-
-    def load_vectors():
-        return _load_middle_frame_vectors(store, selected, model_name, layer,
-            collar)
-
-    probe_run.run(load_vectors=load_vectors, manifest=manifest,
-        probe_run_directory=probe_run_directory, phone_result=phone_result,
-        display_name=f'{target_phoneme} layer {layer}', n_splits=n_splits,
-        random_state=random_state, standardize=standardize,
-        save_probes=True, save_predictions=True, overwrite=overwrite,
-        verbose=verbose)
-
     cache_status = probe_run.classify_cache_status(True, complete_before,
         overwrite, existing_fold_count)
+
+    if cache_status == 'hit':
+        if verbose:
+            print(f'{target_phoneme} layer {layer}: cache status: hit',
+                flush=True)
+        return
+
+    if probe_matrix is None:
+        if store is None:
+            store_root = str(store_root)
+            store = echoframe.Store(store_root)
+        probe_matrix = probe_data.build_probe_matrix(phones, store,
+            model_name, layer, collar=collar,
+            expected_target_count=expected_target_count)
+
+    probe_run_directory = _run_directory(probe_save_dir, model_name,
+        target_phoneme, layer, collar)
+
+    def load_vectors():
+        return probe_data.select_balanced_vectors(probe_matrix,
+            target_phoneme)
+
+    outcome = probe_run.run(load_vectors=load_vectors,
+        probe_run_directory=probe_run_directory, phone_result=phone_result,
+        display_name=f'{target_phoneme} layer {layer}',
+        save_probes=True, save_predictions=True,
+        overwrite=overwrite, verbose=verbose)
+
+    description = probe_data.describe_probe_run(probe_matrix.phone_labels,
+        target_phoneme, 'embedding', expected_target_count)
+    description['actual_n_samples'] = outcome.n_samples
+    description['actual_n_missing'] = outcome.n_missing
+    phone_result.save_run(description)
+
     if verbose:
         print(f'{target_phoneme} layer {layer}: cache status: '
             f'{cache_status}', flush=True)
@@ -79,55 +91,131 @@ def train_binary_embedding_probe(phones, target_phoneme, store=None,
 
 def train_binary_embedding_probes(phones, target_phonemes=None, store=None,
     store_root=locations.echoframe_store, model_name=default_model_name,
-    layer=9, collar=2000, n_embeds=None, n_splits=5, random_state=42,
-    standardize=False, probe_save_dir=locations.phone_probes,
+    layer=9, collar=2000, expected_target_count=13500, max_workers=None,
+    probe_save_dir=locations.phone_probes,
     results_dir=locations.probe_results, overwrite=False, verbose=True,
     report=False):
     '''Train one binary embedding probe run for each target phoneme.
 
-    The Phraser label inventory must contain the same number of items for
-    every label. All labels are used when target_phonemes is omitted.
+    Loads embeddings for the whole label inventory once
+    (probe_data.build_probe_matrix) and reuses that matrix for every
+    label, instead of each label re-fetching its own selected subset.
+    All labels are used when target_phonemes is omitted.
 
-    phones:            phone inventory paired with Phraser phones
-    target_phonemes:   optional ordered subset of labels to probe
-    store:             optional open Echoframe store shared across labels
-    model_name:        model identifier stored with each embedding
-    n_embeds:          maximum positive examples selected per label
-    report:            when True, reconstruct each label's accuracy metrics
-                        from disk after training and return them keyed by
-                        target phoneme; when False, return None
+    phones:                phone inventory paired with Phraser phones
+    target_phonemes:       optional ordered subset of labels to probe
+    store:                 optional open Echoframe store shared across
+                           labels
+    model_name:            model identifier stored with each embedding
+    expected_target_count:  passed to probe_data.build_probe_matrix
+    max_workers:            when None (default), trains sequentially in
+                            this process. When a positive integer, trains
+                            that many labels concurrently in worker
+                            processes, each reusing the one preloaded
+                            probe_matrix (sent once per worker process,
+                            not once per label). A failure in any label
+                            cancels the remaining queued labels and
+                            re-raises immediately, matching the
+                            sequential path.
+    report:                when True, reconstruct each label's accuracy
+                           metrics from disk after training and return
+                           them keyed by target phoneme; when False,
+                           return None
     '''
-    probe_training.validate_training_options(n_splits, standardize)
-    targets = probe_utils.prepare_balanced_probe_targets(phones,
-        target_phonemes, n_samples=n_embeds)
-    probe_utils.validate_unique_phraser_keys(phones)
+    if target_phonemes is None:
+        targets = sorted(phones.label_to_phraser_phone)
+    else:
+        targets = list(target_phonemes)
 
     owns_store = store is None
     if store is None:
         store_root = str(store_root)
         store = echoframe.Store(store_root)
 
+    probe_matrix = probe_data.build_probe_matrix(phones, store, model_name,
+        layer, collar=collar, expected_target_count=expected_target_count)
+
     def train_one(target_phoneme):
         train_binary_embedding_probe(phones, target_phoneme,
             store=store, model_name=model_name, layer=layer, collar=collar,
-            n_embeds=n_embeds, n_splits=n_splits, random_state=random_state,
-            standardize=standardize, probe_save_dir=probe_save_dir,
+            expected_target_count=expected_target_count,
+            probe_matrix=probe_matrix, probe_save_dir=probe_save_dir,
             results_dir=results_dir, overwrite=overwrite, verbose=verbose)
         if not report: return None
         return _phone_report(target_phoneme, model_name, layer, collar,
-            n_embeds, n_splits, random_state, standardize, results_dir)
+            results_dir)
 
     try:
-        results = probe_utils.run_probe_sweep(targets, train_one,
-            'embedding', verbose=verbose)
+        if max_workers is None:
+            results = probe_utils.run_probe_sweep(targets, train_one,
+                'embedding', verbose=verbose)
+        else:
+            results = _train_labels_in_pool(targets, probe_matrix,
+                model_name, layer, collar, expected_target_count,
+                probe_save_dir, results_dir, overwrite, verbose,
+                max_workers)
         return results if report else None
     finally:
         if owns_store: store.close()
 
 
+def _init_pool_worker(probe_matrix):
+    '''Store the shared ProbeMatrix once per worker process, sent through
+    ProcessPoolExecutor's initializer rather than as a per-task argument.
+    '''
+    global _pool_probe_matrix
+    _pool_probe_matrix = probe_matrix
+
+
+def _train_one_label_in_pool(target_phoneme, model_name, layer, collar,
+    expected_target_count, probe_save_dir, results_dir, overwrite):
+    '''Run inside a worker process. Reads the matrix _init_pool_worker
+    already stored in this process instead of receiving it as an
+    argument. Never touches phones or a store.
+    '''
+    train_binary_embedding_probe(None, target_phoneme,
+        model_name=model_name, layer=layer, collar=collar,
+        expected_target_count=expected_target_count,
+        probe_matrix=_pool_probe_matrix, probe_save_dir=probe_save_dir,
+        results_dir=results_dir, overwrite=overwrite, verbose=False)
+    return target_phoneme, _phone_report(target_phoneme, model_name, layer,
+        collar, results_dir)
+
+
+def _train_labels_in_pool(targets, probe_matrix, model_name, layer, collar,
+    expected_target_count, probe_save_dir, results_dir, overwrite, verbose,
+    max_workers):
+    '''Train every target phoneme concurrently, sharing one preloaded
+    ProbeMatrix once per worker process via an initializer.
+    '''
+    context = multiprocessing.get_context('spawn')
+    results = {}
+    total = len(targets)
+    completed = 0
+    with ProcessPoolExecutor(max_workers=max_workers, mp_context=context,
+        initializer=_init_pool_worker, initargs=(probe_matrix,)) as executor:
+        futures = {
+            executor.submit(_train_one_label_in_pool, target_phoneme,
+                model_name, layer, collar, expected_target_count,
+                probe_save_dir, results_dir, overwrite): target_phoneme
+            for target_phoneme in targets}
+        try:
+            for future in as_completed(futures):
+                target_phoneme, label_report = future.result()
+                results[target_phoneme] = label_report
+                completed += 1
+                if verbose:
+                    print(f'[embedding pool] {completed}/{total} completed '
+                        f'{target_phoneme!r}', flush=True)
+        except BaseException:
+            executor.shutdown(cancel_futures=True)
+            raise
+    return results
+
+
 def train_binary_embedding_probe_checkpoint_sweep(phones,
-    store_root=locations.echoframe_model_stores, collar=2000, n_embeds=None,
-    n_splits=5, random_state=42, standardize=False,
+    store_root=locations.echoframe_model_stores, collar=2000,
+    expected_target_count=13500, max_workers=None,
     probe_save_dir=locations.phone_probes,
     results_dir=locations.probe_results, overwrite=False,
     metadata_batch_size=_default_inventory_batch_size, verbose=True):
@@ -137,25 +225,25 @@ def train_binary_embedding_probe_checkpoint_sweep(phones,
     before training. Failures are reported without stopping later runs. The
     returned report contains compact metrics rather than fitted classifiers.
 
-    phones:               phone inventory paired with Phraser phones
-    store_root:           directory containing checkpoint Echoframe stores
-    n_embeds:             maximum positive examples selected per label
-    metadata_batch_size:  number of metadata keys checked per request
-    verbose:              whether to print progress and the final report
+    phones:                phone inventory paired with Phraser phones
+    store_root:            directory containing checkpoint Echoframe stores
+    expected_target_count:  passed to probe_data.build_probe_matrix
+    max_workers:            passed to train_binary_embedding_probes; when
+                            None (default), each checkpoint/layer's labels
+                            train sequentially, matching today's behavior
+    metadata_batch_size:   number of metadata keys checked per request
+    verbose:               whether to print progress and the final report
     '''
     _validate_inventory_batch_size(metadata_batch_size)
-    probe_training.validate_training_options(n_splits, standardize)
-    probe_utils.prepare_balanced_probe_targets(phones, target_phonemes=None,
-        n_samples=n_embeds)
-    expected_n_samples = _expected_probe_sample_count(phones, n_embeds)
+    expected_n_samples = _expected_probe_sample_count(phones)
     n_total = len(phones.phraser_phones)
     store_root = Path(store_root)
     report = _empty_checkpoint_sweep_report(store_root)
-    probe_options = {'collar': collar, 'n_embeds': n_embeds,
-        'n_splits': n_splits, 'random_state': random_state,
-        'standardize': standardize, 'probe_save_dir': probe_save_dir,
-        'results_dir': results_dir, 'overwrite': overwrite,
-        'verbose': verbose, 'report': True}
+    probe_options = {'collar': collar,
+        'expected_target_count': expected_target_count,
+        'max_workers': max_workers,
+        'probe_save_dir': probe_save_dir, 'results_dir': results_dir,
+        'overwrite': overwrite, 'verbose': verbose, 'report': True}
 
     try:
         checkpoint_stores = discover_wav2vec2_checkpoint_stores(store_root)
@@ -256,47 +344,10 @@ def check_embedding_inventory(phones, store, model_name, layer, collar=2000,
         'n_missing': n_missing, 'complete': n_missing == 0}
 
 
-def _embedding_echoframe_keys(store, selected, model_name, layer, collar):
-    keys = []
-    for _, phraser_phone, _ in selected:
-        key = store.make_echoframe_key('hidden_state', model_name=model_name,
-            phraser_key=phraser_phone.key, layer=layer, collar=collar)
-        keys.append(key)
-    return keys
-
-
-def _load_middle_frame_vectors(store, selected, model_name, layer, collar):
-    '''Load embeddings and reduce each stored phone to its middle frame.'''
-    phraser_keys = [phone.key for _, phone, _ in selected]
-    embeddings = store.phraser_keys_to_embeddings(phraser_keys, model_name,
-        layer, collar=collar)
-    by_key = {}
-    for embedding in embeddings.embeddings:
-        by_key[embedding.phraser_key] = embedding
-
-    X, y, true_labels, missing = [], [], [], []
-    for phone, phraser_phone, binary_label in selected:
-        embedding = by_key.get(phraser_phone.key)
-        if embedding is None:
-            missing.append(phone)
-            continue
-        middle_frame = embedding.middle_frame_segment(phraser_phone)
-        X.append(middle_frame)
-        y.append(binary_label)
-        true_labels.append(phone.phoneme_ipa)
-    X = np.array(X)
-    y = np.array(y)
-    true_labels = np.array(true_labels)
-    return X, y, true_labels, missing
-
-
-def _phone_report(target_phoneme, model_name, layer, collar, n_embeds,
-    n_splits, random_state, standardize, results_dir):
+def _phone_report(target_phoneme, model_name, layer, collar, results_dir):
     '''Reconstruct one label's accuracy metrics from persisted results.'''
     phone_result = probe_result.PhoneResult.embedding(target_phoneme,
-        model_name, layer, collar, n_samples=n_embeds, n_splits=n_splits,
-        random_state=random_state, standardize=standardize,
-        root=results_dir)
+        model_name, layer, collar, root=results_dir)
     run = phone_result.run or {}
     return {'mean_accuracy': phone_result.mean_accuracy,
         'std_accuracy': phone_result.std_accuracy,
@@ -304,9 +355,9 @@ def _phone_report(target_phoneme, model_name, layer, collar, n_embeds,
         'n_missing': run.get('actual_n_missing')}
 
 
-def _run_directory(root, model_name, target_phoneme, layer, collar, run_id):
+def _run_directory(root, model_name, target_phoneme, layer, collar):
     return Path(root) / model_name / target_phoneme / f'layer{layer:02d}' / (
-        f'collar{collar}ms') / run_id
+        f'collar{collar}ms')
 
 
 def _checkpoint_number(model_name):
@@ -341,15 +392,14 @@ def _compact_probe_results(results, expected_n_samples):
     return compact
 
 
-def _expected_probe_sample_count(phones, n_embeds):
+def _expected_probe_sample_count(phones):
     grouped = phones.label_to_phraser_phone
     n_labels = len(grouped)
     grouped_values = iter(grouped.values())
     first_group = next(grouped_values)
     items_per_label = len(first_group)
-    target_count = items_per_label if n_embeds is None else n_embeds
-    other_count = target_count // (n_labels - 1) * (n_labels - 1)
-    return target_count + other_count
+    other_count = items_per_label // (n_labels - 1) * (n_labels - 1)
+    return items_per_label + other_count
 
 
 def _empty_checkpoint_sweep_report(store_root):

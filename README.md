@@ -376,14 +376,12 @@ each model and layer unless `overwrite=True`. The caller owns the `Phones`
 object and its Phraser store and should close that store after the complete
 workflow.
 
-Sampling: the target phoneme gets `n_embeds` phones
-(default `None` - every available target-phoneme phone, not an arbitrary
-cap); every other phoneme class gets `n_embeds // (number of other phoneme
-classes)`, so the two binary classes ("target" vs "other") stay balanced
-overall. Sampling is deterministic (seeded by `random_state`). If any class
-doesn't have enough phones to fill its quota, this raises `ValueError`
-naming the class and the shortfall, rather than silently training on less
-data than requested.
+Sampling: the target phoneme uses every available target-phoneme phone;
+every other phoneme class gets an even split of that same count, so the two
+binary classes ("target" vs "other") stay balanced overall. Sampling is
+deterministic (seeded internally). If any class doesn't have enough phones
+to fill its quota, this raises `ValueError` naming the class and the
+shortfall, rather than silently training on less data than requested.
 
 Loading (`_load_middle_frame_vectors`): embeddings for the sampled phones
 are batch-loaded in one call (`store.phraser_keys_to_embeddings`, grouped
@@ -470,30 +468,15 @@ single-target cache behavior, and report target progress with elapsed time
 and ETA. Pass `target_phonemes=[...]` to train only a selected subset; the
 full Phraser label inventory must still be balanced.
 
-Both trainers accept `standardize=False` by default. Set `standardize=True`
-to fit a `StandardScaler` on each training fold and apply it to that fold's
-test data before logistic regression. Scaling is per feature dimension; no
-test-fold statistics leak into training.
-
-Before choosing that flag, run the independent scale diagnostic on a subset:
-
-	from probing.probe_utils import inspect_feature_scale
-
-	report = inspect_feature_scale(phones, sample_size=1000)
-	report['embedding']['recommend_standardize']
-	report['mfcc']['recommend_standardize']
-
-It loads paired center frames from both stores and reports the per-dimension
-standard deviations, their spread, zero-variance dimensions, and a heuristic
-recommendation. It does not train a probe or change either training pipeline.
-The recommendation threshold can be changed with `std_ratio_threshold`.
+Both trainers always fit a plain `LogisticRegression` on raw features; there
+is no feature-scaling option.
 
 e) Shared probe utilities
 
 The shared code is divided by responsibility: `probe_utils.py` contains
-sampling, sweep progress, validation, and scale inspection;
-`probe_training.py` contains cross-validation and fold-local scaling; and
-`probe_run.py` contains run identity, cache validation, and persistence.
+sampling, sweep progress, and validation; `probe_training.py` contains
+cross-validation and classifier fitting; and `probe_run.py` contains run
+identity, cache validation, and persistence.
 Representation-specific key construction and feature loading stay in their two
 trainer modules.
 

@@ -11,9 +11,11 @@ from pathlib import Path
 import locations
 from probing.extract_embeddings import default_model_name
 
+_n_splits = 5
+
 _identity_manifest_fields = (
-    'representation', 'feature_parameters', 'target_phoneme', 'n_samples',
-    'n_splits', 'random_state', 'classifier', 'feature_set_hash')
+    'representation', 'feature_parameters', 'target_phoneme',
+    'classifier', 'feature_set_hash')
 
 
 def manifests_match(a, b):
@@ -58,8 +60,7 @@ class PhoneResult:
     '''Result identity and computed folds for one target phoneme.'''
 
     def __init__(self, target_phoneme, *, representation, model_name, layer,
-        collar, frame, n_samples=None, n_splits=5, random_state=42,
-        standardize=False, root=locations.probe_results):
+        collar, frame, root=locations.probe_results):
         '''Create a validated phone-result identity.
 
         target_phoneme:  phoneme label used as the positive class
@@ -68,10 +69,6 @@ class PhoneResult:
         layer:           embedding hidden-state layer, otherwise None
         collar:          embedding context in milliseconds, otherwise None
         frame:           frame reduction used to create feature vectors
-        n_samples:       requested positive examples, or all when None
-        n_splits:        number of cross-validation folds
-        random_state:    random seed used for selection and fold creation
-        standardize:     whether features are standardized within each fold
         root:            root directory containing probe results
         '''
         self.target_phoneme = target_phoneme
@@ -80,10 +77,7 @@ class PhoneResult:
         self.layer = layer
         self.collar = collar
         self.frame = frame
-        self.n_samples = n_samples
-        self.n_splits = n_splits
-        self.random_state = random_state
-        self.standardize = standardize
+        self.n_splits = _n_splits
         self.root = Path(root)
 
     def __repr__(self):
@@ -100,43 +94,30 @@ class PhoneResult:
 
     @classmethod
     def embedding(cls, target_phoneme, model_name=default_model_name,
-        layer=9, collar=2000, n_samples=None, n_splits=5, random_state=42,
-        standardize=False, root=locations.probe_results):
+        layer=9, collar=2000, root=locations.probe_results):
         '''Create an embedding result using middle-frame hidden states.
 
         target_phoneme:  phoneme label used as the positive class
         model_name:      embedding model identifier
         layer:           hidden-state layer
         collar:          embedding context in milliseconds
-        n_samples:       requested positive examples, or all when None
-        n_splits:        number of cross-validation folds
-        random_state:    random seed used for selection and fold creation
-        standardize:     whether features are standardized within each fold
         root:            root directory containing probe results
         '''
         return cls(target_phoneme, representation='embedding',
             model_name=model_name, layer=layer, collar=collar,
-            frame='middle', n_samples=n_samples, n_splits=n_splits,
-            random_state=random_state, standardize=standardize, root=root)
+            frame='middle', root=root)
 
     @classmethod
-    def mfcc(cls, target_phoneme, frame='center', n_samples=None, n_splits=5,
-        random_state=42, standardize=False,
+    def mfcc(cls, target_phoneme, frame='center',
         root=locations.probe_results):
         '''Create an MFCC result using the requested frame reduction.
 
         target_phoneme:  phoneme label used as the positive class
         frame:           MFCC frame reduction
-        n_samples:       requested positive examples, or all when None
-        n_splits:        number of cross-validation folds
-        random_state:    random seed used for selection and fold creation
-        standardize:     whether features are standardized within each fold
         root:            root directory containing probe results
         '''
         return cls(target_phoneme, representation='mfcc', model_name=None,
-            layer=None, collar=None, frame=frame, n_samples=n_samples,
-            n_splits=n_splits, random_state=random_state,
-            standardize=standardize, root=root)
+            layer=None, collar=None, frame=frame, root=root)
 
     def load_run(self):
         '''Load run.json, returning None when it does not exist.'''
@@ -197,8 +178,7 @@ class PhoneResult:
     def identity(self):
         '''Tuple containing every public experiment-identity parameter.'''
         return (self.target_phoneme, self.representation, self.model_name,
-            self.layer, self.collar, self.frame, self.n_samples,
-            self.n_splits, self.random_state, self.standardize)
+            self.layer, self.collar, self.frame)
 
     @cached_property
     def folds(self):

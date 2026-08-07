@@ -5,7 +5,7 @@ import echoframe
 import numpy as np
 
 import locations
-from probing import probe_run, probe_training, probe_utils
+from probing import probe_run, probe_utils
 from probing import result as probe_result
 
 _frame_modes = {'center', 'mean', 'first', 'last'}
@@ -74,7 +74,6 @@ def _compact_mfcc_probe_result(target_phoneme, result):
         'feature_name': result.get('feature_name', 'mfcc'),
         'frame': result['frame'],
         'run_id': result['run_id'],
-        'standardize': bool(result['standardize']),
         'accuracies': accuracies,
         'mean_accuracy': float(result['mean_accuracy']),
         'std_accuracy': float(result['std_accuracy']),
@@ -85,18 +84,16 @@ def _compact_mfcc_probe_result(target_phoneme, result):
     }
 
 
-def _phone_report(target_phoneme, frame, n_samples, n_splits, random_state,
-    standardize, results_dir):
+def _phone_report(target_phoneme, frame, results_dir):
     '''Reconstruct one label's accuracy metrics from persisted results.'''
     phone_result = probe_result.PhoneResult.mfcc(target_phoneme, frame,
-        n_samples=n_samples, n_splits=n_splits, random_state=random_state,
-        standardize=standardize, root=results_dir)
+        root=results_dir)
     run = phone_result.run or {}
     run_id = probe_run.stored_run_id(phone_result) if phone_result.run else (
         None)
     return {'representation': 'mfcc', 'target_phoneme': target_phoneme,
         'feature_name': 'mfcc', 'frame': frame, 'run_id': run_id,
-        'standardize': standardize, 'accuracies': phone_result.accuracies,
+        'accuracies': phone_result.accuracies,
         'mean_accuracy': phone_result.mean_accuracy,
         'std_accuracy': phone_result.std_accuracy,
         'n_samples': run.get('actual_n_samples'),
@@ -109,10 +106,6 @@ def save_mfcc_probe_results(
     output_path=None,
     results_dir=locations.probe_results,
     frame='center',
-    n_samples=None,
-    n_splits=5,
-    random_state=42,
-    standardize=False,
     probe_save_dir=locations.phone_probes,
     overwrite=False,
     verbose=True,
@@ -126,14 +119,12 @@ def save_mfcc_probe_results(
     if not isinstance(results, dict) or not results:
         raise ValueError('results must be a non-empty dictionary')
     for name, value in (
-        ('standardize', standardize),
         ('overwrite', overwrite),
         ('verbose', verbose),
     ):
         if not isinstance(value, bool):
             raise TypeError(f'{name} must be a boolean')
     _validate_frame(frame)
-    probe_training.validate_training_options(n_splits, standardize)
     compact_results = {
         target: _compact_mfcc_probe_result(target, result)
         for target, result in results.items()
@@ -158,10 +149,6 @@ def save_mfcc_probe_results(
         'report_path': str(output_path),
         'settings': {
             'frame': frame,
-            'n_samples': n_samples,
-            'n_splits': n_splits,
-            'random_state': random_state,
-            'standardize': standardize,
             'probe_save_dir': str(
                 Path(probe_save_dir).expanduser().resolve()),
             'results_dir': str(results_dir),
@@ -186,10 +173,6 @@ def train_binary_mfcc_probe(
     store=None,
     store_root=locations.echoframe_mfcc_store,
     frame='center',
-    n_samples=None,
-    n_splits=5,
-    random_state=42,
-    standardize=False,
     probe_save_dir=locations.phone_probes,
     results_dir=locations.probe_results,
     save_results=True,
@@ -200,21 +183,17 @@ def train_binary_mfcc_probe(
     MFCCs.
 
     The primary representation is the center row of each `(frames, 39)`
-    matrix: 13 MFCC coefficients, 13 deltas, and 13 delta-deltas.
-    `standardize=False` preserves the legacy raw-feature probe. When True,
-    StandardScaler is fitted independently inside every cross-validation
-    training fold through an sklearn Pipeline. Fitted probes and fold
+    matrix: 13 MFCC coefficients, 13 deltas, and 13 delta-deltas. Every
+    available target-phoneme phone is used. Fitted probes and fold
     predictions are always saved. Nothing is returned; read results back
     afterward through probing.result.PhoneResult.
     '''
     probe_utils.validate_target_phoneme(target_phoneme)
-    probe_training.validate_training_options(n_splits, standardize)
     if not isinstance(save_results, bool):
         raise TypeError('save_results must be a boolean')
     _validate_frame(frame)
     probe_utils.validate_unique_phraser_keys(phones)
-    selected = probe_utils.select_phones(
-        phones, target_phoneme, n_samples, seed=random_state)
+    selected = probe_utils.select_phones(phones, target_phoneme)
 
     if store is None:
         store = echoframe.Store(str(store_root))
@@ -226,13 +205,12 @@ def train_binary_mfcc_probe(
     }
     manifest = probe_run.build_probe_run_manifest(
         store, selected, echoframe_keys, 'mfcc', feature_parameters,
-        target_phoneme, n_samples, n_splits, random_state, standardize)
+        target_phoneme)
     run_id = probe_run.hash_run_manifest(manifest)
     probe_run_directory = _run_directory(
         probe_save_dir, target_phoneme, frame, run_id)
     phone_result = probe_result.PhoneResult.mfcc(target_phoneme, frame,
-        n_samples=n_samples, n_splits=n_splits, random_state=random_state,
-        standardize=standardize, root=results_dir)
+        root=results_dir)
     existing_fold_count = len(phone_result.folds)
     complete_before = phone_result.complete
 
@@ -245,9 +223,6 @@ def train_binary_mfcc_probe(
         probe_run_directory=probe_run_directory,
         phone_result=phone_result,
         display_name=f'{target_phoneme} MFCC {frame} frame',
-        n_splits=n_splits,
-        random_state=random_state,
-        standardize=standardize,
         save_probes=True,
         save_predictions=True,
         overwrite=overwrite,
@@ -261,18 +236,13 @@ def train_binary_mfcc_probe(
             f'{cache_status}', flush=True)
 
     if save_results:
-        report = _phone_report(target_phoneme, frame, n_samples, n_splits,
-            random_state, standardize, results_dir)
+        report = _phone_report(target_phoneme, frame, results_dir)
         output_path = phone_result.path / _run_results_filename
         save_mfcc_probe_results(
             {target_phoneme: report},
             output_path=output_path,
             results_dir=results_dir,
             frame=frame,
-            n_samples=n_samples,
-            n_splits=n_splits,
-            random_state=random_state,
-            standardize=standardize,
             probe_save_dir=probe_save_dir,
             overwrite=overwrite,
             verbose=verbose,
@@ -285,10 +255,6 @@ def train_binary_mfcc_probes(
     store=None,
     store_root=locations.echoframe_mfcc_store,
     frame='center',
-    n_samples=None,
-    n_splits=5,
-    random_state=42,
-    standardize=False,
     probe_save_dir=locations.phone_probes,
     results_dir=locations.probe_results,
     save_results=True,
@@ -307,12 +273,11 @@ def train_binary_mfcc_probes(
              after training and return them keyed by target phoneme; when
              False, return None
     '''
-    probe_training.validate_training_options(n_splits, standardize)
     if not isinstance(save_results, bool):
         raise TypeError('save_results must be a boolean')
     _validate_frame(frame)
     targets = probe_utils.prepare_balanced_probe_targets(
-        phones, target_phonemes, n_samples=n_samples)
+        phones, target_phonemes)
     probe_utils.validate_unique_phraser_keys(phones)
 
     owns_store = store is None
@@ -325,10 +290,6 @@ def train_binary_mfcc_probes(
             target_phoneme,
             store=store,
             frame=frame,
-            n_samples=n_samples,
-            n_splits=n_splits,
-            random_state=random_state,
-            standardize=standardize,
             probe_save_dir=probe_save_dir,
             results_dir=results_dir,
             save_results=False,
@@ -336,8 +297,7 @@ def train_binary_mfcc_probes(
             verbose=verbose,
         )
         if not (report or save_results): return None
-        return _phone_report(target_phoneme, frame, n_samples, n_splits,
-            random_state, standardize, results_dir)
+        return _phone_report(target_phoneme, frame, results_dir)
 
     try:
         results = probe_utils.run_probe_sweep(
@@ -348,10 +308,6 @@ def train_binary_mfcc_probes(
                 output_path=results_path,
                 results_dir=results_dir,
                 frame=frame,
-                n_samples=n_samples,
-                n_splits=n_splits,
-                random_state=random_state,
-                standardize=standardize,
                 probe_save_dir=probe_save_dir,
                 overwrite=overwrite,
                 verbose=verbose,

@@ -18,31 +18,35 @@ TrainingOutcome = namedtuple('TrainingOutcome',
         'n_missing'])
 
 
-def run(*, load_vectors, manifest, probe_run_directory,
-    phone_result, display_name, n_splits, random_state,
-    standardize, save_probes, save_predictions, overwrite, verbose):
+def run(*, load_vectors, manifest=None, probe_run_directory,
+    phone_result, display_name,
+    save_probes, save_predictions, overwrite, verbose):
     '''Train and persist fold classifiers and predictions.
 
     load_vectors:               callback returning features and labels
-    manifest:                   canonical identity of the probe run
+    manifest:                   canonical identity of the probe run, or
+                                None to skip the pre-training identity
+                                check and manifest writes entirely (the
+                                caller builds and saves its own
+                                descriptive record afterward instead)
     probe_run_directory:        directory containing fitted fold probes
-    phone_result:               identity and storage for fold predictions
-    n_splits:                   number of cross-validation folds
+    phone_result:                identity and storage for fold predictions
 
     Returns a TrainingOutcome describing what was trained, or None when
     every fold result was already stored and training was skipped.
     '''
-    probe_training.validate_training_options(n_splits, standardize)
-    if save_predictions: phone_result.check_manifest(manifest)
+    if save_predictions and manifest is not None:
+        phone_result.check_manifest(manifest)
     if save_predictions and phone_result.complete and not overwrite:
         if verbose:
-            print(f'{display_name}: all {n_splits} results already stored '
-                f'under {phone_result.path} - skipping '
+            print(f'{display_name}: all {phone_result.n_splits} results '
+                f'already stored under {phone_result.path} - skipping '
                 '(pass overwrite=True to retrain)')
         return None
 
-    run_id = hash_run_manifest(manifest)
-    if save_probes: _write_run_manifest(probe_run_directory, manifest)
+    run_id = hash_run_manifest(manifest) if manifest is not None else None
+    if save_probes and manifest is not None:
+        _write_run_manifest(probe_run_directory, manifest)
 
     X, y, true_labels, missing = load_vectors()
     if verbose:
@@ -50,8 +54,7 @@ def run(*, load_vectors, manifest, probe_run_directory,
         label_counts = Counter(y)
         print(label_counts)
 
-    probes = probe_training.Probes(X, y, n_splits, standardize=standardize,
-        random_state=random_state)
+    probes = probe_training.Probes(X, y)
     probes.run(show_progress=verbose)
     for probe in probes.probes:
         fold_idx = probe.fold_index
@@ -73,7 +76,7 @@ def run(*, load_vectors, manifest, probe_run_directory,
             fold = probe_result.Fold(phone_result, fold_number)
             fold.save_results(predictions)
 
-    if save_predictions:
+    if save_predictions and manifest is not None:
         manifest_with_counts = dict(manifest)
         manifest_with_counts['actual_n_samples'] = len(X)
         manifest_with_counts['actual_n_missing'] = len(missing)
@@ -102,8 +105,7 @@ def classify_cache_status(save_predictions, complete_before, overwrite,
 
 
 def build_probe_run_manifest(store, selected, echoframe_keys, representation,
-    feature_parameters, target_phoneme, n_samples, n_splits, random_state,
-    standardize):
+    feature_parameters, target_phoneme):
     '''Build the canonical identity for an embedding or MFCC probe run.
 
     store:               Echoframe feature store
@@ -138,7 +140,7 @@ def build_probe_run_manifest(store, selected, echoframe_keys, representation,
                 'shard_id': shard_id})
         feature_records.append(record)
 
-    classifier = probe_training.configuration(standardize)
+    classifier = probe_training.configuration()
     selected_sample_count = len(sample_records)
     selected_samples_hash = _hash_json(sample_records)
     feature_set_hash = _hash_json(feature_records)
@@ -146,8 +148,7 @@ def build_probe_run_manifest(store, selected, echoframe_keys, representation,
         'trainer_version': _trainer_version,
         'representation': representation,
         'feature_parameters': dict(feature_parameters),
-        'target_phoneme': target_phoneme, 'n_samples': n_samples,
-        'n_splits': n_splits, 'random_state': random_state,
+        'target_phoneme': target_phoneme,
         'classifier': classifier,
         'selected_sample_count': selected_sample_count,
         'selected_samples_hash': selected_samples_hash,
