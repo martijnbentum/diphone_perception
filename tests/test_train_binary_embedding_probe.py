@@ -348,15 +348,16 @@ def test_train_binary_embedding_probes_trains_each_phraser_label(
         report=True,
     )
 
+    # results are reordered to match target_phonemes regardless of which
+    # worker process happens to finish first
     assert list(results) == ['p', 'a']
     assert all('mean_accuracy' in result for result in results.values())
     # one batched load for the whole sweep, not one per label - the
     # concrete proof the redundant-reload problem is fixed
     assert len(store.phraser_keys_to_embeddings_calls) == 1
     output = capsys.readouterr().out
-    assert "[embedding probes] 1/2 starting 'p'" in output
-    assert '[embedding probes] 2/2 completed' in output
-    assert 'ETA ' in output
+    assert '[embedding pool] 1/2 completed' in output
+    assert '[embedding pool] 2/2 completed' in output
 
 
 def test_train_binary_embedding_probes_runs_in_a_process_pool(

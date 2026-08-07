@@ -1,4 +1,5 @@
 import multiprocessing
+import os
 import re
 import warnings
 from collections import Counter
@@ -108,15 +109,21 @@ def train_binary_embedding_probes(phones, target_phonemes=None, store=None,
                            labels
     model_name:            model identifier stored with each embedding
     expected_target_count:  passed to probe_data.build_probe_matrix
-    max_workers:            when None (default), trains sequentially in
-                            this process. When a positive integer, trains
-                            that many labels concurrently in worker
-                            processes, each reusing the one preloaded
-                            probe_matrix (sent once per worker process,
-                            not once per label). A failure in any label
-                            cancels the remaining queued labels and
-                            re-raises immediately, matching the
-                            sequential path.
+    max_workers:            trains that many labels concurrently in
+                            worker processes, each reusing the one
+                            preloaded probe_matrix (sent once per worker
+                            process, not once per label). Defaults to
+                            min(number of targets, os.cpu_count()), so a
+                            small target_phonemes subset or a small
+                            machine never over-spawns. Pass 1 to force a
+                            single worker process (still out-of-process,
+                            just not concurrent); building your own
+                            probe_matrix and calling
+                            train_binary_embedding_probe per label with
+                            probe_utils.run_probe_sweep is the fully
+                            in-process alternative. A failure in any
+                            label cancels the remaining queued labels and
+                            re-raises immediately.
     report:                when True, reconstruct each label's accuracy
                            metrics from disk after training and return
                            them keyed by target phoneme; when False,
@@ -127,6 +134,9 @@ def train_binary_embedding_probes(phones, target_phonemes=None, store=None,
     else:
         targets = list(target_phonemes)
 
+    if max_workers is None:
+        max_workers = max(1, min(len(targets), os.cpu_count() or 1))
+
     owns_store = store is None
     if store is None:
         store_root = str(store_root)
@@ -135,25 +145,10 @@ def train_binary_embedding_probes(phones, target_phonemes=None, store=None,
     probe_matrix = probe_data.build_probe_matrix(phones, store, model_name,
         layer, collar=collar, expected_target_count=expected_target_count)
 
-    def train_one(target_phoneme):
-        train_binary_embedding_probe(phones, target_phoneme,
-            store=store, model_name=model_name, layer=layer, collar=collar,
-            expected_target_count=expected_target_count,
-            probe_matrix=probe_matrix, probe_save_dir=probe_save_dir,
-            results_dir=results_dir, overwrite=overwrite, verbose=verbose)
-        if not report: return None
-        return _phone_report(target_phoneme, model_name, layer, collar,
-            results_dir)
-
     try:
-        if max_workers is None:
-            results = probe_utils.run_probe_sweep(targets, train_one,
-                'embedding', verbose=verbose)
-        else:
-            results = _train_labels_in_pool(targets, probe_matrix,
-                model_name, layer, collar, expected_target_count,
-                probe_save_dir, results_dir, overwrite, verbose,
-                max_workers)
+        results = _train_labels_in_pool(targets, probe_matrix,
+            model_name, layer, collar, expected_target_count,
+            probe_save_dir, results_dir, overwrite, verbose, max_workers)
         return results if report else None
     finally:
         if owns_store: store.close()
@@ -187,9 +182,13 @@ def _train_labels_in_pool(targets, probe_matrix, model_name, layer, collar,
     max_workers):
     '''Train every target phoneme concurrently, sharing one preloaded
     ProbeMatrix once per worker process via an initializer.
+
+    Progress is reported in completion order, but the returned dict is
+    reordered to match `targets` - completion order depends on OS
+    scheduling and isn't reproducible run to run.
     '''
     context = multiprocessing.get_context('spawn')
-    results = {}
+    completed_reports = {}
     total = len(targets)
     completed = 0
     with ProcessPoolExecutor(max_workers=max_workers, mp_context=context,
@@ -202,7 +201,7 @@ def _train_labels_in_pool(targets, probe_matrix, model_name, layer, collar,
         try:
             for future in as_completed(futures):
                 target_phoneme, label_report = future.result()
-                results[target_phoneme] = label_report
+                completed_reports[target_phoneme] = label_report
                 completed += 1
                 if verbose:
                     print(f'[embedding pool] {completed}/{total} completed '
@@ -210,7 +209,8 @@ def _train_labels_in_pool(targets, probe_matrix, model_name, layer, collar,
         except BaseException:
             executor.shutdown(cancel_futures=True)
             raise
-    return results
+    return {target_phoneme: completed_reports[target_phoneme]
+        for target_phoneme in targets}
 
 
 def train_binary_embedding_probe_checkpoint_sweep(phones,
@@ -230,7 +230,9 @@ def train_binary_embedding_probe_checkpoint_sweep(phones,
     expected_target_count:  passed to probe_data.build_probe_matrix
     max_workers:            passed to train_binary_embedding_probes; when
                             None (default), each checkpoint/layer's labels
-                            train sequentially, matching today's behavior
+                            train concurrently with a worker count that
+                            adapts to the label count and machine (see
+                            train_binary_embedding_probes)
     metadata_batch_size:   number of metadata keys checked per request
     verbose:               whether to print progress and the final report
     '''
