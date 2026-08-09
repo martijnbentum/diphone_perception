@@ -192,3 +192,50 @@ def test_phone_result_tracks_completeness_and_accuracy(tmp_path):
     assert reloaded.complete is True
     assert reloaded.accuracies == pytest.approx([0.5, 1.0, 1.0, 1.0, 1.0])
     assert reloaded.mean_accuracy == pytest.approx(0.9)
+
+
+# -- checkpoint result inventory ----------------------------------------
+
+def test_find_missing_checkpoint_layer_results_aggregates_phone_results(
+    tmp_path,
+):
+    model_name = 'wav2vec2_nl1_checkpoint-1000'
+    complete = result.PhoneResult.model_feature(
+        'p', model_name, 9, 500, root=tmp_path)
+    for fold_number in range(1, 6):
+        result.Fold(complete, fold_number).save_results(
+            [('p', 'target', 'target')])
+
+    partial = result.PhoneResult.model_feature(
+        'a', model_name, 9, 500, root=tmp_path)
+    partial.save_run({'representation': 'embedding'})
+    result.Fold(partial, 1).save_results([('a', 'target', 'target')])
+
+    missing = result.find_missing_checkpoint_layer_results(
+        ['p', 'a'], model_name, 9, collar=500, root=tmp_path)
+
+    assert missing == [{
+        'target_phoneme': 'a',
+        'missing_fold_numbers': [2, 3, 4, 5],
+        'run_manifest_missing': False,
+    }]
+
+
+def test_find_missing_checkpoint_results_groups_missing_results_by_layer(
+    tmp_path,
+):
+    model_name = 'wav2vec2_nl1_checkpoint-1000'
+    complete = result.PhoneResult.model_feature(
+        'p', model_name, 9, 500, root=tmp_path)
+    for fold_number in range(1, 6):
+        result.Fold(complete, fold_number).save_results(
+            [('p', 'target', 'target')])
+
+    missing = result.find_missing_checkpoint_results(
+        ['p'], model_name, (9, 'cnn'), collar=500, root=tmp_path)
+
+    assert missing == {'cnn': [{
+        'target_phoneme': 'p',
+        'missing_fold_numbers': [1, 2, 3, 4, 5],
+        'run_manifest_missing': True,
+    }]}

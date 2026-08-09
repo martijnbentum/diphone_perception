@@ -59,21 +59,11 @@ class FakeCNNFeatures:
         self.cnn_features = features
 
 
-class FakeMetadata:
-    def __init__(self, echoframe_key, vector):
-        self.echoframe_key = echoframe_key
-        self.created_at = '2026-01-01T00:00:00+00:00'
-        self.dataset_path = f'embeddings/{echoframe_key[2]}'
-        self.shape = vector.shape
-        self.shard_id = 0
-
-
 class FakeStore:
     def __init__(self, vectors_by_key):
         self.vectors_by_key = vectors_by_key
         self.phraser_keys_to_embeddings_calls = []
         self.phraser_keys_to_cnn_features_calls = []
-        self.load_many_metadata_calls = []
         self.closed = False
 
     def close(self):
@@ -101,25 +91,7 @@ class FakeStore:
         ]
         return FakeCNNFeatures(features)
 
-    def make_echoframe_key(
-        self, output_type, model_name, phraser_key, layer=None, collar=None,
-    ):
-        return output_type, model_name, phraser_key, layer, collar
-
-    def load_many_metadata(self, echoframe_keys, keep_missing=False):
-        self.load_many_metadata_calls.append(
-            (list(echoframe_keys), keep_missing))
-        metadatas = []
-        for key in echoframe_keys:
-            vector = self.vectors_by_key.get(key[2])
-            metadata = (
-                FakeMetadata(key, vector) if vector is not None else None)
-            if metadata is not None or keep_missing:
-                metadatas.append(metadata)
-        return metadatas
-
-
-# -- checkpoint discovery and inventory preflight -------------------------
+# -- checkpoint discovery -------------------------------------------------
 
 def test_discover_wav2vec2_checkpoint_stores_filters_and_sorts(tmp_path):
     directory_names = (
@@ -166,65 +138,50 @@ def test_checkpoint_probe_layers_rejects_unsupported_models(model_name):
         tbp.checkpoint_probe_layers(model_name)
 
 
-def test_check_embedding_inventory_checks_every_phone_in_batches():
-    phones = FakePhones(['p', 'p', 'a', 'a', 't'])
-    store = FakeStore({key: np.ones(2) for key in (0, 1, 3, 4)})
-
-    report = tbp.check_embedding_inventory(
-        phones,
-        store,
-        'wav2vec2_nl1_checkpoint-1000',
-        layer=9,
-        collar=2000,
-        batch_size=2,
-        verbose=False,
+def test_find_missing_checkpoint_probe_results_reports_folds_and_manifest(
+    tmp_path, monkeypatch,
+):
+    model_name = 'wav2vec2_nl1_checkpoint-1000'
+    store_path = tmp_path / 'stores' / model_name
+    results_dir = tmp_path / 'results'
+    monkeypatch.setattr(
+        tbp, 'discover_wav2vec2_checkpoint_stores',
+        lambda root: [(model_name, store_path)],
     )
+    phones = FakePhones(['p', 'p', 'a', 'a'])
 
-    assert report == {
-        'n_total': 5,
-        'n_available': 4,
-        'n_missing': 1,
-        'complete': False,
+    complete_without_manifest = probe_result.PhoneResult.model_feature(
+        'p', model_name, 9, 500, root=results_dir)
+    for fold_number in range(1, 6):
+        probe_result.Fold(complete_without_manifest, fold_number).save_results(
+            [('p', 'target', 'target')])
+
+    partial_with_manifest = probe_result.PhoneResult.model_feature(
+        'a', model_name, 9, 500, root=results_dir)
+    partial_with_manifest.save_run({'representation': 'embedding'})
+    probe_result.Fold(partial_with_manifest, 1).save_results(
+        [('a', 'target', 'target')])
+
+    missing = tbp.find_missing_checkpoint_probe_results(
+        phones, store_root=tmp_path / 'stores', collar=500,
+        results_dir=results_dir)
+
+    assert missing == {
+        (model_name, 9): [{
+            'target_phoneme': 'a',
+            'missing_fold_numbers': [2, 3, 4, 5],
+            'run_manifest_missing': False,
+        }],
+        (model_name, 'cnn'): [{
+            'target_phoneme': 'a',
+            'missing_fold_numbers': [1, 2, 3, 4, 5],
+            'run_manifest_missing': True,
+        }, {
+            'target_phoneme': 'p',
+            'missing_fold_numbers': [1, 2, 3, 4, 5],
+            'run_manifest_missing': True,
+        }],
     }
-    assert len(store.load_many_metadata_calls) == 3
-    requested_keys = [
-        key
-        for keys, keep_missing in store.load_many_metadata_calls
-        for key in keys
-    ]
-    assert all(
-        keep_missing for _, keep_missing in store.load_many_metadata_calls)
-    assert requested_keys == [
-        ('hidden_state', 'wav2vec2_nl1_checkpoint-1000', phraser_key, 9, 2000)
-        for phraser_key in range(5)
-    ]
-
-
-def test_check_embedding_inventory_uses_cnn_keys_without_layer():
-    phones = FakePhones(['p', 'p', 'a'])
-    store = FakeStore({key: np.ones(2) for key in (0, 2)})
-
-    report = tbp.check_embedding_inventory(phones, store,
-        'wav2vec2_nl1_checkpoint-1000', layer='cnn', collar=2000,
-        batch_size=2, verbose=False)
-
-    assert report['n_available'] == 2
-    requested_keys = [
-        key for keys, _ in store.load_many_metadata_calls for key in keys]
-    assert requested_keys == [
-        ('cnn', 'wav2vec2_nl1_checkpoint-1000', phraser_key, None, 2000)
-        for phraser_key in range(3)]
-
-
-@pytest.mark.parametrize('batch_size', [0, -1, True, 1.5])
-def test_check_embedding_inventory_rejects_invalid_batch_size(batch_size):
-    phones = FakePhones(['p'])
-    store = FakeStore({0: np.ones(2)})
-
-    with pytest.raises((TypeError, ValueError), match='positive integer'):
-        tbp.check_embedding_inventory(
-            phones, store, 'wav2vec2_nl1_checkpoint-1000', layer=9,
-            batch_size=batch_size, verbose=False)
 
 
 # -- _select_phones ------------------------------------------------------
@@ -559,13 +516,37 @@ class SweepStore:
         self.closed = True
 
 
+def _save_complete_checkpoint_layer_results(targets, model_name, layer,
+    collar, results_dir):
+    for target_phoneme in targets:
+        phone_result = probe_result.PhoneResult.model_feature(
+            target_phoneme, model_name, layer, collar, root=results_dir)
+        for fold_number in range(1, 6):
+            probe_result.Fold(phone_result, fold_number).save_results(
+                [(target_phoneme, 'target', 'target')])
+
+
+def test_checkpoint_probe_sweep_validates_source_inventory_first(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        tbp,
+        'discover_wav2vec2_checkpoint_stores',
+        lambda root: pytest.fail('invalid inventory must fail first'),
+    )
+    phones = FakePhones(['p', 'p', 'a'])
+
+    with pytest.raises(ValueError, match='not balanced'):
+        tbp.train_binary_embedding_probe_checkpoint_sweep(
+            phones, verbose=False)
+
+
 def test_checkpoint_probe_sweep_trains_and_returns_compact_report(
     tmp_path, monkeypatch, capsys,
 ):
     model_name = 'wav2vec2_nl1_checkpoint-1000'
     store_path = tmp_path / model_name
     store = SweepStore(store_path)
-    preflight_calls = []
     train_calls = []
 
     monkeypatch.setattr(
@@ -574,21 +555,10 @@ def test_checkpoint_probe_sweep_trains_and_returns_compact_report(
     )
     monkeypatch.setattr(tbp.echoframe, 'Store', lambda path: store)
 
-    def fake_check(phones, store_arg, model_name_arg, layer, **kwargs):
-        preflight_calls.append(
-            (phones, store_arg, model_name_arg, layer, kwargs))
-        return {
-            'n_total': 4,
-            'n_available': 4,
-            'n_missing': 0,
-            'complete': True,
-        }
-
     def fake_train(phones, **kwargs):
         train_calls.append((phones, kwargs))
         return make_compact_probe_results()
 
-    monkeypatch.setattr(tbp, 'check_embedding_inventory', fake_check)
     monkeypatch.setattr(tbp, 'train_binary_embedding_probes', fake_train)
     phones = FakePhones(['p', 'p', 'a', 'a'])
 
@@ -599,15 +569,9 @@ def test_checkpoint_probe_sweep_trains_and_returns_compact_report(
         probe_save_dir=tmp_path / 'probes',
         results_dir=tmp_path / 'results',
         overwrite=True,
-        metadata_batch_size=25,
         verbose=True,
     )
 
-    expected_check_options = {
-        'collar': 500, 'batch_size': 25, 'verbose': True}
-    assert preflight_calls == [
-        (phones, store, model_name, layer, expected_check_options)
-        for layer in (9, 'cnn')]
     expected_train_options = {
         'target_phonemes': None,
         'store': store,
@@ -630,6 +594,9 @@ def test_checkpoint_probe_sweep_trains_and_returns_compact_report(
     assert [run['layer'] for run in report['runs']] == [9, 'cnn']
     for run in report['runs']:
         assert run['status'] == 'completed'
+        assert run['n_total'] == 4
+        assert run['n_available'] == 4
+        assert run['n_missing'] == 0
         assert run['n_labels'] == 2
         assert run['mean_label_accuracy'] == pytest.approx(.775)
         assert run['labels']['p'] == {
@@ -660,12 +627,6 @@ def test_checkpoint_probe_sweep_threads_max_workers_through(
         lambda root: [(model_name, store_path)],
     )
     monkeypatch.setattr(tbp.echoframe, 'Store', lambda path: store)
-    monkeypatch.setattr(
-        tbp, 'check_embedding_inventory',
-        lambda *args, **kwargs: {
-            'n_total': 4, 'n_available': 4, 'n_missing': 0, 'complete': True,
-        },
-    )
 
     def fake_train(phones, **kwargs):
         train_calls.append(kwargs['max_workers'])
@@ -673,60 +634,124 @@ def test_checkpoint_probe_sweep_threads_max_workers_through(
 
     monkeypatch.setattr(tbp, 'train_binary_embedding_probes', fake_train)
 
+    phones = FakePhones(['p', 'p', 'a', 'a'])
     tbp.train_binary_embedding_probe_checkpoint_sweep(
-        FakePhones(['p', 'p', 'a', 'a']),
+        phones,
         store_root=tmp_path,
         max_workers=4,
+        results_dir=tmp_path / 'results',
         verbose=False,
     )
 
     assert train_calls == [4, 4]
 
 
-def test_checkpoint_probe_sweep_skips_incomplete_inventory(
-    tmp_path, monkeypatch, capsys,
+def test_checkpoint_probe_sweep_runs_only_layers_with_missing_results(
+    tmp_path, monkeypatch,
 ):
     model_name = 'wav2vec2_nl1_checkpoint-1000'
     store_path = tmp_path / model_name
+    results_dir = tmp_path / 'results'
     store = SweepStore(store_path)
+    train_calls = []
+    _save_complete_checkpoint_layer_results(
+        ('a', 'p'), model_name, 9, 500, results_dir)
     monkeypatch.setattr(
         tbp, 'discover_wav2vec2_checkpoint_stores',
         lambda root: [(model_name, store_path)],
     )
     monkeypatch.setattr(tbp.echoframe, 'Store', lambda path: store)
 
-    def fake_check(phones, store, model_name, layer, **kwargs):
-        available = 3 if layer == 'cnn' else 4
-        return {'n_total': 4, 'n_available': available,
-            'n_missing': 4 - available, 'complete': available == 4}
+    def fake_train(phones, **kwargs):
+        train_calls.append(kwargs['layer'])
+        return make_compact_probe_results()
 
-    train_calls = []
-    monkeypatch.setattr(tbp, 'check_embedding_inventory', fake_check)
-    monkeypatch.setattr(tbp, 'train_binary_embedding_probes',
-        lambda *args, **kwargs: train_calls.append(kwargs['layer']) or
-        make_compact_probe_results())
+    monkeypatch.setattr(tbp, 'train_binary_embedding_probes', fake_train)
 
-    with pytest.warns(RuntimeWarning, match='1 of 4 CNN features are missing'):
-        report = tbp.train_binary_embedding_probe_checkpoint_sweep(
-            FakePhones(['p', 'p', 'a', 'a']),
-            store_root=tmp_path,
-            verbose=True,
-        )
+    phones = FakePhones(['p', 'p', 'a', 'a'])
+    report = tbp.train_binary_embedding_probe_checkpoint_sweep(
+        phones,
+        store_root=tmp_path,
+        collar=500,
+        results_dir=results_dir,
+        verbose=False,
+    )
 
+    assert train_calls == ['cnn']
     assert store.closed is True
+    assert [run['layer'] for run in report['runs']] == [9, 'cnn']
+    assert [run['status'] for run in report['runs']] == [
+        'skipped', 'completed']
     assert report['status_counts'] == {
         'completed': 1, 'skipped': 1, 'failed': 0}
-    assert train_calls == [9]
-    assert report['runs'][1] == {
-        'model_name': model_name,
-        'layer': 'cnn',
-        'n_total': 4,
-        'n_available': 3,
-        'n_missing': 1,
-        'status': 'skipped',
-        'reason': 'incomplete cnn inventory',
-    }
-    assert '1 completed, 1 skipped, 0 failed' in capsys.readouterr().out
+
+
+def test_checkpoint_probe_sweep_does_not_open_store_when_results_complete(
+    tmp_path, monkeypatch,
+):
+    model_name = 'wav2vec2_nl1_checkpoint-1000'
+    store_path = tmp_path / model_name
+    results_dir = tmp_path / 'results'
+    for layer in (9, 'cnn'):
+        _save_complete_checkpoint_layer_results(
+            ('a', 'p'), model_name, layer, 500, results_dir)
+    monkeypatch.setattr(
+        tbp, 'discover_wav2vec2_checkpoint_stores',
+        lambda root: [(model_name, store_path)],
+    )
+    monkeypatch.setattr(
+        tbp.echoframe, 'Store',
+        lambda path: pytest.fail('complete checkpoint store must not open'),
+    )
+
+    phones = FakePhones(['p', 'p', 'a', 'a'])
+    report = tbp.train_binary_embedding_probe_checkpoint_sweep(
+        phones,
+        store_root=tmp_path,
+        collar=500,
+        results_dir=results_dir,
+        verbose=False,
+    )
+
+    assert [run['layer'] for run in report['runs']] == [9, 'cnn']
+    assert all(run['status'] == 'skipped' for run in report['runs'])
+    assert all(run['reason'] == 'all fold results already stored'
+        for run in report['runs'])
+    expected_counts = {'completed': 0, 'skipped': 2, 'failed': 0}
+    assert report['status_counts'] == expected_counts
+
+
+def test_checkpoint_probe_sweep_validates_inventory_while_loading_features(
+    tmp_path, monkeypatch,
+):
+    model_name = 'wav2vec2_nl1_checkpoint-1000'
+    store_path = tmp_path / model_name
+    store = FakeStore({0: np.ones(2), 2: np.ones(2), 3: np.ones(2)})
+    monkeypatch.setattr(
+        tbp, 'discover_wav2vec2_checkpoint_stores',
+        lambda root: [(model_name, store_path)],
+    )
+    monkeypatch.setattr(tbp.echoframe, 'Store', lambda path: store)
+
+    with pytest.warns(RuntimeWarning) as warning_records:
+        phones = FakePhones(['p', 'p', 'a', 'a'])
+        report = tbp.train_binary_embedding_probe_checkpoint_sweep(
+            phones,
+            store_root=tmp_path,
+            expected_target_count=2,
+            results_dir=tmp_path / 'results',
+            verbose=False,
+        )
+
+    assert len(warning_records) == 2
+    assert len(store.phraser_keys_to_embeddings_calls) == 1
+    assert len(store.phraser_keys_to_cnn_features_calls) == 1
+    assert store.closed is True
+    expected_counts = {'completed': 0, 'skipped': 0, 'failed': 2}
+    assert report['status_counts'] == expected_counts
+    assert all(run['failure_stage'] == 'training' for run in report['runs'])
+    assert all('expected 2 tokens per label' in run['error']
+        for run in report['runs'])
 
 
 def test_checkpoint_probe_sweep_records_failures_and_continues(
@@ -754,29 +779,22 @@ def test_checkpoint_probe_sweep_records_failures_and_continues(
             raise OSError('cannot open')
         return stores[model_name]
 
-    def fake_check(phones, store, model_name, layer, **kwargs):
-        if model_name == model_names[1]:
-            raise RuntimeError('cannot check')
-        return {
-            'n_total': 4,
-            'n_available': 4,
-            'n_missing': 0,
-            'complete': True,
-        }
-
     def fake_train(phones, model_name, **kwargs):
+        if model_name == model_names[1]:
+            raise RuntimeError('cannot load probe matrix')
         if model_name == model_names[2]:
             raise RuntimeError('cannot train')
         return make_compact_probe_results()
 
     monkeypatch.setattr(tbp.echoframe, 'Store', fake_store)
-    monkeypatch.setattr(tbp, 'check_embedding_inventory', fake_check)
     monkeypatch.setattr(tbp, 'train_binary_embedding_probes', fake_train)
 
     with pytest.warns(RuntimeWarning) as warning_records:
+        phones = FakePhones(['p', 'p', 'a', 'a'])
         report = tbp.train_binary_embedding_probe_checkpoint_sweep(
-            FakePhones(['p', 'p', 'a', 'a']),
+            phones,
             store_root=tmp_path,
+            results_dir=tmp_path / 'results',
             verbose=False,
         )
 
@@ -785,7 +803,7 @@ def test_checkpoint_probe_sweep_records_failures_and_continues(
         'failed', 'failed', 'failed', 'failed',
         'failed', 'failed', 'completed', 'completed']
     assert [run.get('failure_stage') for run in report['runs'][:6]] == [
-        'store', 'store', 'preflight', 'preflight',
+        'store', 'store', 'training', 'training',
         'training', 'training']
     assert report['status_counts'] == {
         'completed': 2, 'skipped': 0, 'failed': 6}

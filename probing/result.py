@@ -320,6 +320,52 @@ class PhoneResult:
         return [number for number in expected if number not in present]
 
 
+def find_missing_checkpoint_layer_results(target_phonemes, model_name, layer,
+    collar=2000, root=locations.probe_results):
+    '''Return incomplete phoneme results for one checkpoint layer.
+
+    target_phonemes:  labels whose fold results should be checked
+    model_name:       checkpoint identifier stored in each result path
+    layer:            hidden-state layer index or 'cnn'
+    collar:           model context in milliseconds
+    root:             root directory containing probe results
+
+    PhoneResult remains the single-phoneme completeness primitive. This
+    function aggregates it across target_phonemes. Classifier artifacts are
+    intentionally not inspected.
+    '''
+    missing = []
+    for target_phoneme in sorted(set(target_phonemes)):
+        phone_result = PhoneResult.model_feature(target_phoneme, model_name,
+            layer, collar, root=root)
+        if phone_result.complete: continue
+        missing.append({'target_phoneme': target_phoneme,
+            'missing_fold_numbers': phone_result.missing_fold_numbers,
+            'run_manifest_missing': not phone_result.run_path.is_file()})
+    return missing
+
+
+def find_missing_checkpoint_results(target_phonemes, model_name, layers,
+    collar=2000, root=locations.probe_results):
+    '''Return incomplete phoneme results grouped by layer for one checkpoint.
+
+    target_phonemes:  labels whose fold results should be checked
+    model_name:       checkpoint identifier stored in each result path
+    layers:           hidden-state layer indices and/or 'cnn'
+    collar:           model context in milliseconds
+    root:             root directory containing probe results
+
+    layers is explicit so result storage remains independent of checkpoint
+    discovery and layer-selection policy.
+    '''
+    missing = {}
+    for layer in layers:
+        layer_missing = find_missing_checkpoint_layer_results(
+            target_phonemes, model_name, layer, collar=collar, root=root)
+        if layer_missing: missing[layer] = layer_missing
+    return missing
+
+
 class Fold:
     '''Result and artifact locations for one cross-validation fold.'''
 

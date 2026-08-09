@@ -14,7 +14,6 @@ from probing import probe_data, probe_run, probe_utils
 from probing import result as probe_result
 from probing.extract_embeddings import default_model_name
 
-_default_inventory_batch_size = 1_000
 _pool_probe_matrix = None
 
 
@@ -222,14 +221,14 @@ def train_binary_embedding_probe_checkpoint_sweep(phones,
     store_root=locations.echoframe_model_stores, collar=2000,
     expected_target_count=13500, max_workers=None,
     probe_save_dir=locations.phone_probes,
-    results_dir=locations.probe_results, overwrite=False,
-    metadata_batch_size=_default_inventory_batch_size, verbose=True):
+    results_dir=locations.probe_results, overwrite=False, verbose=True):
     '''Train layer-specific all-label probes across wav2vec2 checkpoints.
 
-    Every checkpoint and layer is checked for a complete model-feature
-    inventory before training. Failures are reported without stopping later
-    runs. The returned report contains compact metrics rather than fitted
-    classifiers.
+    Existing fold results are checked before opening a checkpoint store.
+    Layers with complete results are skipped; every incomplete layer loads its
+    model features directly and validates the loaded per-label inventory before
+    training. Failures are reported without stopping later runs. The returned
+    report contains compact metrics rather than fitted classifiers.
 
     phones:                phone inventory paired with Phraser phones
     store_root:            directory containing checkpoint Echoframe stores
@@ -239,10 +238,9 @@ def train_binary_embedding_probe_checkpoint_sweep(phones,
                             train concurrently with a worker count that
                             adapts to the label count and machine (see
                             train_binary_embedding_probes)
-    metadata_batch_size:   number of metadata keys checked per request
     verbose:               whether to print progress and the final report
     '''
-    _validate_inventory_batch_size(metadata_batch_size)
+    targets = probe_utils.prepare_balanced_probe_targets(phones)
     expected_n_samples = _expected_probe_sample_count(phones)
     n_total = len(phones.phraser_phones)
     store_root = Path(store_root)
@@ -261,8 +259,27 @@ def train_binary_embedding_probe_checkpoint_sweep(phones,
         return report
 
     for model_name, store_path in checkpoint_stores:
+        layers = checkpoint_probe_layers(model_name)
+        if overwrite:
+            layers_to_run = layers
+        else:
+            missing = probe_result.find_missing_checkpoint_results(
+                targets, model_name, layers, collar=collar,
+                root=results_dir)
+            layers_to_run = []
+            for layer in layers:
+                if layer in missing:
+                    layers_to_run.append(layer)
+                    continue
+                report['runs'].append({'model_name': model_name,
+                    'layer': layer, 'status': 'skipped',
+                    'n_total': n_total, 'n_available': None,
+                    'n_missing': None,
+                    'reason': 'all fold results already stored'})
+            layers_to_run = tuple(layers_to_run)
+        if not layers_to_run: continue
         _probe_checkpoint_store(report, phones, model_name, store_path,
-            n_total, expected_n_samples, probe_options, metadata_batch_size,
+            layers_to_run, n_total, expected_n_samples, probe_options,
             verbose)
 
     status_counts = Counter()
@@ -311,47 +328,35 @@ def checkpoint_probe_layers(model_name):
     return (*layers, 'cnn')
 
 
-def check_embedding_inventory(phones, store, model_name, layer, collar=2000,
-    batch_size=_default_inventory_batch_size, verbose=True):
-    '''Check model-feature availability for every phone without loading arrays.
+def find_missing_checkpoint_probe_results(phones,
+    store_root=locations.echoframe_model_stores, collar=2000,
+    results_dir=locations.probe_results):
+    '''Return incomplete phone results grouped by checkpoint and layer.
 
-    Metadata is requested with keep_missing enabled in bounded batches.
+    phones:       phone inventory defining the target labels
+    store_root:   directory containing checkpoint Echoframe stores
+    collar:       model context in milliseconds
+    results_dir:  root directory containing probe results
 
-    phones:      phone inventory paired with Phraser phones
-    store:       open Echoframe checkpoint store
-    model_name:  model identifier stored with each embedding
-    layer:       hidden-state layer index or 'cnn'
-    batch_size:  number of metadata keys checked per request
+    Completeness follows PhoneResult.complete. A result is complete when all
+    configured fold-prediction files exist. Classifier artifacts below
+    locations.phone_probes are intentionally not inspected.
+
+    Each missing-result record identifies the target phoneme, absent fold
+    numbers, and whether its descriptive run manifest is also absent. A
+    missing manifest is informational and does not make an otherwise complete
+    fold set incomplete.
     '''
-    representation = probe_utils.representation_for_layer(layer)
-    _validate_inventory_batch_size(batch_size)
-    phraser_phones = phones.phraser_phones
-    n_total = len(phraser_phones)
-    n_available = 0
-    for start in range(0, n_total, batch_size):
-        batch = phraser_phones[start:start + batch_size]
-        keys = []
-        for phraser_phone in batch:
-            key = _model_feature_key(store, model_name, phraser_phone.key,
-                layer, collar)
-            keys.append(key)
-        metadatas = store.load_many_metadata(keys, keep_missing=True)
-        if len(metadatas) != len(keys):
-            message = 'load_many_metadata returned an unexpected number of '
-            message += f'records: expected {len(keys)}, '
-            message += f'received {len(metadatas)}'
-            raise ValueError(message)
-        available = sum(metadata is not None for metadata in metadatas)
-        n_available += available
-        if verbose:
-            batch_length = len(batch)
-            checked = min(start + batch_length, n_total)
-            print(f'[{model_name} layer {layer}] checked '
-                f'{checked:,}/{n_total:,} {representation} metadata '
-                'records', flush=True)
-    n_missing = n_total - n_available
-    return {'n_total': n_total, 'n_available': n_available,
-        'n_missing': n_missing, 'complete': n_missing == 0}
+    targets = sorted(phones.label_to_phraser_phone)
+    missing = {}
+    checkpoint_stores = discover_wav2vec2_checkpoint_stores(store_root)
+    for model_name, _ in checkpoint_stores:
+        layers = checkpoint_probe_layers(model_name)
+        checkpoint_missing = probe_result.find_missing_checkpoint_results(
+            targets, model_name, layers, collar=collar, root=results_dir)
+        for layer, missing_targets in checkpoint_missing.items():
+            missing[(model_name, layer)] = missing_targets
+    return missing
 
 
 def _phone_report(target_phoneme, model_name, layer, collar, results_dir):
@@ -371,14 +376,6 @@ def _run_directory(root, model_name, target_phoneme, layer, collar):
         f'collar{collar}ms')
 
 
-def _model_feature_key(store, model_name, phraser_key, layer, collar):
-    if layer == 'cnn':
-        return store.make_echoframe_key('cnn', model_name=model_name,
-            phraser_key=phraser_key, collar=collar)
-    return store.make_echoframe_key('hidden_state', model_name=model_name,
-        phraser_key=phraser_key, layer=layer, collar=collar)
-
-
 def _checkpoint_number(model_name):
     random_name = locations.wav2vec2_random_checkpoint_name
     if model_name == random_name: return 0
@@ -387,13 +384,6 @@ def _checkpoint_number(model_name):
     if match is None: return None
     checkpoint = match.group(1)
     return int(checkpoint)
-
-
-def _validate_inventory_batch_size(batch_size):
-    message = 'batch_size must be a positive integer'
-    if isinstance(batch_size, bool) or not isinstance(batch_size, int):
-        raise TypeError(message)
-    if batch_size <= 0: raise ValueError(message)
 
 
 def _compact_probe_results(results, expected_n_samples):
@@ -436,9 +426,8 @@ def _record_discovery_failure(report, store_root, error):
         {'stage': 'discovery', 'error': error_summary})
 
 
-def _probe_checkpoint_store(report, phones, model_name, store_path, n_total,
-    expected_n_samples, probe_options, metadata_batch_size, verbose):
-    layers = checkpoint_probe_layers(model_name)
+def _probe_checkpoint_store(report, phones, model_name, store_path, layers,
+    n_total, expected_n_samples, probe_options, verbose):
     if verbose:
         print(f'[{model_name}] opening checkpoint store {store_path}',
             flush=True)
@@ -452,8 +441,7 @@ def _probe_checkpoint_store(report, phones, model_name, store_path, n_total,
     try:
         for layer in layers:
             run = _probe_checkpoint_layer(phones, store, model_name, layer,
-                n_total, expected_n_samples, probe_options,
-                metadata_batch_size, verbose)
+                n_total, expected_n_samples, probe_options, verbose)
             report['runs'].append(run)
     finally:
         _close_checkpoint_store(report, store, model_name)
@@ -474,42 +462,12 @@ def _record_store_failure(report, model_name, layers, error, n_total):
 
 
 def _probe_checkpoint_layer(phones, store, model_name, layer, n_total,
-    expected_n_samples, probe_options, metadata_batch_size, verbose):
-    representation = probe_utils.representation_for_layer(layer)
+    expected_n_samples, probe_options, verbose):
+    run = {'model_name': model_name, 'layer': layer, 'n_total': n_total,
+        'n_available': None, 'n_missing': None}
     if verbose:
-        print(f'[{model_name} layer {layer}] checking complete '
-            f'{representation} inventory for {n_total:,} phones', flush=True)
-    try:
-        inventory = check_embedding_inventory(phones, store, model_name, layer,
-            collar=probe_options['collar'],
-            batch_size=metadata_batch_size, verbose=verbose)
-    except Exception as error:
-        error_summary = f'{type(error).__name__}: {error}'
-        message = f'{representation.capitalize()} preflight failed for '
-        message += f'{model_name} layer '
-        message += f'{layer}: {error_summary}'
-        _warn_checkpoint_failure(message)
-        return _failed_run(model_name, layer, 'preflight', error,
-            n_total=n_total)
-
-    run = {'model_name': model_name, 'layer': layer,
-        'n_total': inventory['n_total'],
-        'n_available': inventory['n_available'],
-        'n_missing': inventory['n_missing']}
-    if not inventory['complete']:
-        run['status'] = 'skipped'
-        run['reason'] = f'incomplete {representation} inventory'
-        missing = inventory['n_missing']
-        total = inventory['n_total']
-        feature_plural = 'CNN features' if layer == 'cnn' else 'embeddings'
-        message = f'Skipping {model_name} layer {layer}: '
-        message += f'{missing:,} of {total:,} {feature_plural} are missing'
-        _warn_checkpoint_failure(message)
-        return run
-
-    if verbose:
-        print(f'[{model_name} layer {layer}] inventory complete; '
-            'training probes for all phone labels', flush=True)
+        print(f'[{model_name} layer {layer}] loading features and training '
+            'probes for all phone labels', flush=True)
     try:
         results = train_binary_embedding_probes(phones,
             target_phonemes=None, store=store, model_name=model_name,
@@ -519,7 +477,8 @@ def _probe_checkpoint_layer(phones, store, model_name, layer, n_total,
         for summary in labels.values():
             accuracies.append(summary['mean_accuracy'])
         mean_label_accuracy = float(np.mean(accuracies))
-        run.update({'status': 'completed', 'n_labels': len(labels),
+        run.update({'status': 'completed', 'n_available': n_total,
+            'n_missing': 0, 'n_labels': len(labels),
             'mean_label_accuracy': mean_label_accuracy, 'labels': labels})
         del results
     except Exception as error:
