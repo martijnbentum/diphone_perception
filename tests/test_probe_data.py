@@ -40,10 +40,16 @@ class FakeEmbeddings:
         self.embeddings = embeddings
 
 
+class FakeCNNFeatures:
+    def __init__(self, features):
+        self.cnn_features = features
+
+
 class FakeStore:
     def __init__(self, vectors_by_key):
         self.vectors_by_key = vectors_by_key
         self.calls = []
+        self.cnn_calls = []
 
     def phraser_keys_to_embeddings(self, phraser_keys, model_name, layer,
         collar=500):
@@ -53,6 +59,15 @@ class FakeStore:
             FakeEmbedding(key, self.vectors_by_key[key])
             for key in phraser_keys if key in self.vectors_by_key]
         return FakeEmbeddings(embeddings)
+
+    def phraser_keys_to_cnn_features(self, phraser_keys, model_name,
+        collar=500):
+        self.cnn_calls.append(dict(phraser_keys=list(phraser_keys),
+            model_name=model_name, collar=collar))
+        features = [
+            FakeEmbedding(key, self.vectors_by_key[key])
+            for key in phraser_keys if key in self.vectors_by_key]
+        return FakeCNNFeatures(features)
 
 
 def test_build_probe_matrix_returns_aligned_arrays():
@@ -89,6 +104,26 @@ def test_build_probe_matrix_tracks_missing_embeddings():
     assert list(matrix.phone_labels) == ['p', 't']
     assert matrix.phraser_keys == [0, 2]
     assert matrix.missing == [1, 3]
+
+
+def test_build_probe_matrix_loads_middle_frame_cnn_features():
+    phones = FakePhones(['p', 't', 'p', 't'])
+    store = FakeStore({
+        0: np.array([0., 1.]), 1: np.array([1., 0.]),
+        2: np.array([2., 2.]), 3: np.array([3., 3.])})
+
+    matrix = probe_data.build_probe_matrix(
+        phones, store, 'model-a', layer='cnn', collar=2000,
+        expected_target_count=2)
+
+    assert matrix.X.shape == (4, 2)
+    assert list(matrix.phone_labels) == ['p', 't', 'p', 't']
+    assert store.calls == []
+    assert store.cnn_calls == [{
+        'phraser_keys': [0, 1, 2, 3],
+        'model_name': 'model-a',
+        'collar': 2000,
+    }]
 
 
 def test_build_probe_matrix_rejects_duplicate_phraser_keys():

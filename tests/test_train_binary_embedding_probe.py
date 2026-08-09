@@ -54,6 +54,11 @@ class FakeEmbeddings:
         self.embeddings = embeddings
 
 
+class FakeCNNFeatures:
+    def __init__(self, features):
+        self.cnn_features = features
+
+
 class FakeMetadata:
     def __init__(self, echoframe_key, vector):
         self.echoframe_key = echoframe_key
@@ -67,6 +72,7 @@ class FakeStore:
     def __init__(self, vectors_by_key):
         self.vectors_by_key = vectors_by_key
         self.phraser_keys_to_embeddings_calls = []
+        self.phraser_keys_to_cnn_features_calls = []
         self.load_many_metadata_calls = []
         self.closed = False
 
@@ -84,8 +90,19 @@ class FakeStore:
         ]
         return FakeEmbeddings(embeddings)
 
+    def phraser_keys_to_cnn_features(self, phraser_keys, model_name,
+        collar=500):
+        self.phraser_keys_to_cnn_features_calls.append(
+            dict(phraser_keys=list(phraser_keys), model_name=model_name,
+                collar=collar))
+        features = [
+            FakeEmbedding(key, self.vectors_by_key[key])
+            for key in phraser_keys if key in self.vectors_by_key
+        ]
+        return FakeCNNFeatures(features)
+
     def make_echoframe_key(
-        self, output_type, model_name, phraser_key, layer, collar,
+        self, output_type, model_name, phraser_key, layer=None, collar=None,
     ):
         return output_type, model_name, phraser_key, layer, collar
 
@@ -131,9 +148,9 @@ def test_discover_wav2vec2_checkpoint_stores_filters_and_sorts(tmp_path):
 @pytest.mark.parametrize(
     ('model_name', 'layers'),
     [
-        ('wav2vec2_checkpoint-0', tuple(range(1, 13))),
-        ('wav2vec2_nl1_checkpoint-1000', (9,)),
-        ('wav2vec2_nl1_checkpoint-200000', tuple(range(1, 13))),
+        ('wav2vec2_checkpoint-0', (*range(1, 13), 'cnn')),
+        ('wav2vec2_nl1_checkpoint-1000', (9, 'cnn')),
+        ('wav2vec2_nl1_checkpoint-200000', (*range(1, 13), 'cnn')),
     ],
 )
 def test_checkpoint_probe_layers(model_name, layers):
@@ -181,6 +198,22 @@ def test_check_embedding_inventory_checks_every_phone_in_batches():
         ('hidden_state', 'wav2vec2_nl1_checkpoint-1000', phraser_key, 9, 2000)
         for phraser_key in range(5)
     ]
+
+
+def test_check_embedding_inventory_uses_cnn_keys_without_layer():
+    phones = FakePhones(['p', 'p', 'a'])
+    store = FakeStore({key: np.ones(2) for key in (0, 2)})
+
+    report = tbp.check_embedding_inventory(phones, store,
+        'wav2vec2_nl1_checkpoint-1000', layer='cnn', collar=2000,
+        batch_size=2, verbose=False)
+
+    assert report['n_available'] == 2
+    requested_keys = [
+        key for keys, _ in store.load_many_metadata_calls for key in keys]
+    assert requested_keys == [
+        ('cnn', 'wav2vec2_nl1_checkpoint-1000', phraser_key, None, 2000)
+        for phraser_key in range(3)]
 
 
 @pytest.mark.parametrize('batch_size', [0, -1, True, 1.5])
@@ -276,7 +309,7 @@ def _make_separable_dataset(rng, n_target, n_other_each, other_labels, dim=4):
 
 
 def _phone_result(target_phoneme, model_name, layer, collar, results_dir):
-    return probe_result.PhoneResult.embedding(target_phoneme, model_name,
+    return probe_result.PhoneResult.model_feature(target_phoneme, model_name,
         layer, collar, root=results_dir)
 
 
@@ -296,6 +329,27 @@ def test_train_binary_embedding_probe_end_to_end(tmp_path):
     assert phone_result.run['actual_n_missing'] == 0
     assert len(phone_result.accuracies) == 5
     assert phone_result.mean_accuracy > 0.9  # clusters are well separated
+
+
+def test_train_binary_embedding_probe_uses_cnn_features_and_paths(tmp_path):
+    rng = np.random.default_rng(0)
+    phones, store = _make_separable_dataset(
+        rng, n_target=30, n_other_each=30, other_labels=['a', 't'])
+    probe_dir, results_dir = tmp_path / 'probes', tmp_path / 'results'
+
+    tbp.train_binary_embedding_probe(
+        phones, 'p', store=store, model_name='model-a', layer='cnn',
+        collar=500, expected_target_count=30, verbose=False,
+        probe_save_dir=probe_dir, results_dir=results_dir)
+
+    phone_result = _phone_result(
+        'p', 'model-a', 'cnn', 500, results_dir)
+    assert phone_result.run['representation'] == 'cnn'
+    assert phone_result.mean_accuracy > .9
+    assert len(store.phraser_keys_to_cnn_features_calls) == 1
+    assert store.phraser_keys_to_embeddings_calls == []
+    assert phone_result.path.parent.name == 'layer-cnn'
+    assert (probe_dir / 'model-a' / 'p' / 'layer-cnn').is_dir()
 
 
 def test_train_binary_embedding_probe_passes_default_collar_to_echoframe(
@@ -371,6 +425,7 @@ def test_train_binary_embedding_probes_runs_in_a_process_pool(
         target_phonemes=['p', 'a'],
         store=store,
         model_name='model-a',
+        layer='cnn',
         expected_target_count=30,
         max_workers=2,
         verbose=True,
@@ -382,11 +437,14 @@ def test_train_binary_embedding_probes_runs_in_a_process_pool(
     assert set(results) == {'p', 'a'}
     assert all('mean_accuracy' in result for result in results.values())
     output = capsys.readouterr().out
-    assert '[embedding pool] 1/2 completed' in output
-    assert '[embedding pool] 2/2 completed' in output
+    assert '[cnn pool] 1/2 completed' in output
+    assert '[cnn pool] 2/2 completed' in output
+    assert len(store.phraser_keys_to_cnn_features_calls) == 1
+    assert store.phraser_keys_to_embeddings_calls == []
 
     # results are actually persisted to disk by the worker processes
-    phone_result = _phone_result('p', 'model-a', 9, 2000, tmp_path / 'results')
+    phone_result = _phone_result(
+        'p', 'model-a', 'cnn', 2000, tmp_path / 'results')
     assert phone_result.complete is True
 
 
@@ -545,49 +603,47 @@ def test_checkpoint_probe_sweep_trains_and_returns_compact_report(
         verbose=True,
     )
 
-    assert preflight_calls == [(
-        phones,
-        store,
-        model_name,
-        9,
-        {'collar': 500, 'batch_size': 25, 'verbose': True},
-    )]
-    assert train_calls == [(
-        phones,
-        {
-            'target_phonemes': None,
-            'store': store,
-            'model_name': model_name,
-            'layer': 9,
-            'collar': 500,
-            'expected_target_count': 13500,
-            'max_workers': None,
-            'probe_save_dir': tmp_path / 'probes',
-            'results_dir': tmp_path / 'results',
-            'overwrite': True,
-            'verbose': True,
-            'report': True,
-        },
-    )]
+    expected_check_options = {
+        'collar': 500, 'batch_size': 25, 'verbose': True}
+    assert preflight_calls == [
+        (phones, store, model_name, layer, expected_check_options)
+        for layer in (9, 'cnn')]
+    expected_train_options = {
+        'target_phonemes': None,
+        'store': store,
+        'model_name': model_name,
+        'collar': 500,
+        'expected_target_count': 13500,
+        'max_workers': None,
+        'probe_save_dir': tmp_path / 'probes',
+        'results_dir': tmp_path / 'results',
+        'overwrite': True,
+        'verbose': True,
+        'report': True,
+    }
+    assert train_calls == [
+        (phones, {**expected_train_options, 'layer': layer})
+        for layer in (9, 'cnn')]
     assert store.closed is True
     assert report['status_counts'] == {
-        'completed': 1, 'skipped': 0, 'failed': 0}
-    run = report['runs'][0]
-    assert run['status'] == 'completed'
-    assert run['n_labels'] == 2
-    assert run['mean_label_accuracy'] == pytest.approx(.775)
-    assert run['labels']['p'] == {
-        'mean_accuracy': .8,
-        'std_accuracy': .1,
-        'n_samples': 4,
-        'n_missing': 0,
-    }
-    assert run['labels']['a']['n_samples'] == 4
-    assert run['labels']['a']['n_missing'] == 0
-    assert all(
-        'probes' not in summary for summary in run['labels'].values())
+        'completed': 2, 'skipped': 0, 'failed': 0}
+    assert [run['layer'] for run in report['runs']] == [9, 'cnn']
+    for run in report['runs']:
+        assert run['status'] == 'completed'
+        assert run['n_labels'] == 2
+        assert run['mean_label_accuracy'] == pytest.approx(.775)
+        assert run['labels']['p'] == {
+            'mean_accuracy': .8,
+            'std_accuracy': .1,
+            'n_samples': 4,
+            'n_missing': 0,
+        }
+        assert run['labels']['a']['n_samples'] == 4
+        assert run['labels']['a']['n_missing'] == 0
+        assert all(
+            'probes' not in summary for summary in run['labels'].values())
     output = capsys.readouterr().out
-    assert '1 completed, 0 skipped, 0 failed' in output
+    assert '2 completed, 0 skipped, 0 failed' in output
     assert '2 labels, mean label accuracy 0.7750' in output
 
 
@@ -624,7 +680,7 @@ def test_checkpoint_probe_sweep_threads_max_workers_through(
         verbose=False,
     )
 
-    assert train_calls == [4]
+    assert train_calls == [4, 4]
 
 
 def test_checkpoint_probe_sweep_skips_incomplete_inventory(
@@ -638,21 +694,19 @@ def test_checkpoint_probe_sweep_skips_incomplete_inventory(
         lambda root: [(model_name, store_path)],
     )
     monkeypatch.setattr(tbp.echoframe, 'Store', lambda path: store)
-    monkeypatch.setattr(
-        tbp, 'check_embedding_inventory',
-        lambda *args, **kwargs: {
-            'n_total': 4,
-            'n_available': 3,
-            'n_missing': 1,
-            'complete': False,
-        },
-    )
-    monkeypatch.setattr(
-        tbp, 'train_binary_embedding_probes',
-        lambda *args, **kwargs: pytest.fail('training should be skipped'),
-    )
 
-    with pytest.warns(RuntimeWarning, match='1 of 4 embeddings are missing'):
+    def fake_check(phones, store, model_name, layer, **kwargs):
+        available = 3 if layer == 'cnn' else 4
+        return {'n_total': 4, 'n_available': available,
+            'n_missing': 4 - available, 'complete': available == 4}
+
+    train_calls = []
+    monkeypatch.setattr(tbp, 'check_embedding_inventory', fake_check)
+    monkeypatch.setattr(tbp, 'train_binary_embedding_probes',
+        lambda *args, **kwargs: train_calls.append(kwargs['layer']) or
+        make_compact_probe_results())
+
+    with pytest.warns(RuntimeWarning, match='1 of 4 CNN features are missing'):
         report = tbp.train_binary_embedding_probe_checkpoint_sweep(
             FakePhones(['p', 'p', 'a', 'a']),
             store_root=tmp_path,
@@ -661,17 +715,18 @@ def test_checkpoint_probe_sweep_skips_incomplete_inventory(
 
     assert store.closed is True
     assert report['status_counts'] == {
-        'completed': 0, 'skipped': 1, 'failed': 0}
-    assert report['runs'][0] == {
+        'completed': 1, 'skipped': 1, 'failed': 0}
+    assert train_calls == [9]
+    assert report['runs'][1] == {
         'model_name': model_name,
-        'layer': 9,
+        'layer': 'cnn',
         'n_total': 4,
         'n_available': 3,
         'n_missing': 1,
         'status': 'skipped',
-        'reason': 'incomplete embedding inventory',
+        'reason': 'incomplete cnn inventory',
     }
-    assert '0 completed, 1 skipped, 0 failed' in capsys.readouterr().out
+    assert '1 completed, 1 skipped, 0 failed' in capsys.readouterr().out
 
 
 def test_checkpoint_probe_sweep_records_failures_and_continues(
@@ -725,13 +780,15 @@ def test_checkpoint_probe_sweep_records_failures_and_continues(
             verbose=False,
         )
 
-    assert len(warning_records) == 3
+    assert len(warning_records) == 5
     assert [run['status'] for run in report['runs']] == [
-        'failed', 'failed', 'failed', 'completed']
-    assert [run.get('failure_stage') for run in report['runs'][:3]] == [
-        'store', 'preflight', 'training']
+        'failed', 'failed', 'failed', 'failed',
+        'failed', 'failed', 'completed', 'completed']
+    assert [run.get('failure_stage') for run in report['runs'][:6]] == [
+        'store', 'store', 'preflight', 'preflight',
+        'training', 'training']
     assert report['status_counts'] == {
-        'completed': 1, 'skipped': 0, 'failed': 3}
+        'completed': 2, 'skipped': 0, 'failed': 6}
     assert report['errors'][0]['stage'] == 'store'
     assert all(store.closed for store in stores.values())
 

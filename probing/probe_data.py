@@ -20,37 +20,38 @@ ProbeMatrix = namedtuple('ProbeMatrix',
 
 def build_probe_matrix(phones, store, model_name, layer, collar=2000,
     expected_target_count=13500):
-    '''Load one middle-frame embedding per phone into aligned arrays.
+    '''Load one middle-frame model feature per phone into aligned arrays.
 
     phones:                phone inventory paired with Phraser phones
     store:                 open Echoframe checkpoint store
     model_name:            embedding model identifier
-    layer:                 hidden-state layer to load
+    layer:                 hidden-state layer index or 'cnn'
     collar:                embedding context in milliseconds
     expected_target_count:  every phone label must have exactly this many
                             loaded tokens; raises otherwise
 
     Returns a ProbeMatrix whose X and phone_labels are aligned row for
-    row. Phones with no stored embedding are omitted from both and their
+    row. Phones with no stored feature are omitted from both and their
     Phraser keys are returned separately as missing.
     '''
+    probe_utils.validate_probe_layer(layer)
     probe_utils.validate_unique_phraser_keys(phones)
     phraser_keys = [
         phraser_phone.key for phraser_phone in phones.phraser_phones]
-    embeddings = store.phraser_keys_to_embeddings(phraser_keys, model_name,
-        layer, collar=collar)
+    features = _load_model_features(store, phraser_keys, model_name, layer,
+        collar)
     by_key = {}
-    for embedding in embeddings.embeddings:
-        by_key[embedding.phraser_key] = embedding
+    for feature in features:
+        by_key[feature.phraser_key] = feature
 
     X, phone_labels, kept_keys, missing = [], [], [], []
     pairs = zip(phones.phones, phones.phraser_phones, strict=True)
     for phone, phraser_phone in pairs:
-        embedding = by_key.get(phraser_phone.key)
-        if embedding is None:
+        feature = by_key.get(phraser_phone.key)
+        if feature is None:
             missing.append(phraser_phone.key)
             continue
-        X.append(embedding.middle_frame_segment(phraser_phone))
+        X.append(feature.middle_frame_segment(phraser_phone))
         phone_labels.append(phone.phoneme_ipa)
         kept_keys.append(phraser_phone.key)
 
@@ -59,6 +60,16 @@ def build_probe_matrix(phones, store, model_name, layer, collar=2000,
     _check_expected_target_count(phones, matrix.phone_labels,
         expected_target_count)
     return matrix
+
+
+def _load_model_features(store, phraser_keys, model_name, layer, collar):
+    if layer == 'cnn':
+        features = store.phraser_keys_to_cnn_features(phraser_keys,
+            model_name, collar=collar)
+        return features.cnn_features
+    embeddings = store.phraser_keys_to_embeddings(phraser_keys, model_name,
+        layer, collar=collar)
+    return embeddings.embeddings
 
 
 def build_mfcc_probe_matrix(phones, store, frame='center',

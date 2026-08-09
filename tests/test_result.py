@@ -58,6 +58,67 @@ def test_phone_result_embedding_path_includes_identity_components(tmp_path):
         tmp_path / 'model-a' / 'p' / 'layer09' / 'collar500')
 
 
+def test_phone_result_cnn_path_includes_identity_components(tmp_path):
+    phone_result = result.PhoneResult.model_feature(
+        'p', 'model-a', layer='cnn', collar=500, root=tmp_path)
+
+    assert phone_result.representation == 'cnn'
+    assert phone_result.identity == (
+        'p', 'cnn', 'model-a', 'cnn', 500, 'middle')
+    assert phone_result.path == (
+        tmp_path / 'model-a' / 'p' / 'layer-cnn' / 'collar500')
+    assert result.PhoneResult.cnn(
+        'p', 'model-a', collar=500, root=tmp_path) == phone_result
+    assert result.cnn_result_path(
+        'p', 'model-a', collar=500, root=tmp_path) == phone_result.path
+
+
+def test_embedding_apis_reject_cnn_layer(tmp_path):
+    with pytest.raises(ValueError, match='non-negative integer'):
+        result.PhoneResult.embedding(
+            'p', 'model-a', layer='cnn', collar=500, root=tmp_path)
+    with pytest.raises(ValueError, match='non-negative integer'):
+        result.embedding_result_path(
+            'p', 'model-a', layer='cnn', collar=500, root=tmp_path)
+
+
+@pytest.mark.parametrize(
+    ('options', 'message'),
+    [
+        ({'representation': 'cnn', 'model_name': 'model-a', 'layer': 9,
+            'collar': 500, 'frame': 'middle'}, "requires layer='cnn'"),
+        ({'representation': 'embedding', 'model_name': 'model-a',
+            'layer': 'cnn', 'collar': 500, 'frame': 'middle'},
+            'non-negative integer'),
+        ({'representation': 'mfcc', 'model_name': 'model-a', 'layer': None,
+            'collar': None, 'frame': 'center'}, 'requires model_name'),
+    ],
+)
+def test_phone_result_rejects_inconsistent_identity(
+    tmp_path, options, message,
+):
+    with pytest.raises(ValueError, match=message):
+        result.PhoneResult('p', root=tmp_path, **options)
+
+
+def test_valid_representations_have_distinct_paths(tmp_path):
+    results = [
+        result.PhoneResult.embedding(
+            'p', 'model-a', layer=9, collar=500, root=tmp_path),
+        result.PhoneResult.cnn(
+            'p', 'model-a', collar=500, root=tmp_path),
+        result.PhoneResult.mfcc('p', frame='center', root=tmp_path),
+    ]
+
+    assert len({phone_result.identity for phone_result in results}) == 3
+    assert len({phone_result.path for phone_result in results}) == 3
+
+
+def test_layer_directory_name_preserves_numeric_convention():
+    assert result.layer_directory_name(9) == 'layer09'
+    assert result.layer_directory_name('cnn') == 'layer-cnn'
+
+
 def test_phone_result_mfcc_path_includes_identity_components(tmp_path):
     phone_result = result.PhoneResult.mfcc('p', frame='center',
         root=tmp_path)

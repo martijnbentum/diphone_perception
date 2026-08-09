@@ -14,6 +14,22 @@ class FakeBalancedPhones:
         }
 
 
+@pytest.mark.parametrize('layer', [0, 9, 'cnn'])
+def test_validate_probe_layer_accepts_supported_layers(layer):
+    assert probe_utils.validate_probe_layer(layer) is None
+
+
+@pytest.mark.parametrize('layer', [True, -1, 'CNN', [9], None])
+def test_validate_probe_layer_rejects_unsupported_layers(layer):
+    with pytest.raises((TypeError, ValueError), match="integer or 'cnn'"):
+        probe_utils.validate_probe_layer(layer)
+
+
+def test_representation_for_layer_infers_feature_family():
+    assert probe_utils.representation_for_layer(9) == 'embedding'
+    assert probe_utils.representation_for_layer('cnn') == 'cnn'
+
+
 def test_prepare_balanced_probe_targets_uses_phraser_label_inventory():
     phones = FakeBalancedPhones({'t': 10, 'a': 10, 'p': 10})
 

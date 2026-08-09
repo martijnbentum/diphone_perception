@@ -3,6 +3,23 @@ import time
 from collections import defaultdict
 
 _random_state = 42
+_cnn_layer = 'cnn'
+
+
+def validate_probe_layer(layer):
+    '''Validate one hidden-state layer index or the CNN layer marker.'''
+    if layer == _cnn_layer: return
+    message = "layer must be a non-negative integer or 'cnn'"
+    if isinstance(layer, bool) or not isinstance(layer, int):
+        raise TypeError(message)
+    if layer < 0: raise ValueError(message)
+
+
+def representation_for_layer(layer):
+    '''Return the probe representation selected by one layer value.'''
+    validate_probe_layer(layer)
+    if layer == _cnn_layer: return _cnn_layer
+    return 'embedding'
 
 
 def run_probe_sweep(target_phonemes, train_one, representation, verbose=True):

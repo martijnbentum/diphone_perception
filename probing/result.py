@@ -9,6 +9,7 @@ from functools import cached_property
 from pathlib import Path
 
 import locations
+from probing import probe_utils
 from probing.extract_embeddings import default_model_name
 
 _n_splits = 5
@@ -41,8 +42,29 @@ def embedding_result_path(target_phoneme, model_name=default_model_name,
     collar:          embedding context in milliseconds
     root:            root directory containing probe results
     '''
-    return Path(root) / model_name / target_phoneme / f'layer{layer:02d}' / (
-        f'collar{collar}')
+    _validate_embedding_layer(layer)
+    return _model_feature_result_path(target_phoneme, model_name, layer,
+        collar, root)
+
+
+def cnn_result_path(target_phoneme, model_name=default_model_name,
+    collar=2000, *, root=locations.probe_results):
+    '''Return the result directory for one CNN frontend probe.
+
+    target_phoneme:  phoneme label used as the positive class
+    model_name:      CNN model identifier
+    collar:          model context in milliseconds
+    root:            root directory containing probe results
+    '''
+    return _model_feature_result_path(target_phoneme, model_name, 'cnn',
+        collar, root)
+
+
+def layer_directory_name(layer):
+    '''Return the artifact-directory name for one probe layer.'''
+    probe_utils.validate_probe_layer(layer)
+    if layer == 'cnn': return 'layer-cnn'
+    return f'layer{layer:02d}'
 
 
 def mfcc_result_path(target_phoneme, frame='center', *,
@@ -56,6 +78,19 @@ def mfcc_result_path(target_phoneme, frame='center', *,
     return Path(root) / 'mfcc' / target_phoneme / f'frame-{frame}'
 
 
+def _model_feature_result_path(target_phoneme, model_name, layer, collar,
+    root):
+    layer_directory = layer_directory_name(layer)
+    return (Path(root) / model_name / target_phoneme / layer_directory /
+        f'collar{collar}')
+
+
+def _validate_embedding_layer(layer):
+    probe_utils.validate_probe_layer(layer)
+    if layer == 'cnn':
+        raise ValueError("embedding layer must be a non-negative integer")
+
+
 class PhoneResult:
     '''Result identity and computed folds for one target phoneme.'''
 
@@ -64,13 +99,15 @@ class PhoneResult:
         '''Create a validated phone-result identity.
 
         target_phoneme:  phoneme label used as the positive class
-        representation:  feature family, either embedding or MFCC
-        model_name:      embedding model identifier, otherwise None
-        layer:           embedding hidden-state layer, otherwise None
-        collar:          embedding context in milliseconds, otherwise None
+        representation:  feature family: embedding, cnn, or MFCC
+        model_name:      model identifier, otherwise None
+        layer:           hidden-state layer or 'cnn', otherwise None
+        collar:          model context in milliseconds, otherwise None
         frame:           frame reduction used to create feature vectors
         root:            root directory containing probe results
         '''
+        self._validate_identity(representation, model_name, layer, collar,
+            frame)
         self.target_phoneme = target_phoneme
         self.representation = representation
         self.model_name = model_name
@@ -80,9 +117,41 @@ class PhoneResult:
         self.n_splits = _n_splits
         self.root = Path(root)
 
+    @staticmethod
+    def _validate_identity(representation, model_name, layer, collar, frame):
+        supported = {'embedding', 'cnn', 'mfcc'}
+        if representation not in supported:
+            message = f'unsupported representation: {representation!r}'
+            raise ValueError(message)
+
+        if representation == 'mfcc':
+            if model_name is not None or layer is not None or collar is not None:
+                message = ('mfcc representation requires model_name, layer, '
+                    'and collar to be None')
+                raise ValueError(message)
+            if not isinstance(frame, str) or not frame:
+                raise ValueError('mfcc representation requires a frame')
+            return
+
+        if not isinstance(model_name, str) or not model_name.strip():
+            raise ValueError(f'{representation} representation requires a '
+                'model_name')
+        if collar is None:
+            raise ValueError(f'{representation} representation requires a '
+                'collar')
+        if frame != 'middle':
+            raise ValueError(f'{representation} representation requires '
+                "frame='middle'")
+
+        if representation == 'cnn':
+            if layer != 'cnn':
+                raise ValueError("cnn representation requires layer='cnn'")
+            return
+        _validate_embedding_layer(layer)
+
     def __repr__(self):
         identity = f'{self.target_phoneme!r}, {self.representation!r}'
-        if self.representation == 'embedding':
+        if self.representation in {'embedding', 'cnn'}:
             identity += f', {self.model_name!r}, layer={self.layer}'
         else:
             identity += f', frame={self.frame!r}'
@@ -103,9 +172,40 @@ class PhoneResult:
         collar:          embedding context in milliseconds
         root:            root directory containing probe results
         '''
+        _validate_embedding_layer(layer)
         return cls(target_phoneme, representation='embedding',
             model_name=model_name, layer=layer, collar=collar,
             frame='middle', root=root)
+
+    @classmethod
+    def cnn(cls, target_phoneme, model_name=default_model_name, collar=2000,
+        root=locations.probe_results):
+        '''Create a CNN result using middle-frame frontend features.
+
+        target_phoneme:  phoneme label used as the positive class
+        model_name:      CNN model identifier
+        collar:          model context in milliseconds
+        root:            root directory containing probe results
+        '''
+        return cls(target_phoneme, representation='cnn',
+            model_name=model_name, layer='cnn', collar=collar,
+            frame='middle', root=root)
+
+    @classmethod
+    def model_feature(cls, target_phoneme, model_name=default_model_name,
+        layer=9, collar=2000, root=locations.probe_results):
+        '''Create the result identity selected by layer.
+
+        target_phoneme:  phoneme label used as the positive class
+        model_name:      model identifier
+        layer:           hidden-state layer index or 'cnn'
+        collar:          model context in milliseconds
+        root:            root directory containing probe results
+        '''
+        representation = probe_utils.representation_for_layer(layer)
+        if representation == 'cnn':
+            return cls.cnn(target_phoneme, model_name, collar, root)
+        return cls.embedding(target_phoneme, model_name, layer, collar, root)
 
     @classmethod
     def mfcc(cls, target_phoneme, frame='center',
@@ -161,6 +261,9 @@ class PhoneResult:
         if self.representation == 'embedding':
             return embedding_result_path(self.target_phoneme,
                 self.model_name, self.layer, self.collar, root=self.root)
+        if self.representation == 'cnn':
+            return cnn_result_path(self.target_phoneme, self.model_name,
+                self.collar, root=self.root)
         return mfcc_result_path(self.target_phoneme, self.frame,
             root=self.root)
 

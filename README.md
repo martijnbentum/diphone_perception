@@ -335,22 +335,24 @@ c) train_binary_embedding_probe.py
 
 `train_binary_embedding_probe(phones, target_phoneme, ...)` trains and
 evaluates a binary (target-phoneme-vs-other) logistic regression probe on
-middle-frame embeddings read back from an echoframe store (written by
-`extract_phone_embeddings` above), with 5-fold
+middle-frame hidden-state or CNN features read back from an echoframe store
+(written by `extract_phone_embeddings` above), with 5-fold
 `StratifiedKFold(shuffle=True, random_state=42)`.
 
 	from probing.metadata import Phones
 	from probing.train_binary_embedding_probe import train_binary_embedding_probe
 
 	phones = Phones()
-	result = train_binary_embedding_probe(phones, target_phoneme='p')
-	result['mean_accuracy'], result['std_accuracy']
+	train_binary_embedding_probe(phones, target_phoneme='p', layer=9)
+	train_binary_embedding_probe(phones, target_phoneme='p', layer='cnn')
 
 To train one binary embedding probe run for every Phraser phone label:
 
 	from probing.train_binary_embedding_probe import train_binary_embedding_probes
 
-	results = train_binary_embedding_probes(phones, layer=9)
+	results = train_binary_embedding_probes(phones, layer=9, report=True)
+	cnn_results = train_binary_embedding_probes(
+	    phones, layer='cnn', report=True)
 
 To train probes across the available wav2vec2 checkpoints:
 
@@ -367,14 +369,15 @@ report = train_binary_embedding_probe_checkpoint_sweep(
 
 The sweep discovers `wav2vec2_checkpoint-0` and
 `wav2vec2_nl1_checkpoint-<step>` stores below
-`data/echoframe_model_stores`. It probes layers 1–12 for the random checkpoint
-and checkpoint 200000, and layer 9 for other checkpoints.
+`data/echoframe_model_stores`. It probes layers 1–12 plus CNN for the random
+checkpoint and checkpoint 200000, and layer 9 plus CNN for other checkpoints.
 
 The sweep runs sequentially in the current process. For each model and layer,
-it checks embedding metadata for every phone without loading embedding arrays.
-Incomplete inventories are skipped. Store, inventory-check, and training
-failures are recorded, and the sweep continues with the next model or layer.
-Each model-specific Echoframe store is closed before the next model is opened.
+it checks hidden-state or CNN metadata for every phone without loading feature
+arrays. Incomplete inventories are skipped, including absent CNN inventories.
+Store, inventory-check, and training failures are recorded, and the sweep
+continues with the next model or layer. Each model-specific Echoframe store is
+closed before the next model is opened.
 
 The returned report contains `runs`, `status_counts`, and `errors`. Completed
 runs contain compact per-phone metrics, including mean and standard-deviation
@@ -395,16 +398,17 @@ deterministic (seeded internally). If any class doesn't have enough phones
 to fill its quota, this raises `ValueError` naming the class and the
 shortfall, rather than silently training on less data than requested.
 
-Loading (`_load_middle_frame_vectors`): embeddings for the sampled phones
-are batch-loaded in one call (`store.phraser_keys_to_embeddings`, grouped
-by shard) rather than one call per phone, then reduced to each phone's
-middle frame via echoframe's own `Embedding.middle_frame_segment(...)`.
-Phones with no stored embedding (e.g. extraction hasn't been run on them
-yet) are dropped and counted (`result['n_missing']`), not backfilled with
-replacements.
+Loading (`probe_data.build_probe_matrix`): model features for all phones are
+batch-loaded in one call, using `store.phraser_keys_to_embeddings` for a
+numeric layer and `store.phraser_keys_to_cnn_features` for `layer='cnn'`.
+Both are reduced to each phone's middle frame. Phones with no stored feature
+are dropped and counted, not backfilled with replacements.
 
 `model_name`, `layer`, and `collar` must match what
-`extract_phone_embeddings` wrote for the embeddings to be found.
+`extract_phone_embeddings` wrote for the model features to be found. CNN
+probe and prediction artifacts use a `layer-cnn` directory; numeric layer
+directories retain names such as `layer09`.
+
 `save_probes`/`save_predictions` (both default `True`) dump each fold's
 fitted probe / per-example predictions under `probe_save_dir`
 (`data/phone_probes`) / `results_dir` (`data/probe_results`).
@@ -427,9 +431,9 @@ The plural target trainer and checkpoint sweep still resume at their outer
 boundaries. Within each model/layer combination, complete target-phoneme runs
 are reused and targets without a complete run are trained again. Every
 model/layer combination is reconsidered on the next sweep. An incomplete
-embedding inventory is skipped by the probe sweep rather than filled there;
-rerun embedding extraction to fill missing phone-layer outputs, then rerun the
-sweep.
+hidden-state or CNN inventory is skipped by the probe sweep rather than filled
+there; rerun feature extraction to fill missing phone-layer outputs, then
+rerun the sweep.
 
 A true cache hit (all folds already stored, not overwriting) touches
 neither the store nor the preloaded embedding matrix at all.
