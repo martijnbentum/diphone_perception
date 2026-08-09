@@ -26,6 +26,7 @@ class FakePhraserPhone:
 
 class FakePhones:
     def __init__(self, labels):
+        self.store = object()
         self.phones = [FakePhone(label) for label in labels]
         self.phraser_phones = [
             FakePhraserPhone(index, label)
@@ -62,12 +63,16 @@ class FakeCNNFeatures:
 class FakeStore:
     def __init__(self, vectors_by_key):
         self.vectors_by_key = vectors_by_key
+        self.attached_phraser_stores = []
         self.phraser_keys_to_embeddings_calls = []
         self.phraser_keys_to_cnn_features_calls = []
         self.closed = False
 
     def close(self):
         self.closed = True
+
+    def attach_phraser_store(self, source_id, phraser_store):
+        self.attached_phraser_stores.append((source_id, phraser_store))
 
     def phraser_keys_to_embeddings(self, phraser_keys, model_name, layer,
         collar=500):
@@ -367,8 +372,8 @@ def test_train_binary_embedding_probes_trains_each_phraser_label(
     # concrete proof the redundant-reload problem is fixed
     assert len(store.phraser_keys_to_embeddings_calls) == 1
     output = capsys.readouterr().out
-    assert '[embedding pool] 1/2 completed' in output
-    assert '[embedding pool] 2/2 completed' in output
+    assert '[model-a layer 9 probes] 1/2 completed phone label' in output
+    assert '[model-a layer 9 probes] 2/2 completed phone label' in output
 
 
 def test_train_binary_embedding_probes_runs_in_a_process_pool(
@@ -394,8 +399,8 @@ def test_train_binary_embedding_probes_runs_in_a_process_pool(
     assert set(results) == {'p', 'a'}
     assert all('mean_accuracy' in result for result in results.values())
     output = capsys.readouterr().out
-    assert '[cnn pool] 1/2 completed' in output
-    assert '[cnn pool] 2/2 completed' in output
+    assert '[model-a layer cnn probes] 1/2 completed phone label' in output
+    assert '[model-a layer cnn probes] 2/2 completed phone label' in output
     assert len(store.phraser_keys_to_cnn_features_calls) == 1
     assert store.phraser_keys_to_embeddings_calls == []
 
@@ -403,6 +408,54 @@ def test_train_binary_embedding_probes_runs_in_a_process_pool(
     phone_result = _phone_result(
         'p', 'model-a', 'cnn', 2000, tmp_path / 'results')
     assert phone_result.complete is True
+
+
+def test_train_binary_embedding_probes_reports_probe_matrix_progress(
+    monkeypatch, capsys,
+):
+    phones = FakePhones(['p', 'p', 'a', 'a'])
+    vectors_by_key = {
+        key: np.ones(2) for key in range(len(phones.phraser_phones))}
+    store = FakeStore(vectors_by_key)
+    monkeypatch.setattr(tbp, '_train_labels_in_pool', lambda *args: {})
+
+    tbp.train_binary_embedding_probes(
+        phones,
+        store=store,
+        model_name='model-a',
+        layer=8,
+        expected_target_count=2,
+        max_workers=2,
+        verbose=True,
+        report=True,
+    )
+
+    output = capsys.readouterr().out
+    assert '[model-a layer 8] loading probe matrix' in output
+    assert ('[model-a layer 8] probe matrix loaded: 4 vectors, 0 missing; '
+        'starting 2 phone probes with 2 workers') in output
+
+
+def test_pool_worker_reports_phone_label_start(tmp_path, monkeypatch, capsys):
+    probe_matrix = object()
+    monkeypatch.setattr(tbp, '_pool_probe_matrix', probe_matrix)
+    train_calls = []
+
+    def fake_train(*args, **kwargs):
+        train_calls.append((args, kwargs))
+
+    monkeypatch.setattr(tbp, 'train_binary_embedding_probe', fake_train)
+    monkeypatch.setattr(tbp, '_phone_report', lambda *args: {'done': True})
+
+    result = tbp._train_one_label_in_pool(
+        'p', 'model-a', 8, 2000, 13500, tmp_path / 'probes',
+        tmp_path / 'results', False, True)
+
+    assert result == ('p', {'done': True})
+    assert train_calls[0][1]['probe_matrix'] is probe_matrix
+    assert train_calls[0][1]['verbose'] is False
+    output = capsys.readouterr().out
+    assert '[model-a layer 8 probes] starting phone label \'p\'' in output
 
 
 def test_train_binary_embedding_probes_pool_propagates_a_label_failure(
@@ -510,10 +563,14 @@ def make_compact_probe_results():
 class SweepStore:
     def __init__(self, path):
         self.path = path
+        self.attached_phraser_stores = []
         self.closed = False
 
     def close(self):
         self.closed = True
+
+    def attach_phraser_store(self, source_id, phraser_store):
+        self.attached_phraser_stores.append((source_id, phraser_store))
 
 
 def _save_complete_checkpoint_layer_results(targets, model_name, layer,
@@ -548,12 +605,19 @@ def test_checkpoint_probe_sweep_trains_and_returns_compact_report(
     store_path = tmp_path / model_name
     store = SweepStore(store_path)
     train_calls = []
+    progressbar_calls = []
 
     monkeypatch.setattr(
         tbp, 'discover_wav2vec2_checkpoint_stores',
         lambda root: [(model_name, store_path)],
     )
     monkeypatch.setattr(tbp.echoframe, 'Store', lambda path: store)
+
+    def fake_progressbar(items, prefix):
+        progressbar_calls.append((list(items), prefix))
+        return items
+
+    monkeypatch.setattr(tbp, 'progressbar', fake_progressbar)
 
     def fake_train(phones, **kwargs):
         train_calls.append((phones, kwargs))
@@ -588,6 +652,10 @@ def test_checkpoint_probe_sweep_trains_and_returns_compact_report(
     assert train_calls == [
         (phones, {**expected_train_options, 'layer': layer})
         for layer in (9, 'cnn')]
+    assert store.attached_phraser_stores == [
+        (tbp.default_phraser_source_id, phones.store)]
+    assert progressbar_calls == [
+        ([(model_name, store_path)], 'Checkpoints: ')]
     assert store.closed is True
     assert report['status_counts'] == {
         'completed': 2, 'skipped': 0, 'failed': 0}
@@ -627,6 +695,10 @@ def test_checkpoint_probe_sweep_threads_max_workers_through(
         lambda root: [(model_name, store_path)],
     )
     monkeypatch.setattr(tbp.echoframe, 'Store', lambda path: store)
+    monkeypatch.setattr(
+        tbp, 'progressbar',
+        lambda *args, **kwargs: pytest.fail(
+            'verbose=False must not create a progress bar'))
 
     def fake_train(phones, **kwargs):
         train_calls.append(kwargs['max_workers'])

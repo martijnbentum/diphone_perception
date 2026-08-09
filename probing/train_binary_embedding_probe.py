@@ -8,11 +8,13 @@ from pathlib import Path
 
 import echoframe
 import numpy as np
+from progressbar import progressbar
 
 import locations
 from probing import probe_data, probe_run, probe_utils
 from probing import result as probe_result
-from probing.extract_embeddings import default_model_name
+from probing.extract_embeddings import (default_model_name,
+    default_phraser_source_id)
 
 _pool_probe_matrix = None
 
@@ -131,7 +133,6 @@ def train_binary_embedding_probes(phones, target_phonemes=None, store=None,
                            them keyed by target phoneme; when False,
                            return None
     '''
-    representation = probe_utils.representation_for_layer(layer)
     if target_phonemes is None:
         targets = sorted(phones.label_to_phraser_phone)
     else:
@@ -145,14 +146,24 @@ def train_binary_embedding_probes(phones, target_phonemes=None, store=None,
         store_root = str(store_root)
         store = echoframe.Store(store_root)
 
+    progress_name = f'{model_name} layer {layer}'
+    if verbose:
+        print(f'[{progress_name}] loading probe matrix', flush=True)
     probe_matrix = probe_data.build_probe_matrix(phones, store, model_name,
         layer, collar=collar, expected_target_count=expected_target_count)
+    if verbose:
+        n_vectors = len(probe_matrix.X)
+        n_missing = len(probe_matrix.missing)
+        print(f'[{progress_name}] probe matrix loaded: '
+            f'{n_vectors:,} vectors, {n_missing:,} missing; starting '
+            f'{len(targets)} phone probes with {max_workers} workers',
+            flush=True)
 
     try:
         results = _train_labels_in_pool(targets, probe_matrix,
             model_name, layer, collar, expected_target_count,
             probe_save_dir, results_dir, overwrite, verbose, max_workers,
-            representation)
+            progress_name)
         return results if report else None
     finally:
         if owns_store: store.close()
@@ -167,11 +178,14 @@ def _init_pool_worker(probe_matrix):
 
 
 def _train_one_label_in_pool(target_phoneme, model_name, layer, collar,
-    expected_target_count, probe_save_dir, results_dir, overwrite):
+    expected_target_count, probe_save_dir, results_dir, overwrite, verbose):
     '''Run inside a worker process. Reads the matrix _init_pool_worker
     already stored in this process instead of receiving it as an
     argument. Never touches phones or a store.
     '''
+    if verbose:
+        print(f'[{model_name} layer {layer} probes] starting phone label '
+            f'{target_phoneme!r}', flush=True)
     train_binary_embedding_probe(None, target_phoneme,
         model_name=model_name, layer=layer, collar=collar,
         expected_target_count=expected_target_count,
@@ -183,13 +197,14 @@ def _train_one_label_in_pool(target_phoneme, model_name, layer, collar,
 
 def _train_labels_in_pool(targets, probe_matrix, model_name, layer, collar,
     expected_target_count, probe_save_dir, results_dir, overwrite, verbose,
-    max_workers, representation):
+    max_workers, progress_name):
     '''Train every target phoneme concurrently, sharing one preloaded
     ProbeMatrix once per worker process via an initializer.
 
-    Progress is reported in completion order, but the returned dict is
-    reordered to match `targets` - completion order depends on OS
-    scheduling and isn't reproducible run to run.
+    Worker processes report when they begin a label. Completions are reported
+    by the parent in completion order, but the returned dict is reordered to
+    match `targets` - completion order depends on OS scheduling and isn't
+    reproducible run to run.
     '''
     context = multiprocessing.get_context('spawn')
     completed_reports = {}
@@ -200,7 +215,7 @@ def _train_labels_in_pool(targets, probe_matrix, model_name, layer, collar,
         futures = {
             executor.submit(_train_one_label_in_pool, target_phoneme,
                 model_name, layer, collar, expected_target_count,
-                probe_save_dir, results_dir, overwrite): target_phoneme
+                probe_save_dir, results_dir, overwrite, verbose): target_phoneme
             for target_phoneme in targets}
         try:
             for future in as_completed(futures):
@@ -208,8 +223,8 @@ def _train_labels_in_pool(targets, probe_matrix, model_name, layer, collar,
                 completed_reports[target_phoneme] = label_report
                 completed += 1
                 if verbose:
-                    print(f'[{representation} pool] {completed}/{total} '
-                        f'completed {target_phoneme!r}', flush=True)
+                    print(f'[{progress_name} probes] {completed}/{total} '
+                        f'completed phone label {target_phoneme!r}', flush=True)
         except BaseException:
             executor.shutdown(cancel_futures=True)
             raise
@@ -238,7 +253,8 @@ def train_binary_embedding_probe_checkpoint_sweep(phones,
                             train concurrently with a worker count that
                             adapts to the label count and machine (see
                             train_binary_embedding_probes)
-    verbose:               whether to print progress and the final report
+    verbose:               whether to show checkpoint/layer/label progress
+                           and print the final report
     '''
     targets = probe_utils.prepare_balanced_probe_targets(phones)
     expected_n_samples = _expected_probe_sample_count(phones)
@@ -258,6 +274,9 @@ def train_binary_embedding_probe_checkpoint_sweep(phones,
         if verbose: _print_checkpoint_sweep_report(report)
         return report
 
+    if verbose:
+        checkpoint_stores = progressbar(checkpoint_stores,
+            prefix='Checkpoints: ')
     for model_name, store_path in checkpoint_stores:
         layers = checkpoint_probe_layers(model_name)
         if overwrite:
@@ -431,11 +450,15 @@ def _probe_checkpoint_store(report, phones, model_name, store_path, layers,
     if verbose:
         print(f'[{model_name}] opening checkpoint store {store_path}',
             flush=True)
+    store = None
     try:
         store_path_string = str(store_path)
         store = echoframe.Store(store_path_string)
+        store.attach_phraser_store(default_phraser_source_id, phones.store)
     except Exception as error:
         _record_store_failure(report, model_name, layers, error, n_total)
+        if store is not None:
+            _close_checkpoint_store(report, store, model_name)
         return
 
     try:
