@@ -1,9 +1,7 @@
 '''Map persisted synthetic-stimulus packages to a Phraser store.'''
 
-from collections.abc import Mapping
 from dataclasses import dataclass
 import json
-import math
 from pathlib import Path
 
 from phraser import Audio, Phrase, Speaker
@@ -20,8 +18,6 @@ class _ManifestStimulus:
     audio_path: Path
     sample_rate: int
     duration_ms: int
-    parameters: Mapping
-    label: str
 
 
 def add_stimuli(stimulus_package, store):
@@ -83,7 +79,7 @@ def _add_stimulus(stimulus, dataset, speaker, store):
     )
     phrase = store.create(
         Phrase,
-        label=stimulus.label,
+        label=stimulus.stimulus_id,
         start=0,
         end=stimulus.duration_ms,
         audio_id=audio.identifier,
@@ -151,28 +147,12 @@ def _manifest_stimulus(row, package_root):
     if len(waveform) != row['n_samples']:
         raise ValueError(f'sample count does not match manifest: {audio_path}')
     duration_ms = round(len(waveform) / sample_rate * 1000)
-    parameters = row['parameters']
-    label = _stimulus_label(stimulus_id, parameters)
     return _ManifestStimulus(
         stimulus_id,
         audio_path,
         sample_rate,
         duration_ms,
-        parameters,
-        label,
     )
-
-
-def _stimulus_label(stimulus_id, parameters):
-    if parameters.get('family') != 'pure_tone': return stimulus_id
-    frequencies = parameters.get('frequencies_hz')
-    if not isinstance(frequencies, list) or len(frequencies) != 1:
-        return stimulus_id
-    frequency = frequencies[0]
-    if isinstance(frequency, bool) or not isinstance(frequency, (int, float)):
-        return stimulus_id
-    if not math.isfinite(frequency): return stimulus_id
-    return f'{frequency:g} Hz'
 
 
 def _read_json(path):

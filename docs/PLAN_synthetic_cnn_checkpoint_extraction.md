@@ -44,9 +44,9 @@ and unbatched.
 - Accept any package written by `write_stimuli`, rather than coupling the
   Phraser integration to pure tones or CNN extraction.
 - Represent every WAV as one Audio and one full-duration Phrase under a shared
-  synthetic speaker. Use a human-readable frequency label such as `10 Hz`.
+  synthetic speaker. Use the manifest `stimulus_id` as the Phrase label.
 - Keep `stimulus_id` and manifest fields as the authoritative identity and
-  parameters; do not recover frequency by parsing the Phrase label.
+  parameters; use the Phrase label to join the corresponding manifest row.
 - Keep the original stimulus manifest authoritative for identity, parameters,
   files, and ordering. Do not maintain a sidecar catalog or wrapper class; the
   experiment-specific Phraser store holds all Phrase keys.

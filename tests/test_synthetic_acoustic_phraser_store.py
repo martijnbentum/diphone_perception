@@ -43,7 +43,7 @@ def test_add_stimuli_creates_phraser_objects(tmp_path, phraser_store):
 
 
 def test_add_stimuli_assigns_labels(tmp_path, phraser_store):
-    '''Pure tones use frequency labels and other families use stimulus IDs.
+    '''Every Phrase label is its manifest stimulus ID.
 
     tmp_path:  Temporary directory supplied by pytest.
     phraser_store:  Empty temporary Phraser store.
@@ -62,7 +62,7 @@ def test_add_stimuli_assigns_labels(tmp_path, phraser_store):
     add_stimuli(package, phraser_store)
 
     labels = {phrase.label for phrase in phraser_store.phrases}
-    assert labels == {'10 Hz', 'other-stimulus'}
+    assert labels == {'pure-tone_f-10', 'other-stimulus'}
 
 
 def test_load_stimuli_returns_native_phrases(tmp_path, phraser_store):
