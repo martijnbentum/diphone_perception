@@ -2,4 +2,3 @@ __pycache__/
 *.py[cod]
 .DS_Store
 docs/REVIEW_cnn_probe_sweep.md
-docs/PLAN_checkpoint_embedding_probe_sweep.md
