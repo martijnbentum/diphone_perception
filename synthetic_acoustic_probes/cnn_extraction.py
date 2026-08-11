@@ -1,6 +1,7 @@
 '''Sequential CNN extraction for synthetic-stimulus experiments.'''
 
 import echoframe.segment_features as segment_features
+from progressbar import progressbar
 
 
 def extract_cnn_checkpoint(
@@ -73,7 +74,7 @@ def extract_cnn_checkpoints(
         raise TypeError(message) from error
     if not model_names: raise ValueError('model_names must not be empty')
 
-    for model_name in model_names:
+    for model_name in progressbar(model_names):
         extract_cnn_checkpoint(
             phrases,
             model_name,
