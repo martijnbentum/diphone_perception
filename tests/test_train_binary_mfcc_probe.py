@@ -157,6 +157,7 @@ def test_train_binary_mfcc_probe_skips_when_all_folds_already_saved(
     assert second_result.mean_accuracy == pytest.approx(first_mean_accuracy)
 
 
+@pytest.mark.multicore
 def test_train_binary_mfcc_probes_trains_each_phraser_label(
     tmp_path, capsys):
     phones, store = _make_separable_dataset(np.random.default_rng(0))
@@ -192,6 +193,7 @@ def test_train_binary_mfcc_probes_trains_each_phraser_label(
     } == {str(results_path.resolve())}
 
 
+@pytest.mark.multicore
 def test_train_binary_mfcc_probes_runs_in_a_process_pool(tmp_path, capsys):
     phones, store = _make_separable_dataset(np.random.default_rng(0))
 
@@ -239,6 +241,7 @@ def test_train_binary_mfcc_probes_rejects_unknown_target_before_pooling(
     assert store.load_many_frames_calls == []
 
 
+@pytest.mark.multicore
 def test_train_binary_mfcc_probes_returns_none_without_report(tmp_path):
     phones, store = _make_separable_dataset(np.random.default_rng(0))
 

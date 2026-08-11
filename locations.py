@@ -12,6 +12,11 @@ flemish_phraser_phone_key_file = data / 'flemish_phraser_phone_keys.bin'
 duplicate_phone_counts_file = data / 'duplicate_phone_counts.json'
 model_paths_file = data / 'model_paths.json'
 
+synthetic_acoustic_probes_data = data / 'synthetic_acoustic_probes'
+f0_pure_tone_stimuli = synthetic_acoustic_probes_data / 'f0_pure_tones'
+f0_pure_tone_phraser_store = (
+    synthetic_acoustic_probes_data / 'f0_pure_tones_phraser_store')
+
 echoframe_store = data / 'echoframe_store'
 echoframe_mfcc_store = data / 'echoframe_mfcc_store'
 echoframe_model_stores = data / 'echoframe_model_stores'

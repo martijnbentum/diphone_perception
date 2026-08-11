@@ -346,6 +346,7 @@ def test_train_binary_embedding_probe_rejects_duplicate_phraser_keys(
             results_dir=tmp_path / 'results')
 
 
+@pytest.mark.multicore
 def test_train_binary_embedding_probes_trains_each_phraser_label(
     tmp_path, capsys):
     rng = np.random.default_rng(0)
@@ -376,6 +377,7 @@ def test_train_binary_embedding_probes_trains_each_phraser_label(
     assert '[model-a layer 9 probes] 2/2 completed phone label' in output
 
 
+@pytest.mark.multicore
 def test_train_binary_embedding_probes_runs_in_a_process_pool(
     tmp_path, capsys):
     rng = np.random.default_rng(0)
@@ -458,6 +460,7 @@ def test_pool_worker_reports_phone_label_start(tmp_path, monkeypatch, capsys):
     assert '[model-a layer 8 probes] starting phone label \'p\'' in output
 
 
+@pytest.mark.multicore
 def test_train_binary_embedding_probes_pool_propagates_a_label_failure(
     tmp_path):
     rng = np.random.default_rng(0)
@@ -478,6 +481,7 @@ def test_train_binary_embedding_probes_pool_propagates_a_label_failure(
         )
 
 
+@pytest.mark.multicore
 def test_train_binary_embedding_probes_returns_none_without_report(
     tmp_path):
     rng = np.random.default_rng(0)
@@ -511,6 +515,7 @@ def test_train_binary_embedding_probes_rejects_label_count_mismatch():
     assert len(store.phraser_keys_to_embeddings_calls) == 1
 
 
+@pytest.mark.multicore
 def test_train_binary_embedding_probes_opens_one_shared_store(
     tmp_path, monkeypatch,
 ):

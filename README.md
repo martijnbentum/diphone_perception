@@ -572,3 +572,17 @@ Only non-overlapping monophthongs are selected; stress is not inspected. The
 function prints selected-vowel counts and written paths. Token rows retain only
 the Phraser phone key, measurement gender, and acoustic results; group anchors
 use the median of per-speaker medians.
+
+## Testing
+
+The default suite excludes tests that start real worker processes:
+
+```bash
+python -m pytest
+```
+
+Run the isolated multicore tests when multiprocessing functionality changes:
+
+```bash
+python -m pytest -m multicore
+```

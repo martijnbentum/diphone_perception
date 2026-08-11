@@ -9,15 +9,12 @@ from types import MappingProxyType
 
 import numpy as np
 
+import locations
+
 
 DEFAULT_SAMPLE_RATE = 16_000
 DEFAULT_DURATION = 1.0
-_DEFAULT_PURE_TONE_OUTPUT_ROOT = (
-    Path(__file__).resolve().parents[2]
-    / 'data'
-    / 'synthetic_acoustic_probes'
-    / 'f0_pure_tones'
-)
+_DEFAULT_PURE_TONE_OUTPUT_ROOT = locations.f0_pure_tone_stimuli
 
 
 @dataclass(frozen=True)
