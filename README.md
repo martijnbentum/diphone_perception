@@ -518,6 +518,17 @@ monophthong generator.
     paper_stimuli = sinusoidal_component_formant_stimuli()
     vowel = praat_vowel_stimulus(f0_hz=120, f1_hz=500, f2_hz=1500)
 
+Generated stimuli can be persisted as source-independent float32 WAV packages
+with a JSON manifest. Existing output is preserved unless `overwrite=True` is
+passed explicitly.
+
+    from synthetic_acoustic_probes import pure_tone_stimuli, write_stimuli
+
+    write_stimuli(
+        pure_tone_stimuli(),
+        '../data/synthetic_acoustic_probes/f0_pure_tones',
+    )
+
 `vowel_formant_reference/` exposes separate Dutch literature tables and local
 selected-phone measurements. No loader pools sources.
 

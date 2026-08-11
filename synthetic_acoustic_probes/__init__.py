@@ -31,6 +31,7 @@ from .stimuli import (
     sum_of_sinusoids,
     temporal_burst_stimuli,
 )
+from .storage import write_stimuli
 from .vowel_materials import (
     DEFAULT_SOURCE_IDS,
     vowel_anchor_stimuli,
@@ -71,5 +72,6 @@ __all__ = [
     'structure_report',
     'temporal_burst_stimuli',
     'vowel_anchor_stimuli',
+    'write_stimuli',
     'write_vowel_anchor_materials',
 ]
