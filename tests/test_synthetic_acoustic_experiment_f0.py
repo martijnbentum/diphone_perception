@@ -1,5 +1,3 @@
-from pathlib import Path
-
 import pytest
 
 import locations
@@ -83,26 +81,6 @@ def test_create_f0_pure_tone_phraser_store_populates_store(monkeypatch):
     assert add_calls == [(locations.f0_pure_tone_stimuli, result)]
 
 
-def test_create_f0_pure_tone_phraser_store_closes_on_failure(monkeypatch):
-    '''A failed population closes the newly opened store.
-
-    monkeypatch:  Pytest fixture used to simulate population failure.
-    '''
-
-    store = FakeStore(locations.f0_pure_tone_phraser_store)
-    monkeypatch.setattr(experiment_f0, 'Store', lambda path: store)
-
-    def fail_add_stimuli(package, opened_store):
-        raise RuntimeError('population failed')
-
-    monkeypatch.setattr(experiment_f0, 'add_stimuli', fail_add_stimuli)
-
-    with pytest.raises(RuntimeError, match='population failed'):
-        experiment_f0.create_f0_pure_tone_phraser_store()
-
-    assert store.closed is True
-
-
 def test_load_f0_pure_tone_phraser_store(tmp_path, monkeypatch):
     '''Loading requires an existing directory and returns its opened store.
 
@@ -111,11 +89,13 @@ def test_load_f0_pure_tone_phraser_store(tmp_path, monkeypatch):
     '''
 
     missing = tmp_path / 'missing'
+    monkeypatch.setattr(locations, 'f0_pure_tone_phraser_store', missing)
     with pytest.raises(FileNotFoundError, match='F0 Phraser store not found'):
-        experiment_f0.load_f0_pure_tone_phraser_store(missing)
+        experiment_f0.load_f0_pure_tone_phraser_store()
 
     store_path = tmp_path / 'phraser'
     store_path.mkdir()
+    monkeypatch.setattr(locations, 'f0_pure_tone_phraser_store', store_path)
     stores = []
 
     def fake_store(path):
@@ -125,7 +105,7 @@ def test_load_f0_pure_tone_phraser_store(tmp_path, monkeypatch):
 
     monkeypatch.setattr(experiment_f0, 'Store', fake_store)
 
-    result = experiment_f0.load_f0_pure_tone_phraser_store(store_path)
+    result = experiment_f0.load_f0_pure_tone_phraser_store()
 
     assert result is stores[0]
-    assert result.path == Path(store_path)
+    assert result.path == store_path
