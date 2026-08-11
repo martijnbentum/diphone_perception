@@ -4,6 +4,8 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
+import locations
+
 from synthetic_acoustic_probes import echoframe_store
 
 
@@ -70,6 +72,204 @@ class _CNNFeature:
         self.calls.append((phrase, method))
         if method == 'middle': return self.middle
         return self.mean
+
+
+def test_select_wav2vec2_nl1_checkpoints_validates_and_orders(tmp_path):
+    '''The study checkpoint inventory is returned in numeric order.
+
+    tmp_path:  Temporary directory supplied by pytest.
+    '''
+
+    catalog = [{'model_name': locations.wav2vec2_random_checkpoint_name}]
+    for step in reversed(range(1, 122)):
+        catalog.append({'model_name': f'wav2vec2_nl1_checkpoint-{step}'})
+    catalog_path = tmp_path / 'models.json'
+    catalog_text = json.dumps(catalog)
+    catalog_path.write_text(catalog_text, encoding='utf-8')
+
+    names = echoframe_store.select_wav2vec2_nl1_checkpoints(catalog_path)
+
+    assert len(names) == 122
+    assert names[0] == locations.wav2vec2_random_checkpoint_name
+    assert names[1] == 'wav2vec2_nl1_checkpoint-1'
+    assert names[-1] == 'wav2vec2_nl1_checkpoint-121'
+
+
+def test_select_wav2vec2_nl1_checkpoints_rejects_wrong_inventory(tmp_path):
+    '''A checkpoint catalog must contain the complete study inventory.
+
+    tmp_path:  Temporary directory supplied by pytest.
+    '''
+
+    catalog = [{'model_name': locations.wav2vec2_random_checkpoint_name}]
+    catalog_path = tmp_path / 'models.json'
+    catalog_text = json.dumps(catalog)
+    catalog_path.write_text(catalog_text, encoding='utf-8')
+
+    with pytest.raises(ValueError, match='expected 121 NL1 checkpoints'):
+        echoframe_store.select_wav2vec2_nl1_checkpoints(catalog_path)
+
+
+def test_create_store_registers_initial_models(tmp_path, monkeypatch):
+    '''Store creation immediately registers its selected models.
+
+    tmp_path:     Temporary directory supplied by pytest.
+    monkeypatch:  Pytest fixture used to replace the Echoframe Store.
+    '''
+
+    catalog = [
+        {'model_name': 'first', 'local_path': '/models/first'},
+        {'model_name': 'second', 'local_path': '/models/second'},
+    ]
+    catalog_path = tmp_path / 'models.json'
+    catalog_text = json.dumps(catalog)
+    catalog_path.write_text(catalog_text, encoding='utf-8')
+    opened = []
+
+    def store_constructor(path, max_shard_size_bytes):
+        store = _ModelStore()
+        store.path = path
+        store.max_shard_size_bytes = max_shard_size_bytes
+        opened.append(store)
+        return store
+
+    monkeypatch.setattr(echoframe_store.echoframe, 'Store', store_constructor)
+    store_path = tmp_path / 'echoframe'
+
+    result = echoframe_store.create_store(
+        store_path,
+        ('second', 'first'),
+        catalog_path,
+        max_shard_size_bytes=1234,
+    )
+
+    assert result is opened[0]
+    assert result.path == store_path
+    assert result.max_shard_size_bytes == 1234
+    assert [name for name, _ in result.registered] == ['second', 'first']
+
+
+def test_create_store_rejects_existing_path_before_construction(
+    tmp_path,
+    monkeypatch,
+):
+    '''Existing paths are never opened or modified.
+
+    tmp_path:     Temporary directory supplied by pytest.
+    monkeypatch:  Pytest fixture used to replace the Echoframe Store.
+    '''
+
+    store_path = tmp_path / 'echoframe'
+    store_path.mkdir()
+    constructor_calls = []
+
+    def store_constructor(path, max_shard_size_bytes):
+        constructor_calls.append((path, max_shard_size_bytes))
+
+    monkeypatch.setattr(echoframe_store.echoframe, 'Store', store_constructor)
+
+    with pytest.raises(FileExistsError, match='store path exists'):
+        echoframe_store.create_store(store_path, ('model',))
+
+    assert constructor_calls == []
+
+
+def test_create_store_closes_when_registration_fails(tmp_path, monkeypatch):
+    '''A newly created Store is closed after registration failure.
+
+    tmp_path:     Temporary directory supplied by pytest.
+    monkeypatch:  Pytest fixture used to replace the Echoframe Store.
+    '''
+
+    catalog = [{'model_name': 'existing', 'local_path': '/models/existing'}]
+    catalog_path = tmp_path / 'models.json'
+    catalog_text = json.dumps(catalog)
+    catalog_path.write_text(catalog_text, encoding='utf-8')
+    store = _ModelStore(existing=('existing',))
+    close_calls = []
+    store.close = lambda: close_calls.append(True)
+    monkeypatch.setattr(
+        echoframe_store.echoframe,
+        'Store',
+        lambda *args, **kwargs: store,
+    )
+
+    with pytest.raises(ValueError, match='already registered'):
+        echoframe_store.create_store(
+            tmp_path / 'echoframe',
+            ('existing',),
+            catalog_path,
+        )
+
+    assert close_calls == [True]
+
+
+@pytest.mark.parametrize('random_count', [0, 2])
+def test_select_wav2vec2_nl1_checkpoints_rejects_random_inventory(
+    tmp_path,
+    random_count,
+):
+    '''Exactly one random checkpoint is required.
+
+    tmp_path:      Temporary directory supplied by pytest.
+    random_count:  Invalid number of random checkpoint entries.
+    '''
+
+    random_name = locations.wav2vec2_random_checkpoint_name
+    catalog = [{'model_name': random_name} for _ in range(random_count)]
+    for step in range(1, 122):
+        catalog.append({'model_name': f'wav2vec2_nl1_checkpoint-{step}'})
+    catalog_path = tmp_path / 'models.json'
+    catalog_text = json.dumps(catalog)
+    catalog_path.write_text(catalog_text, encoding='utf-8')
+
+    with pytest.raises(ValueError, match='expected one'):
+        echoframe_store.select_wav2vec2_nl1_checkpoints(catalog_path)
+
+
+def test_select_wav2vec2_nl1_checkpoints_rejects_duplicate_steps(tmp_path):
+    '''Numerically duplicate checkpoint steps are ambiguous.
+
+    tmp_path:  Temporary directory supplied by pytest.
+    '''
+
+    catalog = [{'model_name': locations.wav2vec2_random_checkpoint_name}]
+    for step in range(1, 121):
+        catalog.append({'model_name': f'wav2vec2_nl1_checkpoint-{step}'})
+    catalog.append({'model_name': 'wav2vec2_nl1_checkpoint-001'})
+    catalog_path = tmp_path / 'models.json'
+    catalog_text = json.dumps(catalog)
+    catalog_path.write_text(catalog_text, encoding='utf-8')
+
+    with pytest.raises(ValueError, match='duplicate NL1 checkpoint steps'):
+        echoframe_store.select_wav2vec2_nl1_checkpoints(catalog_path)
+
+
+@pytest.mark.parametrize(
+    ('catalog_text', 'match'),
+    [
+        ('{bad JSON', 'invalid JSON'),
+        ('{}', 'must contain a JSON list'),
+        ('[1]', 'contains a non-object'),
+    ],
+)
+def test_select_wav2vec2_nl1_checkpoints_rejects_malformed_catalog(
+    tmp_path,
+    catalog_text,
+    match,
+):
+    '''Malformed model catalogs fail before checkpoint selection.
+
+    tmp_path:      Temporary directory supplied by pytest.
+    catalog_text:  Invalid catalog contents.
+    match:         Text expected in the error message.
+    '''
+
+    catalog_path = tmp_path / 'models.json'
+    catalog_path.write_text(catalog_text, encoding='utf-8')
+
+    with pytest.raises(ValueError, match=match):
+        echoframe_store.select_wav2vec2_nl1_checkpoints(catalog_path)
 
 
 def test_add_models_registers_selected_models_in_requested_order(tmp_path):
@@ -152,51 +352,6 @@ def test_add_models_rejects_invalid_input_before_registration(
         echoframe_store.add_models(model_names, catalog_path, store)
 
     assert store.registered == []
-
-
-def test_add_cnn_features_delegates_sequentially(monkeypatch):
-    '''Every Phrase is passed to compute_cnn in input order.
-
-    monkeypatch:  Pytest fixture used to replace Echoframe extraction.
-    '''
-
-    phrases = (SimpleNamespace(key=b'a'), SimpleNamespace(key=b'b'))
-    store = object()
-    calls = []
-
-    def compute_cnn(
-        phrase,
-        model_name,
-        output_store,
-        collar=0,
-        gpu=False,
-        overwrite=False,
-    ):
-        options = {'collar': collar, 'gpu': gpu, 'overwrite': overwrite}
-        calls.append((phrase, model_name, output_store, options))
-
-    monkeypatch.setattr(
-        echoframe_store.segment_features,
-        'compute_cnn',
-        compute_cnn,
-        raising=False,
-    )
-
-    result = echoframe_store.add_cnn_features(
-        phrases,
-        'checkpoint',
-        store,
-        collar=25,
-        gpu=True,
-        overwrite=True,
-    )
-
-    assert result is None
-    assert [call[0] for call in calls] == list(phrases)
-    assert all(call[1] == 'checkpoint' for call in calls)
-    assert all(call[2] is store for call in calls)
-    expected = {'collar': 25, 'gpu': True, 'overwrite': True}
-    assert all(call[3] == expected for call in calls)
 
 
 def test_load_cnn_features_preserves_phrase_order():

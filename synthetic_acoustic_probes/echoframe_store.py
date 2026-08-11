@@ -2,9 +2,88 @@
 
 import json
 from pathlib import Path
+import re
 
-import echoframe.segment_features as segment_features
+import echoframe
 import numpy as np
+
+import locations
+
+
+NL1_TRAINED_CHECKPOINT_COUNT = 121
+
+
+def select_wav2vec2_nl1_checkpoints(
+    model_paths_file=locations.model_paths_file,
+):
+    '''Return the validated checkpoint set used by the probe experiments.
+
+    model_paths_file:  JSON list containing the model definitions.
+
+    The random checkpoint is returned first, followed by exactly 121 NL1
+    checkpoints ordered by numeric training step.
+    '''
+
+    path, catalog = _model_catalog(model_paths_file)
+    random_name = locations.wav2vec2_random_checkpoint_name
+    pattern = re.compile(locations.wav2vec2_nl1_checkpoint_pattern)
+    random_count = 0
+    trained = []
+    for entry in catalog:
+        model_name = entry.get('model_name')
+        if model_name == random_name: random_count += 1
+        if not isinstance(model_name, str): continue
+        match = pattern.fullmatch(model_name)
+        if match is None: continue
+        trained.append((int(match.group(1)), model_name))
+
+    if random_count != 1:
+        message = f'expected one {random_name!r} in {path}, found '
+        message += str(random_count)
+        raise ValueError(message)
+    if len(trained) != NL1_TRAINED_CHECKPOINT_COUNT:
+        message = f'expected {NL1_TRAINED_CHECKPOINT_COUNT} NL1 checkpoints '
+        message += f'in {path}, found {len(trained)}'
+        raise ValueError(message)
+    steps = [step for step, _ in trained]
+    if len(set(steps)) != len(steps):
+        raise ValueError(f'duplicate NL1 checkpoint steps in {path}')
+
+    trained.sort(key=lambda item: item[0])
+    trained_names = tuple(model_name for _, model_name in trained)
+    return (random_name, *trained_names)
+
+
+def create_store(
+    store_path,
+    model_names,
+    model_paths_file=locations.model_paths_file,
+    max_shard_size_bytes=1_000_000_000,
+):
+    '''Create an Echoframe store and register its initial models.
+
+    store_path:            Destination for the new Echoframe store.
+    model_names:           Iterable of model names to register.
+    model_paths_file:      JSON list containing the model definitions.
+    max_shard_size_bytes:  Maximum Echoframe HDF5 shard size.
+
+    Existing paths are rejected. Returns the native Echoframe Store.
+    '''
+
+    store_path = Path(store_path)
+    if store_path.exists():
+        raise FileExistsError(f'Echoframe store path exists: {store_path}')
+    model_names = _model_names(model_names)
+    entries = _model_entries(model_names, model_paths_file)
+    store = echoframe.Store(
+        store_path,
+        max_shard_size_bytes=max_shard_size_bytes,
+    )
+    try: _register_models(model_names, entries, store)
+    except Exception:
+        store.close()
+        raise
+    return store
 
 
 def add_models(model_names, model_paths_file, store):
@@ -20,63 +99,7 @@ def add_models(model_names, model_paths_file, store):
 
     model_names = _model_names(model_names)
     entries = _model_entries(model_names, model_paths_file)
-
-    existing = []
-    for model_name in model_names:
-        metadata = store.load_model_metadata(model_name)
-        if metadata is not None: existing.append(model_name)
-    if existing:
-        names = ', '.join(repr(name) for name in existing)
-        raise ValueError(f'models already registered in store: {names}')
-
-    for model_name in model_names:
-        entry = entries[model_name]
-        local_path = entry.get('local_path')
-        huggingface_id = entry.get('huggingface_id')
-        language = entry.get('language')
-        size = entry.get('size')
-        architecture = entry.get('architecture')
-        store.register_model(
-            model_name,
-            local_path=local_path,
-            huggingface_id=huggingface_id,
-            language=language,
-            size=size,
-            architecture=architecture,
-        )
-
-
-def add_cnn_features(
-    phrases,
-    model_name,
-    store,
-    *,
-    collar=0,
-    gpu=False,
-    overwrite=False,
-):
-    '''Compute and store CNN features for each Phraser Phrase.
-
-    phrases:     Iterable of native Phraser Phrase objects.
-    model_name:  Registered Echoframe model name.
-    store:       Echoframe Store receiving the CNN features.
-    collar:      Context in milliseconds around each Phrase.
-    gpu:         Whether Echoframe should run the model on a GPU.
-    overwrite:   Whether Echoframe should replace stored CNN features.
-
-    The Phrase stores must already be registered with the Echoframe store.
-    Returns None.
-    '''
-
-    for phrase in phrases:
-        segment_features.compute_cnn(
-            phrase,
-            model_name,
-            store,
-            collar=collar,
-            gpu=gpu,
-            overwrite=overwrite,
-        )
+    _register_models(model_names, entries, store)
 
 
 def load_cnn_features(phrases, model_name, store, *, collar=0):
@@ -140,6 +163,32 @@ def make_x_y(phrases, model_name, store, *, aggregation, collar=0):
     return X, y
 
 
+def _register_models(model_names, entries, store):
+    existing = []
+    for model_name in model_names:
+        metadata = store.load_model_metadata(model_name)
+        if metadata is not None: existing.append(model_name)
+    if existing:
+        names = ', '.join(repr(name) for name in existing)
+        raise ValueError(f'models already registered in store: {names}')
+
+    for model_name in model_names:
+        entry = entries[model_name]
+        local_path = entry.get('local_path')
+        huggingface_id = entry.get('huggingface_id')
+        language = entry.get('language')
+        size = entry.get('size')
+        architecture = entry.get('architecture')
+        store.register_model(
+            model_name,
+            local_path=local_path,
+            huggingface_id=huggingface_id,
+            language=language,
+            size=size,
+            architecture=architecture,
+        )
+
+
 def _model_names(model_names):
     if isinstance(model_names, str):
         raise TypeError('model_names must be an iterable of strings')
@@ -159,19 +208,9 @@ def _model_names(model_names):
 
 
 def _model_entries(model_names, model_paths_file):
-    path = Path(model_paths_file)
-    try:
-        text = path.read_text(encoding='utf-8')
-        catalog = json.loads(text)
-    except json.JSONDecodeError as error:
-        raise ValueError(f'invalid JSON in {path}: {error}') from error
-    if not isinstance(catalog, list):
-        raise ValueError(f'model paths file must contain a JSON list: {path}')
-
+    path, catalog = _model_catalog(model_paths_file)
     matches = {name: [] for name in model_names}
     for entry in catalog:
-        if not isinstance(entry, dict):
-            raise ValueError(f'model paths file contains a non-object: {path}')
         model_name = entry.get('model_name')
         if model_name in matches: matches[model_name].append(entry)
 
@@ -186,3 +225,18 @@ def _model_entries(model_names, model_paths_file):
             raise ValueError(message)
         selected[model_name] = entries[0]
     return selected
+
+
+def _model_catalog(model_paths_file):
+    path = Path(model_paths_file)
+    try:
+        text = path.read_text(encoding='utf-8')
+        catalog = json.loads(text)
+    except json.JSONDecodeError as error:
+        raise ValueError(f'invalid JSON in {path}: {error}') from error
+    if not isinstance(catalog, list):
+        raise ValueError(f'model paths file must contain a JSON list: {path}')
+    for entry in catalog:
+        if not isinstance(entry, dict):
+            raise ValueError(f'model paths file contains a non-object: {path}')
+    return path, catalog

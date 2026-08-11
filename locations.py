@@ -16,6 +16,8 @@ synthetic_acoustic_probes_data = data / 'synthetic_acoustic_probes'
 f0_pure_tone_stimuli = synthetic_acoustic_probes_data / 'f0_pure_tones'
 f0_pure_tone_phraser_store = (
     synthetic_acoustic_probes_data / 'f0_pure_tones_phraser_store')
+synthetic_acoustic_probes_echoframe_store = (
+    synthetic_acoustic_probes_data / 'echoframe_store')
 
 echoframe_store = data / 'echoframe_store'
 echoframe_mfcc_store = data / 'echoframe_mfcc_store'
