@@ -5,9 +5,10 @@ import numpy as np
 import pytest
 from scipy.io import wavfile
 
-from synthetic_acoustic_probes import write_stimuli
+from synthetic_acoustic_probes import pure_tone_stimuli, write_stimuli
 from synthetic_acoustic_probes.stimuli import sum_of_sinusoids
 import synthetic_acoustic_probes.storage as storage
+import synthetic_acoustic_probes.stimuli as stimuli_module
 
 
 def test_write_stimuli_writes_audio_and_manifest(tmp_path):
@@ -118,6 +119,36 @@ def test_failed_write_preserves_output_and_cleans_staging(
     assert _file_snapshot(output_root) == original
     assert not list(tmp_path.glob('.tones-staging-*'))
     assert not list(tmp_path.glob('.tones-backup-*'))
+
+
+def test_pure_tone_save_flag_writes_default_package(tmp_path, monkeypatch):
+    '''The convenience flag delegates to storage and still returns stimuli.
+
+    tmp_path:  Temporary output root supplied by pytest.
+    monkeypatch:  Pytest fixture used to replace the default data path.
+    '''
+
+    output_root = tmp_path / 'f0_pure_tones'
+    monkeypatch.setattr(
+        stimuli_module,
+        '_DEFAULT_PURE_TONE_OUTPUT_ROOT',
+        output_root,
+    )
+
+    stimuli = pure_tone_stimuli(
+        frequencies=(10, 20),
+        duration=0.01,
+        save=True,
+    )
+
+    assert len(stimuli) == 2
+    manifest_path = output_root / 'manifest.json'
+    manifest_text = manifest_path.read_text(encoding='utf-8')
+    manifest = json.loads(manifest_text)
+    assert manifest['stimulus_count'] == 2
+    assert [row['stimulus_id'] for row in manifest['stimuli']] == [
+        'pure-tone_f-10', 'pure-tone_f-20'
+    ]
 
 
 def _stimulus(frequency, stimulus_id):

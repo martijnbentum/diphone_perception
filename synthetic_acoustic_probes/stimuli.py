@@ -4,6 +4,7 @@ from dataclasses import dataclass
 import hashlib
 from itertools import product
 import json
+from pathlib import Path
 from types import MappingProxyType
 
 import numpy as np
@@ -11,6 +12,12 @@ import numpy as np
 
 DEFAULT_SAMPLE_RATE = 16_000
 DEFAULT_DURATION = 1.0
+_DEFAULT_PURE_TONE_OUTPUT_ROOT = (
+    Path(__file__).resolve().parents[2]
+    / 'data'
+    / 'synthetic_acoustic_probes'
+    / 'f0_pure_tones'
+)
 
 
 @dataclass(frozen=True)
@@ -91,12 +98,25 @@ def pure_tone_stimuli(
     duration=DEFAULT_DURATION,
     sample_rate=DEFAULT_SAMPLE_RATE,
     amplitude=1.0,
+    save=False,
+    output_root=None,
+    overwrite=False,
 ):
-    '''Generate the paper's pure-tone grid, corrected to stop below Nyquist.'''
+    '''Generate the paper's pure-tone grid, corrected to stop below Nyquist.
 
+    frequencies:  Frequencies in Hz, or the paper grid when omitted.
+    duration:  Signal duration in seconds.
+    sample_rate:  Number of waveform samples per second.
+    amplitude:  Amplitude shared by every pure tone.
+    save:  Persist the generated stimuli when true.
+    output_root:  Optional package directory used when saving.
+    overwrite:  Replace an existing package only when saving.
+    '''
+
+    _validate_save_options(save, output_root, overwrite)
     if frequencies is None:
         frequencies = np.arange(10, sample_rate / 2, 10)
-    return [
+    stimuli = [
         sum_of_sinusoids(
             frequency,
             amplitudes=amplitude,
@@ -107,6 +127,15 @@ def pure_tone_stimuli(
         )
         for frequency in frequencies
     ]
+    if save:
+        from .storage import write_stimuli
+
+        destination = (
+            _DEFAULT_PURE_TONE_OUTPUT_ROOT
+            if output_root is None else output_root
+        )
+        write_stimuli(stimuli, destination, overwrite=overwrite)
+    return stimuli
 
 
 def bias_stimuli(
@@ -323,6 +352,17 @@ def _one_dimensional_values(values, name):
     if not np.all(np.isfinite(values)):
         raise ValueError(f'{name} contains non-finite values')
     return values
+
+
+def _validate_save_options(save, output_root, overwrite):
+    if not isinstance(save, (bool, np.bool_)):
+        raise TypeError('save must be a boolean')
+    if not isinstance(overwrite, (bool, np.bool_)):
+        raise TypeError('overwrite must be a boolean')
+    if output_root is not None and not save:
+        raise ValueError('output_root requires save=True')
+    if overwrite and not save:
+        raise ValueError('overwrite=True requires save=True')
 
 
 def _broadcast_values(values, size, name):
