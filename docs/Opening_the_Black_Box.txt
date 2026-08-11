@@ -1,0 +1,327 @@
+                                OPENINGTHEBLACKBOXOFWAV2VECFEATUREENCODER
+                                                                           1∗                  2∗
+                                                        KwangheeChoi ,EunJungYeo
+                                                                                                                                 1
+                       Department of Computer Science and Engineering, Sogang University, Republic of Korea
+                                                                                                                       2
+                                 Department of Linguistics, Seoul National University, Republic of Korea
+                                      ABSTRACT                               the convolutional feature encoder to embed acoustic features
+              Self-supervised models, namely, wav2vec and its variants,      where the contextual network handles global, abstract infor-
+              have shown promising results in various downstream tasks in    mation [2]. Based on this understanding, state-of-the-art mod-
+              the speech domain. However, their inner workings are poorly    els choose between passing the raw waveform through the 1D
+              understood, calling for in-depth analyses on what the model    convolutional feature encoder or directly inputting the spec-
+              learns.  In this paper, we concentrate on the convolutional    trogram [4, 5]. However, the inner workings are yet poorly
+              feature encoder where its latent space is often speculated to  understood, calling for in-depth analyses of what the convolu-
+              represent discrete acoustic units. To analyze the embedding    tional net actually encodes.
+              space in a reductive manner, we feed the synthesized au-           In this paper, we are motivated to explore whether the con-
+              dio signals, which is the summation of simple sine waves.      volutional feature encoder can substitute spectrograms, which
+              Through extensive experiments, we conclude that various        is the basic tool in audio spectral analysis, showing frequency-
+              information is embedded inside the feature encoder repre-      wise amplitude information with sufﬁcient temporal detail.
+              sentations: (1) fundamental frequency, (2) formants, and (3)   Hence, we start with the simplest form: the weighted sum of
+              amplitude, packed with (4) sufﬁcient temporal detail. Further, different sine waves. By taking the reductionist approach, we
+              the information incorporated inside the latent representations synthesize inputs block by block instead of using the recorded
+              is analogous to spectrograms but with a fundamental differ-    speech signals.   Our purpose is to provide a fundamental
+              ence: latent representations construct a metric space so that  understanding of how and why the encoder works so well.
+              closer representations imply acoustic similarity.                  Wesummarize the rest of the paper as follows. § 2 covers
+                  Index Terms— Self-supervised Learning, Convolutional       related works that analyze the inner workings of wav2vec-like
+              Feature Encoder, Acoustic Modeling, Phonetic Analysis          models by leveraging existing datasets. Then, we describe our
+                                                                             novel analysis method in § 3.1. § 3.2 explores the temporal
+                                                                             detail encoded in the representations, focusing on whether the
+                                 1. INTRODUCTION                             representations are consistent with different time steps. § 3.3
+                                                                             further investigates the representation space with respect to
+              Large-scale self-supervised models, namely, wav2vec [1] and    fundamental frequencies (F0s) and biases, comparing with
+              its variants [2, 3], have succeeded in a wide range of down-   perceptual scales such as the Mel or the Bark scale. § 3.4 dives
+              stream tasks, such as automatic speech recognition [2] and     into the delicacies of formants aided with linguistic analyses
+              keyword spotting [4]. Furthermore, recent advances demon-      andcomparesdifferent wav2vec variants. Finally, § 3.5 covers
+        arXiv:2210.15386v1  [cs.SD]  27 Oct 2022strate that the model can handle general tasks such as emo-howamplitude differences impact latent representations. We
+              tion recognition, environment classiﬁcation, and music tag-    conclude our paper with in-depth discussions on comparing
+              ging, even with models pretrained with unlabeled speech data   spectrogram and feature encoder representations in § 4.
+              [4, 5]. Concretely, self-supervised learning in wav2vec is de-
+              signed as partially hiding the sequential representations and                    2. RELATEDWORKS
+              identifying the original representation based on its surround-
+              ings in a contrastive manner [1, 2]. Hence, one cannot help    In the past decades, using learnable convolutional layers to
+              but wonder about the acoustic capabilities of self-supervised  handle the raw audio signals has been thoroughly explored,
+              learning, as it does not explicitly guide the model to capture where the prevalent idea was to mimic or enhance the spec-
+              the necessary information for speech analysis.                 trogram. For instance, [6] observed frequency responses of
+                  Thoughwithsubtledifferences, wav2vec-like models usu-      a few convolutional ﬁlters, and concluded that the convolu-
+              ally consist of two components: the feature encoder based      tional neural networks (CNNs) behave as ﬁlter matcher. The
+              on consecutive 1D convolutional layers and the transformer-    follow-uppapershowedthattheearlylayersmodelthespectral
+              based contextual network [1]. It is commonly understood as     envelope [7]. In [8], the authors observed the activations di-
+                 ∗Equal contributors.                                        rectly, looking for correlations with the acoustic features such
+                     as energy or fundamental frequency. Further analysis was con-                                       compare the differences between a bigger model or cross-
+                     ducted in [9], which construct spectrogram-like visualizations                                      lingual pretraining, we also compare wav2vec 2.0 large
+                     based on activations and initialize CNN weights with ﬁlter-                                         (Large, [2]) and XLS-R 300M (XLS-R, [3]), which has
+                     banks. Similarly, [10] concentrated on the network architec-                                        roughly the same size as Large. Architecture. For all three
+                     ture to mimic spectrograms. Even though these works focused                                         models, the feature encoder consists of ﬁve 1D convolution
+                     onbridgingacoustictheoryandneuralnets,itwasdonebefore                                               layers with layer normalization and activation functions. The
+                     the emergence of wav2vec and self-supervised learning, urg-                                         model is fed with 16kHz raw audio, and the effective window
+                     ing the need for extended analysis. Further, when previous                                          size and the stride for the feature encoder are 400 and 320,
+                     studies often regarded CNN representations as the substitu-                                         respectively.         For example, for 1-second input, the encoder
+                     tion for spectrograms, our analysis emphasizes the fundamen-                                        outputs 49 (temporal) × 512 (feature) vector. Visualization.
+                     tal difference between the spectrogram and the self-supervised                                      We use UMAP [18] to visualize the embedding space. As
+                     representations (§ 4).                                                                              wav2vec 2.0 uses contrastive loss based on cosine similarity
+                           After the success of wav2vec-like self-supervised models,                                     S (∗,∗) [18], we choose the cosine distance D                                  = 1 − S
+                                                                                                                           c                                                                        c                 c
+                     researchers concentrated on what high-level information trans-                                      as the distance measure for UMAP. Except for the distance
+                     formers encode. Linear probing, which attaches a shallow                                            measure, we follow the default settings. Implementation. We
+                     learnable layer to consume intermediate representations of a                                        employpublicly released models and libraries of Huggingface
+                                                                                                                                                                                               1
+                     frozen transformer, was often used to verify whether the in-                                        [19]. For more details, consult our repository.
+                     formation of interest exists. Accordingly, it was discovered
+                     that transformer layers from wav2vec-like models contain lo-                                        3.2. Temporal detailedness
+                     cal acoustic, phonetic, word, language, and speaker informa-
+                     tion [11, 12]. Some also focused on self-supervised learning                                        Does the convolutional feature encoder yield consistent
+                     losses and veriﬁed that LSTMs can retain phoneme, speaker,                                          representations with different timesteps? We ﬁrst verify
+                     gender, and language information with self-supervision [13,                                         whether the representations ﬂuctuate with time when we feed
+                     14]. In addition, [15] observed that the transformer attentions                                     a simple 1-second sine signal: x(t) = sin(2πf t), where
+                     focus on the region of interest even without direct supervision.                                                                                                                  0
+                                                                                                                         f ∈{100,200,...500Hz}. Wedenotetheoutput representa-
+                     Thoughwithpromisinganalysesandresults,studieshavecon-                                                 0
+                                                                                                                         tions as R = [r r ...r ] where T is the total timestep.
+                     centrated on the characteristics of the transformer, but not the                                                           1 2          T
+                     convolutional feature encoder. Moreover, studies are mostly                                              We         calculate         the       time-          )                                 1.0
+                                                                                                                                                                   ¯                z  0.11   0.36 0.25 0.14-0.076
+                                                                                                                         averaged representation                   r      =         H
+                                                                                                                            P                                                       k
+                     limited to probing high-level, abstract information.                                                                                                           (
+                                                                                                                          1                                                                                           0.5
+                                                                                                                                                                                    r
+                                                                                                                                  r      and the average co-                             0.36  1   0.15 0.039-0.23
+                                                                                                                                    i                                               .
+                                                                                                                         T       i                                                  r  0.2
+                           Othersalsofocusedonbothconvolutionalfeatureencoders                                                                                                      p
+                                                                                                                                                                                    e
+                                                                                                                                                               ¯                    r
+                                                                                                                         sine similarity between r and r ,
+                                                                                                                            P                                              i        d  0.30.25 0.15 1   0.37 0.22     0.0
+                     and contextual network. For instance, [16] compared the la-                                          1                                                         e
+                                                                                                                                                                                    g
+                                                                                                                                        ¯                                           a
+                                                                                                                                  S (r,r ). The row and the                         r
+                                                                                                                         T       i   c       i                                      e    0.14 0.039 0.37  1  0.32
+                     tent representation space of shallow neural networks with the                                                                                                  v  0.4                              0.5
+                                                                                                                                                                                    a
+                                                                                                                         column of ﬁg. 1 denote averaged                            -
+                                                                                                                                                                                    p
+                                                                                                                                                                                    e
+                     vowel chart, showing the embedded formant and articulation                                                                                                     t   -0.076-0.23 0.22 0.32  1
+                                                                                                                         ¯                                                          S  0.5
+                                                                                                                         r and stepwise representation r .
+                     information. [17] conducted similar research, but analyzed the                                                                                        i                                            1.0
+                                                                                                                         We observe that the average sim-                                0.1  0.2   0.3  0.4  0.5
+                     wav2vec model. Concretely, the authors ﬁne-tuned the pre-                                           ilarity between the averaged and                                  Stepwise repr. ri (kHz)
+                     trained model to the phone recognition task and observed both                                       the stepwise representations are                         Fig. 1: Avg. cos similarity.
+                     transformer and CNN representations. Both retained the pho-                                         1.0, the representations being consistent even as time varies.
+                     netic concepts, such as vowel space, but each contained differ-                                     The matrix is symmetric, which further strengthens the con-
+                     ent knowledge, CNN the gender information and transformer                                                                                                                              ¯
+                     the language information. However, there are two limitations                                        clusion. Hence, we use the averaged representations r in the
+                     on this research. First, using recorded audio for analysis hin-                                     remaining experiments.
+                     ders understanding the representations in detail. Second, as                                             How much temporal detail does the encoder handle?
+                     the model is supervised with phoneme information, it is chal-                                       To observe whether the en-                          1
+                     lenging to understand the effect of self-supervision separately.                                    coder is sensitive to the
+                     Hence, this paper inputs synthesized audio to fully control the                                     change in signals, we mix                           0
+                                                                                                                         twosinesignals (ﬁg. 2). We                       Magnitude
+                     acoustic characteristics and analyze the pretrained model with-                                     put a high frequency signal                         1
+                     out any ﬁne-tuning.                                                                                                                                       0.0     0.2    0.4    0.6    0.8     1.0
+                                                                                                                         with f =800Hz in the mid-                                             Time (s)
+                                                                                                                                   0                                       Fig. 2: Mixed signal example.
+                                                                                                                         dle of the 1-second signal of
+                                                         3. ANALYSIS                                                     lower f0=200Hz. We vary the duration of the high frequency
+                                                                                                                         signal from 320ms to 10ms and compare the stepwise repre-
+                                                                                                                                                                                                     ¯
+                                                                                                                         sentations r with the averaged representations r separately
+                     3.1. Experimental Settings                                                                                            i
+                                                                                                                         obtained from clean 1-second signal.
+                     Models. We analyze wav2vec 2.0 base (Base, [2]), a self-
+                     supervised model trained with English speech. However, to                                               1https://github.com/juice500ml/unbox-w2v-convnet
+                                   320 ms                         160 ms                          80 ms
+                                                                                                                                        6kHz                       8kHz        1.0
+                                                                                                                                                   5kHz                        0.8
+                                                                                                                                        2kHz                                   0.6
+                                                                                                                                                  7kHz                        malized Scale0.4             Mel
+                                                                                                                                1kHz                                          Nor0.2                       Bark
+                                    40 ms                          20 ms                          10 ms                                              4kHz                                                  wav2vec
+                                                                                                                                                3kHz                           0.0
+                                                                                                                                                                   10Hz              0     2000 4000 6000 8000
+                                                                                                                                                                                                Frequency
+                                                                                                                           (a) Representation space with                   (b) Comparing different frequency
+                                                                                                                           varying f .                                     scales.
+                                                                                                                                       0
+                                                                                                                            Fig. 4: Representation analyses on varying fundamental frequency.
+                               Step-avg. feature of 200Hz               Step features (No overlap with 800Hz)                                                                         )
+                               Step-avg. feature of 800Hz               Step features (Overlap with 800Hz)                                                                            z                              1.0
+                                                                                                                                We compare the cosine simi-                           H     1    1   1    1   1
+                                                                                                                                                                                      k  0.1
+                                                                                                                                                                                      (
+                      Fig. 3: Stepwise representations of the mixed signal. Considering the                                                                                            0
+                                                                                                                                                                                      f                              0.5
+                                                                                                                          larity between time-averaged fea-
+                                                                                                                                                                                      .  0.21    1   1    1   1
+                                                                                                                                                                                      q
+                      window and the stride size of the encoder, we color-code based on                                                                                               e
+                                                                                                                                                                                      r
+                                                                                                                          tures with and without bias (b                    =         f
+                                                                                                                                                                         0                  1    1   1    1   1      0.0
+                                                                                                                                                                                      l  0.3
+                                                                                                                                                                                      a
+                      whether the step signal overlaps with the window of the speciﬁc time                                                                                            t
+                                                                                                                          0.0) for multiple f s in ﬁg. 5. We                          n
+                                                                                                                                                       0                              e  0.41    1   1    1   1       0.5
+                      step. Note that some steps may overlap more than others.                                                                                                        m
+                                                                                                                                                                                      a
+                                                                                                                          see no difference across all f s.                           d     1    1   1    1   1
+                                                                                                                                                                           0          n  0.5
+                                                                                                                                                                                      u                               1.0
+                            Weobserveinﬁg.3thatthestepwiserepresentationdiffers                                           Wesuspectlayernormalizationin-                              F    -0.5-0.25 0.0 0.25 0.5
+                      when f changes, even for short bursts. However, its level of                                        side the encoder enables this trait.                                     Bias b
+                                 0                                                                                                                                                 Fig. 5: Cos. similarity with
+                      distinction decreases in shorter periods. As the popular setting                                                                                             varying f and b.
+                      in speech processing for feature extraction is a window size                                        3.4. Formants: F1 and F2                                               0
+                      and stride of 25ms and 10ms [20], we can conclude that the                                          To observe the impact of formants, we feed the signal x(t) =
+                      level of detailedness is adequate for speech analysis.                                              A sin(2πf t) + A sin(2πf t) + A sin(2πf t) to the en-
+                                                                                                                             0              0            1              1             2             2
+                                                                                                                          coder, where A = 0.5,A = 0.35,A = 0.15. We set f ∈
+                                                                                                                                                  0                1                   2                             0
+                      3.3. Fundamental frequency                                                                          {100,125,...,225Hz}, and check 30 evenly spaced frequen-
+                                                                                                                          cies for both f ∈ [235Hz,850Hz]andf ∈ [595Hz,2400Hz],
+                      Howisthefundamentalfrequencyembeddedintherepre-                                                                           1                                        2
+                      sentation space? To explore how different fundamental fre-                                          based on the lowest and highest F1 and F2 formants of [21].
+                      quencyf impactsrepresentations, we use the 1-second signal                                                Comparing              different          en-                                         1.0
+                                    0                                                                                     coders.         We quantify the differ-                           1      0.94    0.82
+                      x(t) = A sin(2πf t) with A = 1.0 and f ranging from                                                                                                              Base                           0.8
+                                      0              0                0                       0                           ences by feeding the signals de-                             ge                             0.6
+                      10Hz to 8kHz with 10Hz interval. As the input signal for the                                        ﬁned above to the three differ-                                 0.94      1      0.83
+                      wav2vec2.0hasasamplerateof16kHz,wesetthemaximum ent encoders.                                                                 We measure the                     Lar                            0.4
+                      as the Nyquist sampling rate of 8kHz.                                                               distances by the much used lin-                              XLS-R0.82   0.83     1         0.2
+                            Figure 4a demonstrates that not only do signals with simi-                                    ear Centered Kernel Alignment                                   Base Large XLS-R            0.0
+                      lar F0 merely cluster with each other but are linearly ordered.                                     (CKA)[22]inﬁg.6. All encoders                            Fig. 6: Difference between
+                      This result aligns with the previous ﬁndings that the speech                                        are similar, whereas the differ-                         representations.
+                      representation of the encoder is clustered by gender [14, 17],                                      ence based on the dataset is much
+                      where the same gender often has a similar F0 range.                                                 more signiﬁcant than that of model size. Hence we omit the
+                            Wefurther analyze the cosine distance of the neighboring                                      Base model plots due to space constraints, but we qualita-
+                      F0s by comparing it with existing frequency scales, Mel and                                         tively conﬁrmed the similarity between the Base and Large
+                      Bark, in ﬁg. 4b. We accumulate the cosine distance of the                                           representations.
+                      neighboring signals to construct a scale, as representations far-                                         How is vowel space constructed? We ﬁrst ﬁx f0 =
+                      ther apart is analogous to using a larger ﬁlter bank. We observe                                    120Hz to concentrate on the impact of F1 and F2.                                          Fig-
+                      that the scale is evenly spaced, unlike the perception-inspired                                     ure 7 presents the F1-F2 representation space for Large and
+                      human-madescales. Hence we conclude that the wav2vec 2.0                                            XLS-R. To intuitively understand how encoders embed for-
+                      embeds F0 not only in an orderly fashion but in a linear way.                                       mant information, we compare the representation space of the
+                      Moreover,theembeddingsarewell-putinthefullrangeoffre-                                               twomodels. Wecanobservethattherepresentations construct
+                      quencies, supporting the effectiveness of the wav2vec 2.0 on                                        a grid structure; not only are they clustering, but the manifold
+                      various auditory downstream tasks [4, 5].                                                           is smoothly formed, reducing the burden of the transformer-
+                            Does the encoder ignore the signal bias? Similar to the                                       side. Furthermore, we found three linguistic ﬁndings. First,
+                      previous setting (ﬁg. 1), we feed the encoder with the follow-                                      the space for /œ/ is empty in Large model while XLS-R
+                      ing 1-second signal: x(t) = A sin(2πf t) + b, where we set
+                                                                      0              0                                    model successfully handles the formants for the correspond-
+                      A0 =0.5withvaryingbias b ∈ (−0.5,0.25,0.0,0.25,0.5).                                                ing phoneme. This can be explained by different phoneme
+                               wav2vec 2.0 Large                          wav2vec 2.0 XLS-R                                wav2vec 2.0 Large                       wav2vec 2.0 XLS-R
+                                                                                      [u]
+                                          [   ]         [u]                            [o]
+                       F2 [y]                           [o]          [y]
+                                                                    [i]       [   ]        [ ] [ ]
+                          [i]    [ø]        [ ]         [ ]
+                           [e]                                          [ø]      [ ] [ ] [ ]
+                                               [ ]                   [e]                                          A0
+                                    [   ]              [ ][ ]                [   ] [  ]                          0.5
+                                 [ ]                                      [ ]     [a]
+                                         [  ]        F1                                                                      0.10.1
+                                        [a]                                                                                                         A1
+                                                                                                                                               0.5
+                   Fig. 7: Representation space of the two models on varying F1 and F2                       Fig. 9: Representation space of the two models on varying ampli-
+                   formants. Same color denotes same F1. Blue (F1) and orange (F2)                           tudes. We color-code based on the amplitudes A (Blue) and A
+                                                                                                                                                                              0                   1
+                   arrows indicate increasing frequencies. Cardinal vowels with their                        (Orange), where it gets darker as the amplitude gets bigger.
+                   standard F1 and F2 values [21] are plotted. We color the distinctively
+                   sparse regions gray.                                                                      3.5. Amplitude
+                                                                                                             How does the encoder handle when signals with differ-
+                                wav2vec 2.0 Large                         wav2vec 2.0 XLS-R                  ent amplitudes are added? Similar to § 3.4, we use the
+                                                                                                             1-second signal: x(t) = A sin(2πf t) + A sin(2πf t),
+                                                                                                                                                       0             0           1            1
+                                                                                                             wheref =100Hz,f =700Hz,andvaryingA andA from0.1
+                                                                                                                        0               1                                 0          1
+                                                                              150Hz 175Hz                    to 0.5. We evenly space out regarding energy by making the
+                                                                                                             interval equal for squared amplitude.
+                                                                       125Hz             225Hz                    Similar to F1-F2 (ﬁg. 7), we verify that the amplitude
+                                                                                                             is also stored in a grid structure in ﬁg. 9. However, unlike
+                                                                                                             XLS-R,Largetendstoclusterthelow-energysignals. Simi-
+                                                                                             200Hz           lar to § 3.4, we suspect this due to the data distribution; noisy
+                                                                             100Hz                           sources would contain more diverse signal energies.
+                   Fig. 8: Representation space of the two models on varying F0, F1,                                       4. DISCUSSIONANDCONCLUSION
+                   and F2. Same color denotes same F0. Blue (F1) and orange (F2)
+                   arrows indicate increasing frequencies.                                                   Throughout various analyses, we demonstrate that all the in-
+                   inventories: while English does not contain /œ/ speech sound,                             formation inside the spectrogram is successfully embedded in
+                   XSL-Rispre-trained with languages which has /œ/ phoneme,                                  therepresentationspaceoftheconvolutionalencoder. Therep-
+                   suchasFrench. Second,representationsclosetocornervowels                                   resentations are temporally consistent and sufﬁciently detailed
+                   /i/, /u/, and /a/ are strongly clustered for XLS-R, compared to                           (§ 3.2), fundamental frequencies lie in an orderly and linear
+                   Large. This reﬂects the characteristics of the corner vowels,                             way (§ 3.3), bias is ignored (§ 3.3), formants are stored in a
+                   which represent the boundaries of the vowel space, meaning                                grid-like structure, linguistically interpretable way (§ 3.4), and
+                   no vowels exist outside these vowels. Lastly, discriminations                             amplitudes are also kept grid-like (§ 3.5).
+                   between different vowels stand out for XLS-R compared to                                       However, we emphasize that our work does not aim to
+                   Large. Concretely, one huge gap is observed between front                                 showthe representational equivalence between the feature en-
+                   vowels and others for Large, while XLS-R representations                                  coder and the spectrogram. The former store information by
+                   also embeds differences of vowels’ height into high, mid, and                             relativedistancesfromothers,whereasthelatterencodeswith
+                                                                                                             absolute values. For example, consider x (t) = sin(2πf t)
+                   low. We attribute this phenomenon to XLS-R hearing a wider                                                                                            i                     i
+                   range of phonemes in various languages.                                                   where f0=100Hz, f1=200Hz, and f2=8kHz. The distances
+                                                                                                             of spectrogram-induced features are the same for D(x ,x )
+                                                                                                                                                                                           1    2
+                                                                                                             and D(x ,x ), but highly different for the feature encoder.
+                         F0 vs Formants. We extend the previous experiment to                                             1    3
+                   show how F0, F1, and F2 interact within the representation                                Hence, we conclude that encoder representations construct an
+                   space. We can observe even though F1 and F2 still maintain                                acoustic metric space, similar to word representations like
+                   the grid structure, F0 separates each grid. This implies that                             word2vec [23]. This revelation aligns with self-supervision;
+                   F0’s inﬂuence is bigger than that of F1 and F2. However, un-                              contrastive and diversity losses being based on the relative dis-
+                   like XLS-R which scatters different F0 signals, Large tends                               tancebetweenrepresentations. Further,transformer’sattention
+                   to groupF0sintohighandlow,whichseemstoindicategender                                      mechanisms also depend on the relative distance; hence using
+                   difference. Wesuspectthatthisisduetothepretrainingdataset                                 the encoder will be more advantageous. A natural progression
+                   for Large being more speech-oriented, whereas XLS-R uses                                  of this work is to design theory-driven sound representations,
+                   various datasets that partially contain non-speech.                                       improving upon the current data-driven methods.
+                                           5. REFERENCES                                         [14] MdeSeyssel,MLavechin,YAdi,EDupoux,andGWis-
+                                                                                                       niewski, “Probing phoneme, language and speaker infor-
+                   [1] Steffen S, Alexei B, Ronan C, and Michael A, “wav2vec:                          mationinunsupervisedspeechrepresentations,” inInter-
+                        Unsupervisedpre-training for speech recognition,” in In-                       speech, 2022, pp. 1402–1406.
+                        terspeech, 2019, pp. 3465–3469.                                          [15] K Choi, M Kersner, J Morton, and B Chang, “Tempo-
+                   [2] ABaevski,YZhou,AMohamed,andMAuli, “wav2vec                                      ral knowledge distillation for on-device audio classiﬁca-
+                        2.0: A framework for self-supervised learning of speech                        tion,” in ICASSP, 2022, pp. 486–490.
+                        representations,” NeurIPS, pp. 12449–12460, 2020.                        [16] NTVu,JWeiner,andTSchultz, “Investigatingthelearn-
+                   [3] A Babu, C Wang, A Tjandra, K Lakhotia, Q Xu, et al.,                            ing effect of multilingual bottle-neck features for asr,” in
+                        “XLS-R: self-supervised cross-lingual speech represen-                         Interspeech, 2014, pp. 825–829.
+                        tation learning at scale,” in Interspeech, 2022, pp. 2278–                                              ´                                        ¨
+                        2282.                                                                    [17] T tom Dieck, PA Perez-Toro, T Arias-Vergara, E Noth,
+                                                                                                       and P Klumpp,           “Wav2vec behind the scenes: How
+                   [4] S Yang, P Chi, YS Chuang, CJ Lai, K Lakhotia,                                   end2endmodelslearnphonetics,” Interspeech,pp.5130–
+                        et al., “Superb: Speechprocessinguniversalperformance                          5134, 2022.
+                        benchmark,” in Interspeech, 2021, pp. 1194–1198.                         [18] L McInnes, J Healy, and J Melville, “Umap: Uniform
+                                                                                                       manifoldapproximationandprojectionfordimensionre-
+                   [5] L Wang, P Luc, Y Wu, A Recasens, L Smaira, et al.,                              duction,” arXiv preprint arXiv:1802.03426, 2018.
+                        “Towards learning universal audio representations,” in
+                        ICASSP, 2022, pp. 4593–4597.                                             [19] T Wolf, L Debut, V Sanh, J Chaumond, C Delangue,
+                                                                                                       et al.,  “Transformers: State-of-the-art natural language
+                   [6] DPalaz,RCollobert,andMMagimai-Doss, “Estimating                                 processing,” in EMNLP, 2020, pp. 38–45.
+                        phonemeclassconditional probabilities from raw speech                    [20] LR Rabiner, RW Schafer, et al., “Introduction to digital
+                        signal using convolutional neural networks,”               in Inter-           speech processing,” Foundations and Trends in Signal
+                        speech, 2013, pp. 1766–1770.                                                   Processing, pp. 1–194, 2007.
+                   [7] D Palaz, M Magimai-Doss, and R Collobert, “Analysis                       [21] JC Catford et al., A practical introduction to phonetics,
+                        ofcnn-basedspeechrecognitionsystemusingrawspeech                               Clarendon Press Oxford, 1988.
+                        as input,” in Interspeech, 2015, pp. 11–15.
+                                                                                                 [22] S Kornblith, M Norouzi, H Lee, and G Hinton, “Similar-
+                   [8] G Trigeorgis, F Ringeval, R Brueckner, E Marchi,                                ity of neural network representations revisited,” in ICML,
+                        MANicolaou,etal., “Adieufeatures? end-to-endspeech                             2019, pp. 3519–3529.
+                        emotionrecognitionusingadeepconvolutionalrecurrent
+                        network,” in ICASSP, 2016, pp. 5200–5204.                                [23] TMikolov,WYih,andGZweig, “Linguisticregularities
+                                                                                                       in continuous space word representations,” in NAACL,
+                   [9] Y Hoshen, RJ Weiss, and KW Wilson, “Speech acous-                               2013, pp. 746–751.
+                        tic modeling from raw multichannel waveforms,”                     in
+                        ICASSP, 2015, pp. 4624–4628.
+                 [10] J Thickstun, Z Harchaoui, and SM Kakade, “Learning
+                        features of music from scratch,” in ICLR, 2017.
+                 [11] A Pasad, JC Chou, and K Livescu, “Layer-wise analy-
+                        sis of a self-supervised speech representation model,” in
+                        ASRU,2021,pp.914–921.
+                 [12] ZFan,MLi,SZhou,andBXu, “Exploringwav2vec2.0
+                        on speaker veriﬁcation and language identiﬁcation,” in
+                        Interspeech, 2021, pp. 1509–1513.
+                 [13] B van Niekerk, L Nortje, M Baas, and H Kamper, “An-
+                        alyzing speaker information in self-supervised models
+                        to improve zero-resource speech processing,” in Inter-
+                        speech, 2021, pp. 1554–1558.
