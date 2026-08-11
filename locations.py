@@ -13,6 +13,8 @@ duplicate_phone_counts_file = data / 'duplicate_phone_counts.json'
 model_paths_file = data / 'model_paths.json'
 
 synthetic_acoustic_probes_data = data / 'synthetic_acoustic_probes'
+f0_experiment = synthetic_acoustic_probes_data / 'f0'
+f0_umap_plot = f0_experiment / 'f0_umap.pdf'
 f0_pure_tone_stimuli = synthetic_acoustic_probes_data / 'f0_pure_tones'
 f0_pure_tone_phraser_store = (
     synthetic_acoustic_probes_data / 'f0_pure_tones_phraser_store')

@@ -9,4 +9,5 @@ to-vector @ git+https://github.com/martijnbentum/to_vector.git
 numpy
 scipy
 scikit-learn
+umap-learn
 praat-parselmouth
