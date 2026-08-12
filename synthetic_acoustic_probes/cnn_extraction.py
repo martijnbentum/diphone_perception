@@ -29,7 +29,7 @@ def extract_cnn_checkpoint(
     phrases = tuple(phrases)
     if not phrases: raise ValueError('phrases must not be empty')
     try:
-        for phrase in phrases:
+        for phrase in progressbar(phrases):
             segment_features.compute_cnn(
                 phrase,
                 model_name,
