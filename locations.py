@@ -16,7 +16,6 @@ synthetic_acoustic_probes_data = data / 'synthetic_acoustic_probes'
 f0_experiment = synthetic_acoustic_probes_data / 'experiment_f0'
 f0_output_data = f0_experiment / 'output_data'
 f0_plots = f0_experiment / 'plots'
-f0_umap_plot = f0_experiment / 'f0_umap.pdf'
 f0_pure_tone_stimuli = f0_experiment / 'f0_pure_tones'
 f0_pure_tone_phraser_store = (
     f0_experiment / 'f0_pure_tones_phraser_store')

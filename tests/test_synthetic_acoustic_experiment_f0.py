@@ -28,7 +28,6 @@ def test_f0_locations_share_experiment_directory():
     assert locations.f0_experiment == root
     assert locations.f0_output_data.parent == root
     assert locations.f0_plots.parent == root
-    assert locations.f0_umap_plot.parent == root
     assert locations.f0_pure_tone_stimuli.parent == root
     assert locations.f0_pure_tone_phraser_store.parent == root
     assert locations.synthetic_acoustic_probes_echoframe_store.parent == root

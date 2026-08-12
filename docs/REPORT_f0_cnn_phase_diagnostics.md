@@ -1,19 +1,21 @@
-# F0 CNN representation and phase diagnostics
+# Raw F0 CNN representation and phase diagnostics
 
 Date: 2026-08-12
 
 ## Conclusion
 
-The sharp F0 UMAP breaks are not frequency-ordering or audio-grid mistakes.
-They reflect discontinuities already present in the final 512-dimensional CNN
-representations, which UMAP magnifies in two dimensions. Frame diagnostics
-further show that temporal mean aggregation does not create the main
-discontinuities at 3,200, 4,800, or 6,400 Hz.
+In the archived raw CNN output, the sharp F0 UMAP breaks are not
+frequency-ordering or audio-grid mistakes. They reflect discontinuities
+already present in the final 512-dimensional CNN representations, which UMAP
+magnifies in two dimensions. Frame diagnostics further show that temporal mean
+aggregation does not create the main discontinuities at 3,200, 4,800, or
+6,400 Hz.
 
 ## Data and attribution
 
-The representation-space findings below were computed from
-[`f0_data.npz`](../../data/synthetic_acoustic_probes/experiment_f0/f0_data.npz). It contains
+The representation-space findings below were computed from the archived raw
+bundle
+[`f0_data.npz`](../../data/synthetic_acoustic_probes/experiment_f0/_raw_cnn_features/f0_data.npz). It contains
 799 aligned rows for one-second pure tones from 10 through 7,990 Hz:
 `mean_cnn_features` `(799, 512)`, UMAP `coordinates` `(799, 2)`, frequencies,
 stimulus IDs, model name, aggregation, metric, and seed.
@@ -22,16 +24,25 @@ stimulus IDs, model name, aggregation, metric, and seed.
 CNN mean representations and frequencies in stimulus-manifest order.
 [`project_umap`](../synthetic_acoustic_probes/umap_projection.py) generated the
 coordinates with cosine distance and seed 42, and
-[`plot_f0_umap`](../synthetic_acoustic_probes/f0_plot.py) generated
-[`f0_umap.pdf`](../../data/synthetic_acoustic_probes/experiment_f0/f0_umap.pdf). No
-repository function currently writes `f0_data.npz`; it is the persisted
-analysis bundle built from those outputs.
+[`plot_f0_umap`](../synthetic_acoustic_probes/f0_plot.py) generated the archived
+raw plot
+[`f0_umap.pdf`](../../data/synthetic_acoustic_probes/experiment_f0/_raw_cnn_features/f0_umap.pdf). No
+current repository function writes that legacy filename; current persistence
+writes `output_data/{model_name}.npz`.
 
-The temporal findings were computed separately from the stored frame-level
-Echoframe payloads with
+The temporal findings were computed separately from the archived raw
+frame-level Echoframe payloads, persisted in
+[`cnn_phase_diagnostics.npz`](../../data/synthetic_acoustic_probes/experiment_f0/_raw_cnn_features/phase_diagnostics/cnn_phase_diagnostics.npz), with
 [`diagnose_cnn_phase`](../synthetic_acoustic_probes/cnn_phase_diagnostics.py).
 
-## Findings from `f0_data.npz`
+The normalized full-rerun artifacts are model-specific:
+[`wav2vec2_checkpoint-0.npz`](../../data/synthetic_acoustic_probes/experiment_f0/output_data/wav2vec2_checkpoint-0.npz),
+[`wav2vec2_nl1_checkpoint-200000.npz`](../../data/synthetic_acoustic_probes/experiment_f0/output_data/wav2vec2_nl1_checkpoint-200000.npz),
+and their corresponding PDFs in
+[`plots`](../../data/synthetic_acoustic_probes/experiment_f0/plots/). Their
+normalized findings are not substituted into the raw measurements below.
+
+## Findings from archived raw `f0_data.npz`
 
 - All 799 frequencies, stimulus IDs, mean features, and UMAP coordinates are
   finite, unique where expected, and aligned in 10 Hz steps.
@@ -54,11 +65,12 @@ Echoframe payloads with
 - The 4,840→4,850 Hz separation is more projection-specific: cosine distance
   is only `0.079`, versus `2.924` units in UMAP.
 
-In [`f0_umap.pdf`](../../data/synthetic_acoustic_probes/experiment_f0/f0_umap.pdf), the
+In the archived raw
+[`f0_umap.pdf`](../../data/synthetic_acoustic_probes/experiment_f0/_raw_cnn_features/f0_umap.pdf), the
 gray path is always drawn between consecutive frequencies. It does not
 explicitly connect 4,800 to 3,560 or 3,600 Hz.
 
-## Findings from `cnn_phase_diagnostics`
+## Findings from archived raw `cnn_phase_diagnostics`
 
 The diagnostic columns mean:
 

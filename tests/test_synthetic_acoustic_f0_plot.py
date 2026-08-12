@@ -87,6 +87,11 @@ def test_plot_adds_ordered_path_frequency_colors_and_landmarks(
     assert figure.axes[1].get_ylabel() == 'F0 (Hz)'
     assert axis.get_xlabel() == 'UMAP 1'
     assert axis.get_ylabel() == 'UMAP 2'
+    assert axis.get_title() == 'F0 representation space'
+    assert line.get_color() == '#D62728'
+    assert line.get_linestyle() == '--'
+    assert line.get_linewidth() == 0.6
+    assert line.get_zorder() > axis.collections[0].get_zorder()
 
 
 def test_plot_annotates_isolated_frequency_jumps(monkeypatch):
@@ -134,6 +139,36 @@ def test_large_jump_detection_flags_isolated_point():
     indices = f0_plot._large_jump_indices(coordinates)
 
     np.testing.assert_array_equal(indices, [2])
+
+
+def test_jump_label_replaces_duplicate_landmark_label(monkeypatch):
+    '''A landmark that is also a jump receives one combined label.'''
+
+    coordinates = np.array([
+        [0.0, 0.0],
+        [1.0, 0.0],
+        [2.0, 0.0],
+        [50.0, 0.0],
+        [3.0, 0.0],
+        [4.0, 0.0],
+        [5.0, 0.0],
+        [6.0, 0.0],
+    ])
+
+    def fake_project(X, *, metric, random_state):
+        return coordinates
+
+    monkeypatch.setattr(f0_plot, 'project_umap', fake_project)
+    frequencies = np.arange(970, 1050, 10)
+
+    figure, axis = f0_plot.plot_f0_umap(
+        np.ones((8, 2)),
+        frequencies,
+        output_path='',
+    )
+
+    assert figure.axes[0] is axis
+    assert [text.get_text() for text in axis.texts] == ['1 kHz jump']
 
 
 def test_plot_can_save_and_return_figure(tmp_path, fixed_projection):
@@ -204,6 +239,10 @@ def test_plot_checkpoint_result_uses_stored_coordinates(
     )
     plotted_frequencies = axis.collections[0].get_array()
     np.testing.assert_array_equal(plotted_frequencies, frequencies)
+    assert axis.get_title() == (
+        'F0 representation space\n'
+        'wav2vec2_nl1_checkpoint-200000'
+    )
     assert axis in figure.axes
 
 
