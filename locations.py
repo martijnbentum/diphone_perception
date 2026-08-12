@@ -13,13 +13,20 @@ duplicate_phone_counts_file = data / 'duplicate_phone_counts.json'
 model_paths_file = data / 'model_paths.json'
 
 synthetic_acoustic_probes_data = data / 'synthetic_acoustic_probes'
-f0_experiment = synthetic_acoustic_probes_data / 'f0'
+f0_experiment = synthetic_acoustic_probes_data / 'experiment_f0'
 f0_umap_plot = f0_experiment / 'f0_umap.pdf'
-f0_pure_tone_stimuli = synthetic_acoustic_probes_data / 'f0_pure_tones'
+f0_pure_tone_stimuli = f0_experiment / 'f0_pure_tones'
 f0_pure_tone_phraser_store = (
-    synthetic_acoustic_probes_data / 'f0_pure_tones_phraser_store')
+    f0_experiment / 'f0_pure_tones_phraser_store')
 synthetic_acoustic_probes_echoframe_store = (
-    synthetic_acoustic_probes_data / 'echoframe_store')
+    f0_experiment / 'echoframe_store')
+f0_phase_diagnostics = f0_experiment / 'phase_diagnostics'
+f0_phase_diagnostic_stimuli = f0_phase_diagnostics / 'stimuli'
+f0_phase_diagnostic_phraser_store = f0_phase_diagnostics / 'phraser_store'
+f0_phase_diagnostic_echoframe_store = (
+    f0_phase_diagnostics / 'echoframe_store')
+f0_phase_diagnostic_results = (
+    f0_phase_diagnostics / 'cnn_phase_diagnostics.npz')
 
 echoframe_store = data / 'echoframe_store'
 echoframe_mfcc_store = data / 'echoframe_mfcc_store'

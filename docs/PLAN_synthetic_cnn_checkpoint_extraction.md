@@ -78,8 +78,8 @@ and unbatched.
   duplicate.
 - Resume at the model/stimulus level by skipping valid existing CNN features.
   Report computed, skipped, and failed counts per checkpoint and overall.
-- Default the stores beneath `data/synthetic_acoustic_probes/`, alongside but
-  separate from the generated `f0_pure_tones` WAV directory.
+- Default the stores beneath `data/synthetic_acoustic_probes/experiment_f0/`,
+  alongside but separate from the generated `f0_pure_tones` WAV directory.
 
 ### Tests
 

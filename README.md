@@ -521,7 +521,7 @@ monophthong generator.
 Generated stimuli can be persisted as source-independent float32 WAV packages
 with a JSON manifest. Existing output is preserved unless `overwrite=True` is
 passed explicitly. The pure-tone grid has a convenience flag that writes to
-`../data/synthetic_acoustic_probes/f0_pure_tones`:
+`../data/synthetic_acoustic_probes/experiment_f0/f0_pure_tones`:
 
     from synthetic_acoustic_probes import pure_tone_stimuli
 
@@ -533,7 +533,7 @@ Use the generic writer for other stimulus families or a custom destination:
 
     write_stimuli(
         pure_tone_stimuli(),
-        '../data/synthetic_acoustic_probes/f0_pure_tones',
+        '../data/synthetic_acoustic_probes/experiment_f0/f0_pure_tones',
     )
 
 `vowel_formant_reference/` exposes separate Dutch literature tables and local

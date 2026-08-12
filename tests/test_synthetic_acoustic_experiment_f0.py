@@ -19,6 +19,24 @@ class FakeStore:
         self.closed = True
 
 
+def test_f0_locations_share_experiment_directory():
+    '''F0 artifacts and stores live below the dedicated experiment root.'''
+
+    root = locations.synthetic_acoustic_probes_data / 'experiment_f0'
+
+    assert locations.f0_experiment == root
+    assert locations.f0_umap_plot.parent == root
+    assert locations.f0_pure_tone_stimuli.parent == root
+    assert locations.f0_pure_tone_phraser_store.parent == root
+    assert locations.synthetic_acoustic_probes_echoframe_store.parent == root
+    phase_root = root / 'phase_diagnostics'
+    assert locations.f0_phase_diagnostics == phase_root
+    assert locations.f0_phase_diagnostic_stimuli.parent == phase_root
+    assert locations.f0_phase_diagnostic_phraser_store.parent == phase_root
+    assert locations.f0_phase_diagnostic_echoframe_store.parent == phase_root
+    assert locations.f0_phase_diagnostic_results.parent == phase_root
+
+
 def test_create_auditory_stimuli_saves_to_default_location(monkeypatch):
     '''Stimulus creation delegates with saving and the shared default path.
 
