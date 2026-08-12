@@ -10,7 +10,18 @@ from .formants import (
     praat_formant_stimuli,
     praat_vowel_stimulus,
 )
-from .f0_plot import plot_f0_checkpoint_result, plot_f0_umap
+from .f0_metrics import (
+    f0_checkpoint_metrics,
+    f0_checkpoint_step,
+    f0_smoothness_metrics,
+    load_f0_checkpoint_metrics,
+)
+from .f0_plot import (
+    plot_f0_checkpoint_distance_heatmap,
+    plot_f0_checkpoint_result,
+    plot_f0_checkpoint_smoothness,
+    plot_f0_umap,
+)
 from .metrics import (
     accumulated_adjacent_cosine_scale,
     compare_frequency_scales,
@@ -61,11 +72,17 @@ __all__ = [
     'designed_formant_response',
     'dominant_fft_peaks',
     'energy_spaced_amplitudes',
+    'f0_checkpoint_metrics',
+    'f0_checkpoint_step',
+    'f0_smoothness_metrics',
+    'load_f0_checkpoint_metrics',
     'local_neighbor_preservation',
     'measure_waveform',
     'pairwise_geometry_spearman',
     'paper_code_amplitudes',
+    'plot_f0_checkpoint_distance_heatmap',
     'plot_f0_checkpoint_result',
+    'plot_f0_checkpoint_smoothness',
     'plot_f0_umap',
     'plot_vowel_formant_space',
     'praat_formant_stimuli',

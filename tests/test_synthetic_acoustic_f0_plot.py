@@ -42,6 +42,168 @@ def fixed_projection(monkeypatch):
     return coordinates, calls
 
 
+@pytest.fixture
+def checkpoint_metrics():
+    '''Return unsorted checkpoint rows with a shared frequency grid.'''
+
+    frequency_edges = np.array([
+        [10.0, 20.0],
+        [20.0, 30.0],
+        [30.0, 40.0],
+    ])
+    thresholds = np.array([0.1, 0.25, 0.5])
+    return (
+        {
+            'checkpoint_step': 200,
+            'mean': 0.12,
+            'median': 0.08,
+            'p95': 0.25,
+            'p99': 0.4,
+            'maximum': 0.6,
+            'thresholds': thresholds,
+            'fractions_above_threshold': np.array([0.3, 0.1, 0.0]),
+            'frequency_edges_hz': frequency_edges,
+            'adjacent_distances': np.array([0.1, 0.2, 0.3]),
+        },
+        {
+            'checkpoint_step': 0,
+            'mean': 0.3,
+            'median': 0.2,
+            'p95': 0.5,
+            'p99': 0.8,
+            'maximum': 1.0,
+            'thresholds': thresholds,
+            'fractions_above_threshold': np.array([0.7, 0.5, 0.2]),
+            'frequency_edges_hz': frequency_edges,
+            'adjacent_distances': np.array([0.3, 0.4, 0.5]),
+        },
+        {
+            'checkpoint_step': 100,
+            'mean': 0.2,
+            'median': 0.1,
+            'p95': 0.3,
+            'p99': 0.5,
+            'maximum': 0.7,
+            'thresholds': thresholds,
+            'fractions_above_threshold': np.array([0.5, 0.2, 0.1]),
+            'frequency_edges_hz': frequency_edges,
+            'adjacent_distances': np.array([0.2, 0.3, 0.4]),
+        },
+    )
+
+
+def test_plot_checkpoint_smoothness_uses_numeric_checkpoint_order(
+    checkpoint_metrics,
+    tmp_path,
+):
+    '''Summary panels plot typical, extreme, and threshold measurements.'''
+
+    output_path = tmp_path / 'plots' / 'smoothness.pdf'
+
+    figure, axes = f0_plot.plot_f0_checkpoint_smoothness(
+        checkpoint_metrics,
+        output_path=output_path,
+        dpi=120,
+    )
+
+    assert output_path.is_file()
+    assert output_path.stat().st_size > 0
+    assert len(axes) == 3
+    expected_steps = np.array([0, 100, 200])
+    for axis in axes:
+        for line in axis.lines:
+            np.testing.assert_array_equal(line.get_xdata(), expected_steps)
+    assert [line.get_label() for line in axes[0].lines] == [
+        'Median', 'Mean', 'P95'
+    ]
+    np.testing.assert_allclose(
+        axes[0].lines[0].get_ydata(),
+        [0.2, 0.1, 0.08],
+    )
+    assert [line.get_label() for line in axes[1].lines] == [
+        'P99', 'Maximum'
+    ]
+    assert [line.get_label() for line in axes[2].lines] == [
+        '> 0.1', '> 0.25', '> 0.5'
+    ]
+    np.testing.assert_allclose(
+        axes[2].lines[1].get_ydata(),
+        [0.5, 0.2, 0.1],
+    )
+    assert axes[2].get_xlabel() == 'Checkpoint step'
+    assert axes[2].get_ylabel() == 'Fraction of edges'
+    assert figure._suptitle.get_text() == (
+        'F0 trajectory smoothness over checkpoints'
+    )
+
+
+def test_plot_checkpoint_distance_heatmap_uses_all_edges(
+    checkpoint_metrics,
+    tmp_path,
+):
+    '''Heatmap columns follow checkpoints and rows retain frequency edges.'''
+
+    output_path = tmp_path / 'plots' / 'distance-heatmap.png'
+
+    figure, axis = f0_plot.plot_f0_checkpoint_distance_heatmap(
+        checkpoint_metrics,
+        output_path=output_path,
+        dpi=120,
+        vmax=1.0,
+    )
+
+    assert output_path.is_file()
+    assert output_path.stat().st_size > 0
+    image = axis.collections[0]
+    plotted = np.asarray(image.get_array()).reshape(3, 3)
+    np.testing.assert_allclose(
+        plotted,
+        np.array([
+            [0.3, 0.2, 0.1],
+            [0.4, 0.3, 0.2],
+            [0.5, 0.4, 0.3],
+        ]),
+    )
+    assert [label.get_text() for label in axis.get_xticklabels()] == [
+        '0', '100', '200'
+    ]
+    assert axis.get_xlabel() == 'Checkpoint step'
+    assert axis.get_ylabel() == 'Frequency edge (Hz)'
+    assert figure.axes[1].get_ylabel() == 'Adjacent cosine distance'
+
+
+def test_checkpoint_metric_plots_validate_shared_inputs(checkpoint_metrics):
+    '''Plots reject empty, duplicate, and incompatible checkpoint rows.'''
+
+    with pytest.raises(ValueError, match='must not be empty'):
+        f0_plot.plot_f0_checkpoint_smoothness(())
+
+    duplicates = [dict(row) for row in checkpoint_metrics]
+    duplicates[1]['checkpoint_step'] = 200
+    with pytest.raises(ValueError, match='duplicate checkpoint_step'):
+        f0_plot.plot_f0_checkpoint_smoothness(duplicates)
+
+    mismatched_thresholds = [dict(row) for row in checkpoint_metrics]
+    mismatched_thresholds[1]['thresholds'] = np.array([0.1, 0.2, 0.5])
+    with pytest.raises(ValueError, match='thresholds do not match'):
+        f0_plot.plot_f0_checkpoint_smoothness(mismatched_thresholds)
+
+    mismatched_edges = [dict(row) for row in checkpoint_metrics]
+    mismatched_edges[1]['frequency_edges_hz'] = np.array([
+        [10.0, 20.0],
+        [20.0, 31.0],
+        [31.0, 40.0],
+    ])
+    with pytest.raises(ValueError, match='frequency edges do not match'):
+        f0_plot.plot_f0_checkpoint_distance_heatmap(mismatched_edges)
+
+    with pytest.raises(ValueError, match='vmax'):
+        f0_plot.plot_f0_checkpoint_distance_heatmap(
+            checkpoint_metrics,
+            vmax=0,
+        )
+
+
 def test_plot_adds_ordered_path_frequency_colors_and_landmarks(
     fixed_projection,
 ):
