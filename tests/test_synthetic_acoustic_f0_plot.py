@@ -5,6 +5,7 @@ import matplotlib
 matplotlib.use('Agg')
 
 from matplotlib import pyplot
+from matplotlib.markers import MarkerStyle
 import numpy as np
 import pytest
 
@@ -70,9 +71,69 @@ def test_plot_adds_ordered_path_frequency_colors_and_landmarks(
     assert [text.get_text() for text in axis.texts] == [
         '10 Hz', '1 kHz', '2 kHz', '8 kHz'
     ]
+    landmarks = axis.collections[1]
+    expected_landmarks = coordinates[[1, 2, 3, 0]]
+    np.testing.assert_array_equal(landmarks.get_offsets(), expected_landmarks)
+    np.testing.assert_array_equal(
+        landmarks.get_facecolors(),
+        [[1.0, 0.0, 0.0, 1.0]],
+    )
+    star = MarkerStyle('*')
+    expected_star = star.get_path().transformed(star.get_transform())
+    np.testing.assert_allclose(
+        landmarks.get_paths()[0].vertices,
+        expected_star.vertices,
+    )
     assert figure.axes[1].get_ylabel() == 'F0 (Hz)'
     assert axis.get_xlabel() == 'UMAP 1'
     assert axis.get_ylabel() == 'UMAP 2'
+
+
+def test_plot_annotates_isolated_frequency_jumps(monkeypatch):
+    '''An isolated point far from its frequency neighbors is labeled once.'''
+
+    coordinates = np.array([
+        [0.0, 0.0],
+        [1.0, 0.0],
+        [2.0, 0.0],
+        [50.0, 0.0],
+        [3.0, 0.0],
+        [4.0, 0.0],
+        [5.0, 0.0],
+        [6.0, 0.0],
+    ])
+
+    def fake_project(X, *, metric, random_state):
+        return coordinates
+
+    monkeypatch.setattr(f0_plot, 'project_umap', fake_project)
+    frequencies = np.arange(100, 180, 10)
+
+    figure, axis = f0_plot.plot_f0_umap(
+        np.ones((8, 2)),
+        frequencies,
+        output_path='',
+    )
+
+    assert figure.axes[0] is axis
+    assert [text.get_text() for text in axis.texts] == ['130 Hz jump']
+    assert axis.texts[0].xy == (50.0, 0.0)
+
+
+def test_large_jump_detection_flags_isolated_point():
+    '''Jump detection flags the shared point of two long incident steps.'''
+
+    coordinates = np.array([
+        [0.0, 0.0],
+        [1.0, 0.0],
+        [30.0, 0.0],
+        [2.0, 0.0],
+        [3.0, 0.0],
+    ])
+
+    indices = f0_plot._large_jump_indices(coordinates)
+
+    np.testing.assert_array_equal(indices, [2])
 
 
 def test_plot_can_save_and_return_figure(tmp_path, fixed_projection):
@@ -146,15 +207,13 @@ def test_plot_checkpoint_result_uses_stored_coordinates(
     assert axis in figure.axes
 
 
-def test_default_output_is_pdf_in_f0_experiment_directory():
-    '''Default output is the shared F0 experiment PDF path.'''
+def test_default_output_does_not_create_a_shared_plot():
+    '''Generic plotting requires an explicit output path.'''
 
     parameters = inspect.signature(f0_plot.plot_f0_umap).parameters
     output_path = parameters['output_path'].default
 
-    assert output_path == locations.f0_umap_plot
-    assert output_path.parent == locations.f0_experiment
-    assert output_path.suffix == '.pdf'
+    assert output_path is None
 
 
 @pytest.mark.parametrize(
