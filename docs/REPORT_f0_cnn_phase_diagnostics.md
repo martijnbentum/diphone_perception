@@ -111,10 +111,11 @@ period-two alternation.
 
 With a 50 Hz CNN frame rate, the 10 Hz stimulus spacing creates a five-frame
 phase cycle away from 50 Hz multiples. Even/odd grouping mixes those phases.
-The implemented next test generates sample offsets 0–4 for the ±10 Hz
-triplets around 3,200, 4,000, 4,800, and 6,400 Hz, plus a 3,500 Hz control
-triplet. The
+The initial sample-offset test used the ±10 Hz triplets around 3,200, 4,000,
+4,800, and 6,400 Hz, plus a 3,500 Hz control triplet. The default panel is now
+expanded with 3,590–3,610 Hz and 10 Hz grids spanning 3,950–4,050 and
+4,750–4,850 Hz. The
 [`run_phase_diagnostic_experiment`](../synthetic_acoustic_probes/cnn_phase_diagnostics.py)
 function creates its stimuli and stores, extracts the final CNN features, and
-writes the diagnostics below `experiment_f0/phase_diagnostics`. It has not
-yet been run; layer-by-layer CNN inspection remains a later experiment.
+writes the diagnostics below `experiment_f0/phase_diagnostics`.
+Layer-by-layer CNN inspection remains a later experiment.

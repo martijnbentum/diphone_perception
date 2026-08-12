@@ -22,8 +22,11 @@ PHASE_DIAGNOSTIC_PHRASER_SOURCE_ID = 'f0-phase-diagnostics'
 PHASE_DIAGNOSTIC_FREQUENCIES_HZ = (
     3190, 3200, 3210,
     3490, 3500, 3510,
-    3990, 4000, 4010,
-    4790, 4800, 4810,
+    3590, 3600, 3610,
+    3950, 3960, 3970, 3980, 3990, 4000,
+    4010, 4020, 4030, 4040, 4050,
+    4750, 4760, 4770, 4780, 4790, 4800,
+    4810, 4820, 4830, 4840, 4850,
     6390, 6400, 6410,
 )
 PHASE_DIAGNOSTIC_SAMPLE_OFFSETS = tuple(range(5))
@@ -101,7 +104,7 @@ def phase_diagnostic_stimuli(
 
 
 def create_phase_diagnostic_stimuli(*, output_root=None, overwrite=False):
-    '''Generate and persist the 75-stimulus phase-diagnostic panel.'''
+    '''Generate and persist the 170-stimulus phase-diagnostic panel.'''
 
     if output_root is None:
         output_root = locations.f0_phase_diagnostic_stimuli

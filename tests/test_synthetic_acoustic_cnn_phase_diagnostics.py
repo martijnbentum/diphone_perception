@@ -40,12 +40,23 @@ class _ClosableStore:
 
 
 def test_phase_diagnostic_stimuli_cover_five_sample_alignments():
-    '''The default panel contains 15 frequencies by five input offsets.'''
+    '''The default panel contains 34 frequencies by five input offsets.'''
 
     stimuli = cnn_phase_diagnostics.phase_diagnostic_stimuli()
 
-    assert len(stimuli) == 75
-    assert len({stimulus.stimulus_id for stimulus in stimuli}) == 75
+    assert len(stimuli) == 170
+    assert len({stimulus.stimulus_id for stimulus in stimuli}) == 170
+    frequencies = tuple(dict.fromkeys(
+        stimulus.parameters['frequencies_hz'][0] for stimulus in stimuli
+    ))
+    assert frequencies == (
+        3190, 3200, 3210,
+        3490, 3500, 3510,
+        3590, 3600, 3610,
+        *range(3950, 4060, 10),
+        *range(4750, 4860, 10),
+        6390, 6400, 6410,
+    )
     first_five = stimuli[:5]
     assert [
         stimulus.parameters['sample_offset'] for stimulus in first_five
