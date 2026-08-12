@@ -97,6 +97,55 @@ def test_plot_can_save_and_return_figure(tmp_path, fixed_projection):
     assert axis in figure.axes
 
 
+def test_plot_checkpoint_result_uses_stored_coordinates(
+    tmp_path,
+    monkeypatch,
+):
+    '''Checkpoint plotting loads its fixed NPZ and writes the plots folder.'''
+    model_name = 'wav2vec2_nl1_checkpoint-200000'
+    output_data = tmp_path / 'output_data'
+    plots = tmp_path / 'plots'
+    output_data.mkdir()
+    coordinates = np.array([
+        [8.0, 80.0],
+        [0.1, 1.0],
+        [1.0, 10.0],
+        [2.0, 20.0],
+    ])
+    frequencies = np.array([8000, 10, 1000, 2000])
+    np.savez_compressed(
+        output_data / f'{model_name}.npz',
+        coordinates=coordinates,
+        frequencies=frequencies,
+    )
+    monkeypatch.setattr(locations, 'f0_output_data', output_data)
+    monkeypatch.setattr(locations, 'f0_plots', plots)
+
+    def fail_projection(X, *, metric, random_state):
+        pytest.fail('stored checkpoint plotting should not run UMAP')
+
+    monkeypatch.setattr(f0_plot, 'project_umap', fail_projection)
+
+    figure, axis = f0_plot.plot_f0_checkpoint_result(model_name, dpi=120)
+
+    plot_path = plots / f'{model_name}.pdf'
+    assert plot_path.is_file()
+    assert plot_path.stat().st_size > 0
+    expected_order = np.array([1, 2, 3, 0])
+    line = axis.lines[0]
+    np.testing.assert_array_equal(
+        line.get_xdata(),
+        coordinates[expected_order, 0],
+    )
+    np.testing.assert_array_equal(
+        line.get_ydata(),
+        coordinates[expected_order, 1],
+    )
+    plotted_frequencies = axis.collections[0].get_array()
+    np.testing.assert_array_equal(plotted_frequencies, frequencies)
+    assert axis in figure.axes
+
+
 def test_default_output_is_pdf_in_f0_experiment_directory():
     '''Default output is the shared F0 experiment PDF path.'''
 

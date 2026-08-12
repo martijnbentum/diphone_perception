@@ -12,6 +12,27 @@ from .umap_projection import project_umap
 _F0_LANDMARKS_HZ = (10, 1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000)
 
 
+def plot_f0_checkpoint_result(model_name, *, figsize=None, dpi=300):
+    '''Plot the stored F0 UMAP result for one checkpoint.
+
+    Loads ``output_data/{model_name}.npz`` and saves the rendered figure as
+    ``plots/{model_name}.pdf`` below the F0 experiment directory. Returns the
+    Matplotlib figure and primary axis.
+    '''
+    result_path = locations.f0_output_data / f'{model_name}.npz'
+    with np.load(result_path, allow_pickle=False) as result:
+        coordinates = np.asarray(result['coordinates'])
+        frequencies = _validated_frequencies(result['frequencies'])
+    output_path = locations.f0_plots / f'{model_name}.pdf'
+    return _plot_f0_coordinates(
+        coordinates,
+        frequencies,
+        output_path=output_path,
+        figsize=figsize,
+        dpi=dpi,
+    )
+
+
 def plot_f0_umap(
     X,
     y,
@@ -36,8 +57,6 @@ def plot_f0_umap(
     figure and primary axis.
     '''
 
-    from matplotlib import pyplot
-
     frequencies = _validated_frequencies(y)
     if np.ndim(X) != 2: raise ValueError('X must be a two-dimensional array')
     if np.shape(X)[0] != frequencies.size:
@@ -48,6 +67,33 @@ def plot_f0_umap(
         metric='cosine',
         random_state=random_state,
     )
+    return _plot_f0_coordinates(
+        coordinates,
+        frequencies,
+        output_path=output_path,
+        figsize=figsize,
+        dpi=dpi,
+    )
+
+
+def _plot_f0_coordinates(
+    coordinates,
+    frequencies,
+    *,
+    output_path,
+    figsize,
+    dpi,
+):
+    from matplotlib import pyplot
+
+    coordinates = np.asarray(coordinates, dtype=float)
+    expected_shape = (frequencies.size, 2)
+    if coordinates.shape != expected_shape:
+        message = f'coordinates must have shape {expected_shape}'
+        raise ValueError(message)
+    if not np.all(np.isfinite(coordinates)):
+        raise ValueError('coordinates contain non-finite values')
+
     order = np.argsort(frequencies, kind='stable')
     ordered_coordinates = coordinates[order]
 

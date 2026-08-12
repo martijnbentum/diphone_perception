@@ -1,6 +1,7 @@
 '''Experiment entry points for the pure-tone F0 probe.'''
 
 import json
+from pathlib import Path
 
 import echoframe
 import numpy as np
@@ -13,6 +14,7 @@ from .echoframe_store import create_store, make_x_y
 from .echoframe_store import select_wav2vec2_nl1_checkpoints
 from .phraser_store import add_stimuli, load_stimuli
 from .stimuli import pure_tone_stimuli
+from .umap_projection import project_umap
 
 
 F0_PHRASER_SOURCE_ID = 'f0-pure-tones'
@@ -138,6 +140,69 @@ def make_f0_x_y(model_name, store, *, aggregation):
         raise ValueError('F0 stimulus IDs are not aligned with the manifest')
     y = np.asarray(targets, dtype=float)
     return X, y
+
+
+def save_f0_checkpoint_result(
+    model_name,
+    store,
+    *,
+    output_directory=locations.f0_output_data,
+):
+    '''Save mean CNN features and their F0 UMAP for one checkpoint.
+
+    model_name:        Registered Echoframe model name.
+    store:             Loaded F0 Echoframe Store.
+    output_directory:  Directory receiving the checkpoint NPZ file.
+
+    Existing checkpoint files are skipped. Returns the output path.
+    '''
+    output_directory = Path(output_directory)
+    output_path = output_directory / f'{model_name}.npz'
+    if output_path.exists(): return output_path
+
+    X, y = make_f0_x_y(model_name, store, aggregation='mean')
+    coordinates = project_umap(X, metric='cosine', random_state=42)
+
+    output_directory.mkdir(parents=True, exist_ok=True)
+    with output_path.open('xb') as stream:
+        np.savez_compressed(
+            stream,
+            mean_cnn_features=np.asarray(X),
+            coordinates=coordinates,
+            frequencies=np.asarray(y),
+            random_state=42,
+            metric='cosine',
+            model_name=model_name,
+            aggregation='mean',
+        )
+    return output_path
+
+
+def save_f0_checkpoint_results(
+    store,
+    *,
+    output_directory=locations.f0_output_data,
+):
+    '''Save F0 result bundles for the complete wav2vec2 checkpoint set.
+
+    Existing checkpoint files are skipped. Returns paths grouped under
+    ``saved`` and ``skipped``.
+    '''
+    output_directory = Path(output_directory)
+    saved = []
+    skipped = []
+    for model_name in select_wav2vec2_nl1_checkpoints():
+        output_path = output_directory / f'{model_name}.npz'
+        if output_path.exists():
+            skipped.append(output_path)
+            continue
+        path = save_f0_checkpoint_result(
+            model_name,
+            store,
+            output_directory=output_directory,
+        )
+        saved.append(path)
+    return {'saved': tuple(saved), 'skipped': tuple(skipped)}
 
 
 def _attach_f0_phraser_store(store):

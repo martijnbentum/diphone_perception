@@ -10,7 +10,7 @@ from .formants import (
     praat_formant_stimuli,
     praat_vowel_stimulus,
 )
-from .f0_plot import plot_f0_umap
+from .f0_plot import plot_f0_checkpoint_result, plot_f0_umap
 from .metrics import (
     accumulated_adjacent_cosine_scale,
     compare_frequency_scales,
@@ -65,6 +65,7 @@ __all__ = [
     'measure_waveform',
     'pairwise_geometry_spearman',
     'paper_code_amplitudes',
+    'plot_f0_checkpoint_result',
     'plot_f0_umap',
     'plot_vowel_formant_space',
     'praat_formant_stimuli',
