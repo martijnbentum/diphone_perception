@@ -164,12 +164,93 @@ def test_plot_checkpoint_distance_heatmap_uses_all_edges(
             [0.5, 0.4, 0.3],
         ]),
     )
+    expected_positions = np.log10(np.array([0, 100, 200]) + 1)
+    expected_boundaries = np.empty(4)
+    expected_boundaries[1:-1] = (
+        expected_positions[:-1] + expected_positions[1:]
+    ) / 2
+    expected_boundaries[0] = (
+        2 * expected_positions[0] - expected_boundaries[1]
+    )
+    expected_boundaries[-1] = (
+        2 * expected_positions[-1] - expected_boundaries[-2]
+    )
+    coordinates = image.get_coordinates()
+    np.testing.assert_allclose(coordinates[0, :, 0], expected_boundaries)
+    np.testing.assert_allclose(axis.get_xticks(), expected_positions)
     assert [label.get_text() for label in axis.get_xticklabels()] == [
-        '0', '100', '200'
+        'init', '100', '200'
     ]
-    assert axis.get_xlabel() == 'Checkpoint step'
+    assert axis.get_xlabel() == (
+        'Checkpoint step (log₁₀(step + 1) spacing)'
+    )
     assert axis.get_ylabel() == 'Frequency edge (Hz)'
     assert figure.axes[1].get_ylabel() == 'Adjacent cosine distance'
+
+
+@pytest.mark.parametrize(
+    ('scale', 'expected_boundaries', 'expected_label'),
+    (
+        ('linear', [-50.0, 50.0, 150.0, 250.0],
+            'Checkpoint step (linear spacing)'),
+        ('categorical', [-0.5, 0.5, 1.5, 2.5],
+            'Checkpoint (equal column spacing)'),
+    ),
+)
+def test_checkpoint_heatmap_supports_alternative_spacing(
+    checkpoint_metrics,
+    scale,
+    expected_boundaries,
+    expected_label,
+):
+    '''Linear and categorical modes use their stated column geometry.'''
+
+    figure, axis = f0_plot.plot_f0_checkpoint_distance_heatmap(
+        checkpoint_metrics,
+        checkpoint_scale=scale,
+    )
+
+    assert figure.axes[0] is axis
+    coordinates = axis.collections[0].get_coordinates()
+    np.testing.assert_allclose(
+        coordinates[0, :, 0],
+        expected_boundaries,
+    )
+    assert axis.get_xlabel() == expected_label
+
+
+def test_checkpoint_heatmap_samples_labels_at_true_log_positions(
+    checkpoint_metrics,
+):
+    '''Dense checkpoint sweeps receive sparse labels at column centers.'''
+
+    template = checkpoint_metrics[0]
+    steps = np.array([
+        0, 100, 500, 1000, 5000, 10_000,
+        20_000, 50_000, 100_000, 200_000,
+    ])
+    rows = []
+    for step in steps:
+        row = dict(template)
+        row['checkpoint_step'] = int(step)
+        rows.append(row)
+
+    figure, axis = f0_plot.plot_f0_checkpoint_distance_heatmap(
+        rows,
+        max_checkpoint_labels=4,
+    )
+
+    assert figure.axes[0] is axis
+    ticks = axis.get_xticks()
+    labels = [label.get_text() for label in axis.get_xticklabels()]
+    available_positions = np.log10(steps + 1)
+    assert len(ticks) <= 4
+    assert labels[0] == 'init'
+    assert labels[-1] == '200k'
+    assert ticks[0] == pytest.approx(available_positions[0])
+    assert ticks[-1] == pytest.approx(available_positions[-1])
+    for tick in ticks:
+        assert np.min(np.abs(available_positions - tick)) < 1e-12
 
 
 def test_checkpoint_metric_plots_validate_shared_inputs(checkpoint_metrics):
@@ -201,6 +282,18 @@ def test_checkpoint_metric_plots_validate_shared_inputs(checkpoint_metrics):
         f0_plot.plot_f0_checkpoint_distance_heatmap(
             checkpoint_metrics,
             vmax=0,
+        )
+
+    with pytest.raises(ValueError, match='checkpoint_scale'):
+        f0_plot.plot_f0_checkpoint_distance_heatmap(
+            checkpoint_metrics,
+            checkpoint_scale='log',
+        )
+
+    with pytest.raises(ValueError, match='max_checkpoint_labels'):
+        f0_plot.plot_f0_checkpoint_distance_heatmap(
+            checkpoint_metrics,
+            max_checkpoint_labels=0,
         )
 
 

@@ -148,6 +148,8 @@ def plot_f0_checkpoint_distance_heatmap(
     dpi=300,
     cmap='magma',
     vmax=None,
+    checkpoint_scale='log1p',
+    max_checkpoint_labels=10,
 ):
     '''Plot every adjacent-frequency distance across checkpoints.
 
@@ -158,10 +160,14 @@ def plot_f0_checkpoint_distance_heatmap(
     dpi:                 Resolution used when saving.
     cmap:                Matplotlib colormap for cosine distance.
     vmax:                Optional shared upper color limit.
+    checkpoint_scale:    ``log1p`` for log10(step + 1), ``linear`` for
+                         training-step spacing, or ``categorical`` for equal
+                         column widths.
+    max_checkpoint_labels:  Maximum number of sampled checkpoint tick labels.
 
-    Checkpoints are equally spaced columns labeled by their numeric training
-    steps; frequency edges retain their physical Hz boundaries. Returns the
-    Matplotlib figure and primary axis.
+    Frequency edges retain their physical Hz boundaries. Tick labels are
+    sampled across the displayed checkpoint positions and placed at their
+    exact column centers. Returns the Matplotlib figure and primary axis.
     '''
 
     from matplotlib import pyplot
@@ -173,6 +179,12 @@ def plot_f0_checkpoint_distance_heatmap(
     if vmax is not None:
         if not np.isscalar(vmax) or not np.isfinite(vmax) or vmax <= 0:
             raise ValueError('vmax must be finite and positive')
+    if (
+        isinstance(max_checkpoint_labels, (bool, np.bool_))
+        or not isinstance(max_checkpoint_labels, (int, np.integer))
+        or max_checkpoint_labels < 1
+    ):
+        raise ValueError('max_checkpoint_labels must be a positive integer')
 
     frequency_edges = rows[0]['frequency_edges_hz']
     frequency_boundaries = np.concatenate((
@@ -183,8 +195,21 @@ def plot_f0_checkpoint_distance_heatmap(
         row['adjacent_distances']
         for row in rows
     ])
-    checkpoint_boundaries = np.arange(len(rows) + 1)
+    checkpoint_steps = np.asarray([
+        row['checkpoint_step']
+        for row in rows
+    ], dtype=float)
+    checkpoint_positions, checkpoint_boundaries = (
+        _checkpoint_axis_geometry(checkpoint_steps, checkpoint_scale)
+    )
+    tick_indices = _sample_checkpoint_indices(
+        checkpoint_positions,
+        max_checkpoint_labels,
+    )
 
+    if figsize is None:
+        width = max(8, min(16, len(rows) * 0.3))
+        figsize = (width, 7)
     figure, axis = pyplot.subplots(figsize=figsize)
     image = axis.pcolormesh(
         checkpoint_boundaries,
@@ -198,15 +223,77 @@ def plot_f0_checkpoint_distance_heatmap(
     colorbar = figure.colorbar(image, ax=axis)
     colorbar.set_label('Adjacent cosine distance')
     axis.set_xticks(
-        np.arange(len(rows)) + 0.5,
-        [f"{row['checkpoint_step']:,}" for row in rows],
+        checkpoint_positions[tick_indices],
+        [
+            _checkpoint_label(rows[index]['checkpoint_step'])
+            for index in tick_indices
+        ],
+        rotation=45,
+        horizontalalignment='right',
     )
-    axis.set_xlabel('Checkpoint step')
+    axis.set_xlabel(_checkpoint_axis_label(checkpoint_scale))
     axis.set_ylabel('Frequency edge (Hz)')
     axis.set_title('F0 adjacent-distance trajectory over checkpoints')
     figure.tight_layout()
     _save_figure(figure, output_path, dpi)
     return figure, axis
+
+
+def _checkpoint_axis_geometry(steps, scale):
+    '''Return checkpoint column centers and boundaries for one axis scale.'''
+
+    if scale == 'log1p':
+        positions = np.log10(steps + 1)
+    elif scale == 'linear':
+        positions = steps.copy()
+    elif scale == 'categorical':
+        positions = np.arange(steps.size, dtype=float)
+    else:
+        message = 'checkpoint_scale must be log1p, linear, or categorical'
+        raise ValueError(message)
+
+    if positions.size == 1:
+        boundaries = np.array([positions[0] - 0.5, positions[0] + 0.5])
+        return positions, boundaries
+    if np.any(np.diff(positions) <= 0):
+        raise ValueError('checkpoint positions must increase')
+
+    boundaries = np.empty(positions.size + 1, dtype=float)
+    boundaries[1:-1] = (positions[:-1] + positions[1:]) / 2
+    boundaries[0] = positions[0] - (boundaries[1] - positions[0])
+    boundaries[-1] = positions[-1] + (
+        positions[-1] - boundaries[-2]
+    )
+    return positions, boundaries
+
+
+def _sample_checkpoint_indices(positions, maximum):
+    if len(positions) <= maximum:
+        return np.arange(len(positions), dtype=int)
+    targets = np.linspace(positions[0], positions[-1], maximum)
+    indices = np.asarray([
+        np.argmin(np.abs(positions - target))
+        for target in targets
+    ], dtype=int)
+    indices = np.unique(indices)
+    if indices[0] != 0: indices = np.insert(indices, 0, 0)
+    if indices[-1] != len(positions) - 1:
+        indices = np.append(indices, len(positions) - 1)
+    return indices
+
+
+def _checkpoint_label(step):
+    if step == 0: return 'init'
+    if step >= 1_000_000: return f'{step / 1_000_000:g}m'
+    if step >= 1_000: return f'{step / 1_000:g}k'
+    return str(step)
+
+
+def _checkpoint_axis_label(scale):
+    if scale == 'log1p':
+        return 'Checkpoint step (log₁₀(step + 1) spacing)'
+    if scale == 'linear': return 'Checkpoint step (linear spacing)'
+    return 'Checkpoint (equal column spacing)'
 
 
 def plot_f0_umap(
