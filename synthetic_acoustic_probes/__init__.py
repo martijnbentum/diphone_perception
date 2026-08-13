@@ -17,6 +17,7 @@ from .f0_metrics import (
     load_f0_checkpoint_metrics,
 )
 from .f0_plot import (
+    plot_f0_checkpoint_comparison,
     plot_f0_checkpoint_distance_heatmap,
     plot_f0_checkpoint_result,
     plot_f0_checkpoint_smoothness,
@@ -80,6 +81,7 @@ __all__ = [
     'measure_waveform',
     'pairwise_geometry_spearman',
     'paper_code_amplitudes',
+    'plot_f0_checkpoint_comparison',
     'plot_f0_checkpoint_distance_heatmap',
     'plot_f0_checkpoint_result',
     'plot_f0_checkpoint_smoothness',

@@ -618,6 +618,74 @@ def test_plot_checkpoint_result_uses_stored_coordinates(
     assert axis in figure.axes
 
 
+def test_plot_checkpoint_comparison_defaults_to_init_and_final(
+    tmp_path,
+    monkeypatch,
+):
+    '''Default comparison loads, titles, and saves two horizontal panels.'''
+
+    model_names = (
+        'wav2vec2_checkpoint-0',
+        'wav2vec2_nl1_checkpoint-200000',
+    )
+    output_data = tmp_path / 'output_data'
+    plots = tmp_path / 'plots'
+    output_data.mkdir()
+    frequencies = np.array([8000, 10, 1000, 2000])
+    coordinates = (
+        np.array([
+            [8.0, 80.0],
+            [0.1, 1.0],
+            [1.0, 10.0],
+            [2.0, 20.0],
+        ]),
+        np.array([
+            [-8.0, 8.0],
+            [-0.1, 0.1],
+            [-1.0, 1.0],
+            [-2.0, 2.0],
+        ]),
+    )
+    for model_name, model_coordinates in zip(model_names, coordinates):
+        np.savez_compressed(
+            output_data / f'{model_name}.npz',
+            coordinates=model_coordinates,
+            frequencies=frequencies,
+        )
+    monkeypatch.setattr(locations, 'f0_output_data', output_data)
+    monkeypatch.setattr(locations, 'f0_plots', plots)
+
+    def fail_projection(X, *, metric, random_state):
+        pytest.fail('stored checkpoint plotting should not run UMAP')
+
+    monkeypatch.setattr(f0_plot, 'project_umap', fail_projection)
+
+    figure, axes = f0_plot.plot_f0_checkpoint_comparison(dpi=120)
+
+    output_path = plots / f'{model_names[0]}_vs_{model_names[1]}.pdf'
+    assert output_path.is_file()
+    assert output_path.stat().st_size > 0
+    assert tuple(axis.get_title() for axis in axes) == model_names
+    assert figure._suptitle.get_text() == 'F0 representation space'
+    np.testing.assert_allclose(figure.get_size_inches(), [16, 7])
+    assert axes[0].get_position().x0 < axes[1].get_position().x0
+    assert axes[0].get_position().y0 == pytest.approx(
+        axes[1].get_position().y0)
+    assert figure.axes[2].get_ylabel() == 'F0 (Hz)'
+    left_points = axes[0].collections[0]
+    right_points = axes[1].collections[0]
+    assert left_points.norm is right_points.norm
+    assert left_points.norm.vmin == 10
+    assert left_points.norm.vmax == 8000
+    for axis, model_coordinates in zip(axes, coordinates):
+        line = axis.lines[0]
+        expected_order = np.array([1, 2, 3, 0])
+        np.testing.assert_array_equal(
+            line.get_xdata(),
+            model_coordinates[expected_order, 0],
+        )
+
+
 def test_default_output_does_not_create_a_shared_plot():
     '''Generic plotting requires an explicit output path.'''
 

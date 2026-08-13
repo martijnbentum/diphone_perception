@@ -45,10 +45,7 @@ def plot_f0_checkpoint_result(model_name, *, figsize=None, dpi=300):
     ``plots/{model_name}.pdf`` below the F0 experiment directory. Returns the
     Matplotlib figure and primary axis.
     '''
-    result_path = locations.f0_output_data / f'{model_name}.npz'
-    with np.load(result_path, allow_pickle=False) as result:
-        coordinates = np.asarray(result['coordinates'])
-        frequencies = _validated_frequencies(result['frequencies'])
+    coordinates, frequencies = _load_f0_checkpoint_result(model_name)
     output_path = locations.f0_plots / f'{model_name}.pdf'
     return _plot_f0_coordinates(
         coordinates,
@@ -58,6 +55,88 @@ def plot_f0_checkpoint_result(model_name, *, figsize=None, dpi=300):
         dpi=dpi,
         title=f'F0 representation space\n{model_name}',
     )
+
+
+def plot_f0_checkpoint_comparison(
+    left_model_name=locations.wav2vec2_random_checkpoint_name,
+    right_model_name='wav2vec2_nl1_checkpoint-200000',
+    *,
+    figsize=None,
+    dpi=300,
+):
+    '''Plot two stored F0 checkpoint results in one horizontal figure.
+
+    left_model_name:   Checkpoint shown in the left panel.
+    right_model_name:  Checkpoint shown in the right panel.
+    figsize:           Optional Matplotlib figure size; defaults to 16 by 7.
+    dpi:               Resolution used when saving.
+
+    Both panels use one F0 color scale and colorbar. The rendered figure is
+    saved below the F0 plots directory as ``{left}_vs_{right}.pdf``. Returns
+    the Matplotlib figure and its two panel axes.
+    '''
+
+    from matplotlib import colors, pyplot
+
+    model_names = (left_model_name, right_model_name)
+    results = tuple(
+        _load_f0_checkpoint_result(model_name)
+        for model_name in model_names
+    )
+    all_frequencies = np.concatenate([
+        frequencies
+        for _, frequencies in results
+    ])
+    norm = colors.Normalize(
+        vmin=float(np.min(all_frequencies)),
+        vmax=float(np.max(all_frequencies)),
+    )
+    if figsize is None: figsize = (16, 7)
+    figure, axes = pyplot.subplots(
+        1,
+        2,
+        figsize=figsize,
+        layout='constrained',
+    )
+    panels = tuple(
+        _draw_f0_coordinates(
+            axis,
+            coordinates,
+            frequencies,
+            title=model_name,
+            norm=norm,
+        )
+        for axis, model_name, (coordinates, frequencies) in zip(
+            axes,
+            model_names,
+            results,
+        )
+    )
+    colorbar = figure.colorbar(
+        panels[0][0],
+        ax=axes,
+        location='right',
+    )
+    colorbar.set_label('F0 (Hz)')
+    figure.suptitle('F0 representation space')
+    figure.canvas.draw()
+    for axis, (coordinates, _), (_, annotations, trajectory) in zip(
+        axes,
+        results,
+        panels,
+    ):
+        _spread_annotation_labels(
+            figure,
+            axis,
+            annotations,
+            coordinates=coordinates,
+            trajectory=trajectory,
+        )
+
+    output_path = locations.f0_plots / (
+        f'{left_model_name}_vs_{right_model_name}.pdf')
+    _save_figure(figure, output_path, dpi)
+    return figure, axes
 
 
 def plot_f0_checkpoint_smoothness(
@@ -350,6 +429,30 @@ def _plot_f0_coordinates(
 ):
     from matplotlib import pyplot
 
+    figure, axis = pyplot.subplots(figsize=figsize)
+    points, annotations, ordered_coordinates = _draw_f0_coordinates(
+        axis,
+        coordinates,
+        frequencies,
+        title=title,
+    )
+    colorbar = figure.colorbar(points, ax=axis)
+    colorbar.set_label('F0 (Hz)')
+    figure.tight_layout()
+    _spread_annotation_labels(
+        figure,
+        axis,
+        annotations,
+        coordinates=coordinates,
+        trajectory=ordered_coordinates,
+    )
+
+    if output_path:
+        _save_figure(figure, output_path, dpi)
+    return figure, axis
+
+
+def _draw_f0_coordinates(axis, coordinates, frequencies, *, title, norm=None):
     coordinates = np.asarray(coordinates, dtype=float)
     expected_shape = (frequencies.size, 2)
     if coordinates.shape != expected_shape:
@@ -361,18 +464,15 @@ def _plot_f0_coordinates(
     order = np.argsort(frequencies, kind='stable')
     ordered_coordinates = coordinates[order]
     ordered_frequencies = frequencies[order]
-
-    figure, axis = pyplot.subplots(figsize=figsize)
     points = axis.scatter(
         coordinates[:, 0],
         coordinates[:, 1],
         c=frequencies,
         cmap='viridis',
+        norm=norm,
         s=18,
         zorder=1,
     )
-    colorbar = figure.colorbar(points, ax=axis)
-    colorbar.set_label('F0 (Hz)')
     jump_indices = _large_jump_indices(ordered_coordinates)
     jump_frequencies = ordered_frequencies[jump_indices]
     annotations = _annotate_landmarks(
@@ -399,18 +499,15 @@ def _plot_f0_coordinates(
         linewidth=0.6,
         zorder=2,
     )
-    figure.tight_layout()
-    _spread_annotation_labels(
-        figure,
-        axis,
-        annotations,
-        coordinates=coordinates,
-        trajectory=ordered_coordinates,
-    )
+    return points, annotations, ordered_coordinates
 
-    if output_path:
-        _save_figure(figure, output_path, dpi)
-    return figure, axis
+
+def _load_f0_checkpoint_result(model_name):
+    result_path = locations.f0_output_data / f'{model_name}.npz'
+    with np.load(result_path, allow_pickle=False) as result:
+        coordinates = np.asarray(result['coordinates'])
+        frequencies = _validated_frequencies(result['frequencies'])
+    return coordinates, frequencies
 
 
 def _validated_checkpoint_metrics(values, *, require_edges=False):
