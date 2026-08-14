@@ -21,15 +21,11 @@ _phraser_label_count = 31
 class Phones:
     '''all Phone objects linked to a phraser store.'''
 
-    def __init__(self, store=None, path=locations.metadata_file,
-        sentence_path=locations.sentence_file,
-        phraser_key_path=locations.phraser_key_file,
+    def __init__(self, store=None, phraser_key_path=locations.phraser_key_file,
         duplicate_replacement_phraser_key_path=(
             locations.duplicate_replacement_phraser_key_file),
     ):
         self._store = store
-        self.path = path
-        self.sentence_path = sentence_path
         self.phraser_key_path = phraser_key_path
         self.duplicate_replacement_phraser_key_path = (
             duplicate_replacement_phraser_key_path)
@@ -45,7 +41,7 @@ class Phones:
     def phones(self):
         if hasattr(self, '_phones'):
             return self._phones
-        phones = load_phones(self.path, self.sentence_path)
+        phones = load_phones()
         for phone in phones:
             phone.parent = self
         self._phones = phones
@@ -413,12 +409,9 @@ class Phones:
 class FlemishPhones:
     '''Metadata-free owner of the selected Flemish Phraser phones.'''
 
-    def __init__(
-        self, store=None,
-        phraser_key_path=locations.flemish_phraser_phone_key_file,
-    ):
+    def __init__(self, store=None):
         self._store = store
-        self.phraser_key_path = phraser_key_path
+        self.phraser_key_path = locations.flemish_phraser_phone_key_file
 
     @property
     def store(self):
@@ -587,31 +580,28 @@ class Speaker:
 
 # Public loading and matching functions
 
-def load_cgn(path=locations.cgn_lmdb):
-    return Store(path=path)
+def load_cgn():
+    return Store(path=locations.cgn_lmdb)
 
 
-def load_phones(
-    path=locations.metadata_file,
-    sentence_path=locations.sentence_file,
-):
-    sentences, speakers = load_sentences(sentence_path)
+def load_phones():
+    sentences, speakers = load_sentences()
     sentence_by_identifier = {s.identifier: s for s in sentences}
-    with open(path, newline='') as f:
+    with open(locations.metadata_file, newline='') as f:
         return [
             Phone(row, sentence_by_identifier, speakers)
             for row in progressbar(csv.DictReader(f))
         ]
 
 
-def load_sentences(path=locations.sentence_file):
+def load_sentences():
     '''load sentences and the shared speaker registry built along the way.
 
     returns (sentences, speakers), where speakers maps speaker_id ->
     Speaker, one object per id, reused across all sentences.
     '''
     speakers = {}
-    with open(path, newline='') as f:
+    with open(locations.sentence_file, newline='') as f:
         sentences = [
             Sentence(row, speakers)
             for row in progressbar(csv.DictReader(f, delimiter='\t'))

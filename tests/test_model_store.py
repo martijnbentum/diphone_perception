@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import locations
 from probing import model_store
 
 
@@ -125,9 +126,10 @@ def test_open_model_store_opens_and_registers_dedicated_store(
 
     monkeypatch.setattr(model_store.echoframe, 'Store',
         fake_store_constructor)
+    monkeypatch.setattr(locations, 'model_paths_file', path)
 
     result = model_store.open_model_store(
-        'model-a', stores_root=tmp_path / 'stores', model_paths_file=path,
+        'model-a', stores_root=tmp_path / 'stores',
         max_shard_size_bytes=1234)
 
     root, max_shard_size_bytes, store = opened[0]

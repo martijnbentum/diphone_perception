@@ -137,18 +137,12 @@ def create_phase_diagnostic_echoframe_store(
     *,
     store_path=None,
     model_name=PHASE_DIAGNOSTIC_MODEL_NAME,
-    model_paths_file=None,
 ):
     '''Create a one-model Echoframe store and attach the Phraser store.'''
 
     if store_path is None:
         store_path = locations.f0_phase_diagnostic_echoframe_store
-    if model_paths_file is None: model_paths_file = locations.model_paths_file
-    store = create_store(
-        store_path,
-        (model_name,),
-        model_paths_file=model_paths_file,
-    )
+    store = create_store(store_path, (model_name,))
     try:
         store.attach_phraser_store(
             PHASE_DIAGNOSTIC_PHRASER_SOURCE_ID,
@@ -215,7 +209,6 @@ def run_phase_diagnostic_experiment(
     *,
     output_root=None,
     model_name=PHASE_DIAGNOSTIC_MODEL_NAME,
-    model_paths_file=None,
     gpu=False,
 ):
     '''Create every artifact, extract features, and save diagnostics.
@@ -227,7 +220,6 @@ def run_phase_diagnostic_experiment(
     '''
 
     if output_root is None: output_root = locations.f0_phase_diagnostics
-    if model_paths_file is None: model_paths_file = locations.model_paths_file
     output_root = Path(output_root)
     stimulus_package = output_root / 'stimuli'
     phraser_store_path = output_root / 'phraser_store'
@@ -251,7 +243,6 @@ def run_phase_diagnostic_experiment(
             phraser_store,
             store_path=echoframe_store_path,
             model_name=model_name,
-            model_paths_file=model_paths_file,
         )
         extract_phase_diagnostic_cnn_features(
             store,

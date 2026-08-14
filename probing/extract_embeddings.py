@@ -14,8 +14,6 @@ def extract_phone_embeddings(
     layers=[9],
     collar=2000,
     store=None,
-    store_root=locations.echoframe_store,
-    model_paths_file=locations.model_paths_file,
     phraser_source_id=default_phraser_source_id,
     gpu=False,
     batch_size=120,
@@ -34,17 +32,14 @@ def extract_phone_embeddings(
     phones:             probing.metadata.Phones - phones.phraser_phones must
                          be complete (raises otherwise)
     model_name:          registered echoframe model_name; looked up in
-                         model_paths_file and registered on first use
+                         locations.model_paths_file and registered on first
+                         use
     layers:              list of hidden_state layer indices to store
     collar:              ms of audio context padded around each phone before
                          running the model (does not affect what is stored;
                          only widens the model's input window)
     store:               existing echoframe.Store to write into; if None,
-                         one is opened at store_root
-    store_root:          path for a new echoframe.Store, used only when
-                         store is None
-    model_paths_file:    JSON file of {model_name, local_path/huggingface_id,
-                         language, size} records
+                         one is opened at locations.echoframe_store
     phraser_source_id:   label to register phones.store under in this store
     gpu:                 whether to run the model on GPU
     batch_size:          segments per forward-pass batch. compute_embeddings_batch
@@ -55,8 +50,9 @@ def extract_phone_embeddings(
     verbose:             print batch progress
     '''
     if store is None:
-        store = echoframe.Store(str(store_root))
-    model_store.ensure_model_registered(store, model_name, model_paths_file)
+        store = echoframe.Store(str(locations.echoframe_store))
+    model_store.ensure_model_registered(
+        store, model_name, locations.model_paths_file)
     store.attach_phraser_store(phraser_source_id, phones.store)
 
     segments = phones.phraser_phones
@@ -76,8 +72,6 @@ def extract_phone_embeddings_for_models(
     model_names,
     layers=[9],
     collar=2000,
-    store_root=locations.echoframe_model_stores,
-    model_paths_file=locations.model_paths_file,
     phraser_source_id=default_phraser_source_id,
     gpu=False,
     batch_size=120,
@@ -88,10 +82,11 @@ def extract_phone_embeddings_for_models(
     every model.
 
     Accepts the extraction options from `extract_phone_embeddings`, replacing
-    `model_name` with `model_names` and managing each model's store. Stores are
-    opened below `store_root`, then the cached model is unloaded and the store
-    is closed after each extraction. When `gpu` is true, unreferenced CUDA
-    allocations are also released before the next model is loaded.
+    `model_name` with `model_names` and managing each model's store. Stores
+    are opened below ``locations.echoframe_model_stores``, then the cached
+    model is unloaded and the store is closed after each extraction. When
+    `gpu` is true, unreferenced CUDA allocations are also released before the
+    next model is loaded.
 
     Returns a dictionary mapping each model name to its store path.
     '''
@@ -100,8 +95,7 @@ def extract_phone_embeddings_for_models(
         model_names,
         layers=layers,
         collar=collar,
-        store_root=store_root,
-        model_paths_file=model_paths_file,
+        store_root=locations.echoframe_model_stores,
         phraser_source_id=phraser_source_id,
         gpu=gpu,
         batch_size=batch_size,
@@ -115,8 +109,6 @@ def extract_flemish_phone_embeddings_for_models(
     model_names,
     layers=[9],
     collar=2000,
-    store_root=locations.echoframe_model_flemish_stores,
-    model_paths_file=locations.model_paths_file,
     phraser_source_id=default_phraser_source_id,
     gpu=False,
     batch_size=120,
@@ -126,7 +118,8 @@ def extract_flemish_phone_embeddings_for_models(
     '''Compute Flemish phone embeddings and CNN features in a dedicated store
     per model.
 
-    The model stores are opened below ``store_root``. The validated inventory
+    The model stores are opened below
+    ``locations.echoframe_model_flemish_stores``. The validated inventory
     exposed by ``flemish_phones.phraser_phones`` is extracted through the same
     single-model workflow used for the Netherlandic phone inventory. Each
     cached model is unloaded and its store is closed after extraction.
@@ -138,8 +131,7 @@ def extract_flemish_phone_embeddings_for_models(
         model_names,
         layers=layers,
         collar=collar,
-        store_root=store_root,
-        model_paths_file=model_paths_file,
+        store_root=locations.echoframe_model_flemish_stores,
         phraser_source_id=phraser_source_id,
         gpu=gpu,
         batch_size=batch_size,
@@ -154,7 +146,6 @@ def _extract_phone_embeddings_for_models(
     layers,
     collar,
     store_root,
-    model_paths_file,
     phraser_source_id,
     gpu,
     batch_size,
@@ -170,7 +161,6 @@ def _extract_phone_embeddings_for_models(
         store = model_store.open_model_store(
             model_name,
             stores_root=store_root,
-            model_paths_file=model_paths_file,
         )
         try:
             extract_phone_embeddings(
@@ -179,7 +169,6 @@ def _extract_phone_embeddings_for_models(
                 layers=layers,
                 collar=collar,
                 store=store,
-                model_paths_file=model_paths_file,
                 phraser_source_id=phraser_source_id,
                 gpu=gpu,
                 batch_size=batch_size,

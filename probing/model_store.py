@@ -59,23 +59,19 @@ def model_store_path(model_name, stores_root):
 def open_model_store(
     model_name,
     stores_root,
-    model_paths_file=locations.model_paths_file,
     max_shard_size_bytes=100_000_000,
 ):
     '''Open or create and register the dedicated store for one model.
 
     model_name:             model to open or create a store for
     stores_root:            directory containing one subdirectory per model
-    model_paths_file:       JSON file of {model_name,
-                            local_path/huggingface_id, language, size}
-                            records
     max_shard_size_bytes:   shard size passed to echoframe.Store
     '''
     store_path = model_store_path(model_name, stores_root)
     store_path = str(store_path)
     store = echoframe.Store(store_path,
         max_shard_size_bytes=max_shard_size_bytes)
-    ensure_model_registered(store, model_name, model_paths_file)
+    ensure_model_registered(store, model_name, locations.model_paths_file)
     return store
 
 

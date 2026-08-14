@@ -1,4 +1,3 @@
-import inspect
 import sys
 from pathlib import Path
 
@@ -29,14 +28,6 @@ class FakeStore:
             if metadata is not None or keep_missing:
                 metadatas.append(metadata)
         return metadatas
-
-
-def test_default_store_root_uses_locations():
-    store_root = inspect.signature(
-        extract_mfcc.extract_phone_mfcc,
-    ).parameters['store_root'].default
-
-    assert store_root == locations.echoframe_mfcc_store
 
 
 class FakeAudio:
@@ -122,9 +113,9 @@ def test_extract_phone_mfcc_opens_store_when_none_given(tmp_path, monkeypatch):
     monkeypatch.setattr(extract_mfcc.echoframe, 'Store', fake_store_constructor)
     monkeypatch.setattr(extract_mfcc, 'mfcc_batch', lambda *a, **k: None)
     monkeypatch.setattr(extract_mfcc, 'store_mfcc_batch', lambda *a, **k: None)
+    monkeypatch.setattr(locations, 'echoframe_mfcc_store', tmp_path / 'store')
 
-    result = extract_mfcc.extract_phone_mfcc(
-        phones, store_root=tmp_path / 'store', verbose=False)
+    result = extract_mfcc.extract_phone_mfcc(phones, verbose=False)
 
     assert result is opened_store
     assert store_roots == [str(tmp_path / 'store')]

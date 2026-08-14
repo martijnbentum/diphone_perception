@@ -147,8 +147,8 @@ def test_create_phase_diagnostic_stores(monkeypatch, tmp_path):
     )
     create_calls = []
 
-    def fake_create_store(path, model_names, model_paths_file):
-        create_calls.append((path, model_names, model_paths_file))
+    def fake_create_store(path, model_names):
+        create_calls.append((path, model_names))
         return echoframe_store
 
     monkeypatch.setattr(
@@ -156,7 +156,6 @@ def test_create_phase_diagnostic_stores(monkeypatch, tmp_path):
         'create_store',
         fake_create_store,
     )
-    model_paths = tmp_path / 'models.json'
     store_path = tmp_path / 'echoframe'
 
     created_echoframe = (
@@ -164,12 +163,11 @@ def test_create_phase_diagnostic_stores(monkeypatch, tmp_path):
             phraser_store,
             store_path=store_path,
             model_name='checkpoint',
-            model_paths_file=model_paths,
         )
     )
 
     assert created_echoframe is echoframe_store
-    assert create_calls == [(store_path, ('checkpoint',), model_paths)]
+    assert create_calls == [(store_path, ('checkpoint',))]
     assert attach_calls == [(
         cnn_phase_diagnostics.PHASE_DIAGNOSTIC_PHRASER_SOURCE_ID,
         phraser_store,
@@ -282,7 +280,6 @@ def test_run_phase_diagnostic_experiment_orchestrates_and_closes(
     result = cnn_phase_diagnostics.run_phase_diagnostic_experiment(
         output_root=tmp_path / 'phase_diagnostics',
         model_name='checkpoint',
-        model_paths_file=tmp_path / 'models.json',
         gpu=True,
     )
 

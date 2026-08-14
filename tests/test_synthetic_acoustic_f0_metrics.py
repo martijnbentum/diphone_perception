@@ -3,6 +3,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+import locations
 from synthetic_acoustic_probes.f0_metrics import (
     f0_checkpoint_metrics,
     f0_checkpoint_step,
@@ -205,7 +206,10 @@ def test_f0_checkpoint_metrics_rejects_missing_and_mislabeled_results(
         f0_checkpoint_metrics(tmp_path / 'absent.npz')
 
 
-def test_load_f0_checkpoint_metrics_returns_checkpoint_order(tmp_path):
+def test_load_f0_checkpoint_metrics_returns_checkpoint_order(
+    tmp_path,
+    monkeypatch,
+):
     '''Directory loading sorts model bundles by numeric checkpoint step.'''
 
     model_names = (
@@ -215,8 +219,9 @@ def test_load_f0_checkpoint_metrics_returns_checkpoint_order(tmp_path):
     )
     for model_name in model_names:
         _write_result(tmp_path / f'{model_name}.npz', model_name)
+    monkeypatch.setattr(locations, 'f0_output_data', tmp_path)
 
-    results = load_f0_checkpoint_metrics(tmp_path)
+    results = load_f0_checkpoint_metrics()
 
     assert [result['checkpoint_step'] for result in results] == [
         0, 100000, 200000
@@ -228,10 +233,16 @@ def test_load_f0_checkpoint_metrics_returns_checkpoint_order(tmp_path):
     ]
 
 
-def test_load_f0_checkpoint_metrics_requires_results_directory(tmp_path):
+def test_load_f0_checkpoint_metrics_requires_results_directory(
+    tmp_path,
+    monkeypatch,
+):
     '''Directory loading distinguishes missing and empty result locations.'''
 
+    monkeypatch.setattr(locations, 'f0_output_data', tmp_path / 'missing')
     with pytest.raises(FileNotFoundError, match='directory not found'):
-        load_f0_checkpoint_metrics(tmp_path / 'missing')
+        load_f0_checkpoint_metrics()
+
+    monkeypatch.setattr(locations, 'f0_output_data', tmp_path)
     with pytest.raises(FileNotFoundError, match='no F0 checkpoint results'):
-        load_f0_checkpoint_metrics(tmp_path)
+        load_f0_checkpoint_metrics()

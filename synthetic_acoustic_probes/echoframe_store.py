@@ -13,18 +13,14 @@ import locations
 NL1_TRAINED_CHECKPOINT_COUNT = 121
 
 
-def select_wav2vec2_nl1_checkpoints(
-    model_paths_file=locations.model_paths_file,
-):
+def select_wav2vec2_nl1_checkpoints():
     '''Return the validated checkpoint set used by the probe experiments.
-
-    model_paths_file:  JSON list containing the model definitions.
 
     The random checkpoint is returned first, followed by exactly 121 NL1
     checkpoints ordered by numeric training step.
     '''
 
-    path, catalog = _model_catalog(model_paths_file)
+    path, catalog = _model_catalog(locations.model_paths_file)
     random_name = locations.wav2vec2_random_checkpoint_name
     pattern = re.compile(locations.wav2vec2_nl1_checkpoint_pattern)
     random_count = 0
@@ -57,14 +53,12 @@ def select_wav2vec2_nl1_checkpoints(
 def create_store(
     store_path,
     model_names,
-    model_paths_file=locations.model_paths_file,
     max_shard_size_bytes=1_000_000_000,
 ):
     '''Create an Echoframe store and register its initial models.
 
     store_path:            Destination for the new Echoframe store.
     model_names:           Iterable of model names to register.
-    model_paths_file:      JSON list containing the model definitions.
     max_shard_size_bytes:  Maximum Echoframe HDF5 shard size.
 
     Existing paths are rejected. Returns the native Echoframe Store.
@@ -74,7 +68,7 @@ def create_store(
     if store_path.exists():
         raise FileExistsError(f'Echoframe store path exists: {store_path}')
     model_names = _model_names(model_names)
-    entries = _model_entries(model_names, model_paths_file)
+    entries = _model_entries(model_names, locations.model_paths_file)
     store = echoframe.Store(
         store_path,
         max_shard_size_bytes=max_shard_size_bytes,

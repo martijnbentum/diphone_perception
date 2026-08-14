@@ -25,22 +25,23 @@ _phoneme_colors = (
 _phoneme_markers = ('o', 's', '^', 'D', 'v', 'P', 'X', '*')
 
 
-def plot_phoneme(phoneme, layer=9, root=locations.probe_results, ax=None,
+def plot_phoneme(phoneme, layer=9, ax=None,
     title=None, legend=True, markersize=None):
     '''Plot embedding-probe accuracy across wav2vec2 checkpoints.
 
-    One point is drawn per checkpoint directory found under root that has
-    a complete-enough embedding result for phoneme at layer. The matching
-    MFCC probe result is drawn as a dashed baseline.
+    One point is drawn per checkpoint directory found under
+    locations.probe_results that has a complete-enough embedding result for
+    phoneme at layer. The matching MFCC probe result is drawn as a dashed
+    baseline.
 
     phoneme:  target phoneme to plot
     layer:    embedding hidden-state layer probed at each checkpoint
-    root:     root directory containing probe results
     ax:       axes to draw on, or None to create and show a new figure
     title:    axes title, or None for the default descriptive title
     legend:   whether to draw the legend on this axes
     markersize: marker size, or None for Matplotlib's default
     '''
+    root = locations.probe_results
     checkpoints = _checkpoint_accuracies(phoneme, layer, root)
     if not checkpoints:
         raise ValueError(f'no checkpoint results found for {phoneme!r}')
@@ -72,7 +73,7 @@ def plot_phoneme(phoneme, layer=9, root=locations.probe_results, ax=None,
     if standalone: plt.show()
 
 
-def plot_phoneme_panels(phonemes, layer=9, root=locations.probe_results,
+def plot_phoneme_panels(phonemes, layer=9,
     x_start=0, x_end=200_000, x_axis_log_scale=True):
     '''Plot embedding and CNN checkpoint results in one panel per phoneme.
 
@@ -83,16 +84,16 @@ def plot_phoneme_panels(phonemes, layer=9, root=locations.probe_results,
 
     phonemes:  phonemes to plot, one panel per phoneme
     layer:     embedding hidden-state layer probed at each checkpoint
-    root:      root directory containing probe results
     x_start:   lower x-axis limit in training steps
     x_end:     upper x-axis limit in training steps
     x_axis_log_scale: whether to use a symmetric logarithmic x-axis
     '''
+    root = locations.probe_results
     _, axes = plt.subplots(1, len(phonemes), figsize=(5 * len(phonemes), 5),
         sharey=True)
     if len(phonemes) == 1: axes = [axes]
     for index, (phoneme, ax) in enumerate(zip(phonemes, axes)):
-        plot_phoneme(phoneme, layer=layer, root=root, ax=ax, title=phoneme,
+        plot_phoneme(phoneme, layer=layer, ax=ax, title=phoneme,
             legend=False, markersize=3)
         checkpoints = _cnn_checkpoint_accuracies(phoneme, root)
         if not checkpoints:
@@ -108,7 +109,7 @@ def plot_phoneme_panels(phonemes, layer=9, root=locations.probe_results,
     plt.show()
 
 
-def plot_phonemes(phonemes, layer=9, root=locations.probe_results,
+def plot_phonemes(phonemes, layer=9,
     x_start=0, x_end=200_000, x_axis_log_scale=True):
     '''Plot embedding-probe accuracy across checkpoints for several phonemes
     overlaid in one figure.
@@ -119,11 +120,11 @@ def plot_phonemes(phonemes, layer=9, root=locations.probe_results,
 
     phonemes:  phonemes to plot, overlaid in one figure
     layer:     embedding hidden-state layer probed at each checkpoint
-    root:      root directory containing probe results
     x_start:   lower x-axis limit in training steps
     x_end:     upper x-axis limit in training steps
     x_axis_log_scale: whether to use a symmetric logarithmic x-axis
     '''
+    root = locations.probe_results
     _, ax = plt.subplots(figsize=(10, 5))
     for index, phoneme in enumerate(phonemes):
         color = _phoneme_colors[index % len(_phoneme_colors)]
@@ -154,7 +155,7 @@ def plot_phonemes(phonemes, layer=9, root=locations.probe_results,
 
 
 def plot_checkpoint_layers(phonemes, checkpoint=default_model_name,
-    root=locations.probe_results, ax=None, title=None, legend=True):
+    ax=None, title=None, legend=True):
     '''Plot CNN and every transformer-layer result for one checkpoint.
 
     Explicit phonemes are drawn as separate colored marker series, with each
@@ -165,11 +166,11 @@ def plot_checkpoint_layers(phonemes, checkpoint=default_model_name,
 
     phonemes:   phoneme labels to plot, or 'all' to plot their mean
     checkpoint: model checkpoint whose CNN and layer results are plotted
-    root:       root directory containing probe results
     ax:         axes to draw on, or None to create and show a new figure
     title:      axes title, or None for the default descriptive title
     legend:     whether to draw the legend on this axes
     '''
+    root = locations.probe_results
     mean_all = phonemes == 'all'
     if mean_all:
         phonemes = _checkpoint_phonemes(checkpoint, root)
@@ -216,8 +217,7 @@ def plot_checkpoint_layers(phonemes, checkpoint=default_model_name,
 
 
 def plot_checkpoint_layer_panels(phonemes, checkpoints=[
-    locations.wav2vec2_random_checkpoint_name, default_model_name],
-    root=locations.probe_results):
+    locations.wav2vec2_random_checkpoint_name, default_model_name]):
     '''Plot one plot_checkpoint_layers panel per checkpoint in a single row.
 
     Panels share their y-axis. Only the leftmost panel has a legend, and each
@@ -225,7 +225,6 @@ def plot_checkpoint_layer_panels(phonemes, checkpoints=[
 
     phonemes:    phoneme labels to plot, or 'all' to plot their mean
     checkpoints: model checkpoints to plot, one per panel
-    root:        root directory containing probe results
     '''
     if isinstance(checkpoints, str):
         raise ValueError('checkpoints must be a collection of model names')
@@ -241,24 +240,25 @@ def plot_checkpoint_layer_panels(phonemes, checkpoints=[
         figsize=(5 * len(checkpoints), 5), sharey=True)
     if len(checkpoints) == 1: axes = [axes]
     for index, (checkpoint, ax) in enumerate(zip(checkpoints, axes)):
-        plot_checkpoint_layers(phonemes, checkpoint=checkpoint, root=root,
+        plot_checkpoint_layers(phonemes, checkpoint=checkpoint,
             ax=ax, title=checkpoint, legend=index == 0)
     plt.tight_layout()
     plt.show()
 
 
 def plot_mfcc_random_trained_for_all_phonemes(checkpoint=default_model_name,
-    layer=9, root=locations.probe_results):
+    layer=9):
     '''Plot mfcc, random-init, and trained-checkpoint accuracy per phoneme.
 
-    Phoneme labels are auto-discovered from the mfcc results under root and
-    drawn as three marker series, sorted by ascending mfcc accuracy.
-    Phonemes missing any of the three results are skipped.
+    Phoneme labels are auto-discovered from the mfcc results under
+    locations.probe_results and drawn as three marker series, sorted by
+    ascending mfcc accuracy. Phonemes missing any of the three results are
+    skipped.
 
     checkpoint:  trained-checkpoint model name to compare against
     layer:       embedding hidden-state layer probed at checkpoint
-    root:        root directory containing probe results
     '''
+    root = locations.probe_results
     random_name = locations.wav2vec2_random_checkpoint_name
     phoneme_dirs = (Path(root) / 'mfcc').iterdir()
     phonemes = sorted(path.name for path in phoneme_dirs if path.is_dir())

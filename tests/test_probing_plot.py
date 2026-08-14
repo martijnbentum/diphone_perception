@@ -11,6 +11,7 @@ from matplotlib import pyplot
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import locations
 from probing import plot
 
 
@@ -149,8 +150,9 @@ def test_checkpoint_layers_all_plots_complete_label_means(
     _stub_layer_results(monkeypatch)
     for phoneme in ('p', 't'):
         (tmp_path / 'model-a' / phoneme).mkdir(parents=True)
+    monkeypatch.setattr(locations, 'probe_results', tmp_path)
 
-    plot.plot_checkpoint_layers('all', checkpoint='model-a', root=tmp_path)
+    plot.plot_checkpoint_layers('all', checkpoint='model-a')
 
     axis = pyplot.gcf().axes[0]
     assert [line.get_label() for line in axis.lines] == [

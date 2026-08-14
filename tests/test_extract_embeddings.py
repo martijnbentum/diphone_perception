@@ -78,10 +78,11 @@ def test_extract_phone_embeddings_registers_model_and_computes(
     monkeypatch.setattr(extract_embeddings,
         'compute_embeddings_batch',
         fake_compute_embeddings_batch)
+    monkeypatch.setattr(locations, 'model_paths_file', path)
 
     result = extract_embeddings.extract_phone_embeddings(
         phones, model_name='model-a', layers=[9, 10], collar=500,
-        store=store, model_paths_file=path, gpu=False, batch_size=16,
+        store=store, gpu=False, batch_size=16,
         tags=['exp-a'], verbose=False)
 
     assert result is store
@@ -103,9 +104,10 @@ def test_extract_phone_embeddings_skips_registration_when_already_registered(
 
     monkeypatch.setattr(extract_embeddings,
         'compute_embeddings_batch', lambda *a, **k: None)
+    monkeypatch.setattr(locations, 'model_paths_file', path)
 
     extract_embeddings.extract_phone_embeddings(
-        phones, model_name='model-a', store=store, model_paths_file=path,
+        phones, model_name='model-a', store=store,
         verbose=False)
 
     assert store.register_model_calls == []
@@ -125,9 +127,10 @@ def test_extract_phone_embeddings_uses_default_layers_and_model(
     monkeypatch.setattr(extract_embeddings,
         'compute_embeddings_batch',
         lambda *a, **k: calls.append((a, k)))
+    monkeypatch.setattr(locations, 'model_paths_file', path)
 
     extract_embeddings.extract_phone_embeddings(
-        phones, store=store, model_paths_file=path, verbose=False)
+        phones, store=store, verbose=False)
 
     (segments, layers, model_name, store_arg), kwargs = calls[0]
     assert layers == [9, 'cnn']
@@ -150,10 +153,11 @@ def test_extract_phone_embeddings_opens_store_when_none_given(
         fake_store_constructor)
     monkeypatch.setattr(extract_embeddings,
         'compute_embeddings_batch', lambda *a, **k: None)
+    monkeypatch.setattr(locations, 'model_paths_file', path)
+    monkeypatch.setattr(locations, 'echoframe_store', tmp_path / 'store')
 
     result = extract_embeddings.extract_phone_embeddings(
-        phones, model_name='model-a', model_paths_file=path,
-        store_root=tmp_path / 'store', verbose=False)
+        phones, model_name='model-a', verbose=False)
 
     assert result is opened_store
     assert store_roots == [str(tmp_path / 'store')]
@@ -168,9 +172,8 @@ def test_extract_phone_embeddings_for_models_opens_extracts_and_closes(
     extract_calls = []
     cuda_release_calls = []
 
-    def fake_open_model_store(
-        model_name, stores_root, model_paths_file):
-        open_calls.append((model_name, stores_root, model_paths_file))
+    def fake_open_model_store(model_name, stores_root):
+        open_calls.append((model_name, stores_root))
         return stores[model_name]
 
     def fake_extract_phone_embeddings(phones, **kwargs):
@@ -182,16 +185,14 @@ def test_extract_phone_embeddings_for_models_opens_extracts_and_closes(
         fake_extract_phone_embeddings)
     monkeypatch.setattr(model_store, 'release_cuda_memory',
         lambda: cuda_release_calls.append(True))
+    monkeypatch.setattr(locations, 'echoframe_model_stores', tmp_path / 'stores')
 
-    path = tmp_path / 'model_paths.json'
     phones = object()
     result = extract_embeddings.extract_phone_embeddings_for_models(
         phones,
         ['model-a', 'model-b'],
         layers=[8, 9],
         collar=500,
-        store_root=tmp_path / 'stores',
-        model_paths_file=path,
         phraser_source_id='phones',
         gpu=True,
         batch_size=16,
@@ -200,19 +201,19 @@ def test_extract_phone_embeddings_for_models_opens_extracts_and_closes(
     )
 
     assert open_calls == [
-        ('model-a', tmp_path / 'stores', path),
-        ('model-b', tmp_path / 'stores', path),
+        ('model-a', tmp_path / 'stores'),
+        ('model-b', tmp_path / 'stores'),
     ]
     assert [call[1] for call in extract_calls] == [
         dict(
             model_name='model-a', layers=[8, 9], collar=500,
-            store=stores['model-a'], model_paths_file=path,
+            store=stores['model-a'],
             phraser_source_id='phones', gpu=True, batch_size=16,
             tags=['experiment'], verbose=False,
         ),
         dict(
             model_name='model-b', layers=[8, 9], collar=500,
-            store=stores['model-b'], model_paths_file=path,
+            store=stores['model-b'],
             phraser_source_id='phones', gpu=True, batch_size=16,
             tags=['experiment'], verbose=False,
         ),
@@ -245,7 +246,7 @@ def test_extract_phone_embeddings_for_models_cleans_up_after_failure(
 
     with pytest.raises(RuntimeError, match='extraction failed'):
         extract_embeddings.extract_phone_embeddings_for_models(
-            object(), ['model-a'], store_root=tmp_path, gpu=True)
+            object(), ['model-a'], gpu=True)
 
     assert store.remove_cached_model_calls == 1
     assert store.close_calls == 1
@@ -260,11 +261,7 @@ def test_extract_phone_embeddings_for_models_rejects_string_model_names():
 
 # -- Flemish embedding extraction ------------------------------------------
 
-def test_flemish_model_store_root_and_batch_defaults():
-    store_root_default = inspect.signature(
-        extract_embeddings.extract_flemish_phone_embeddings_for_models,
-    ).parameters['store_root'].default
-    assert store_root_default == locations.echoframe_model_flemish_stores
+def test_flemish_model_store_path_and_batch_defaults():
     assert model_store.model_store_path(
         'owner/model',
         locations.echoframe_model_flemish_stores,
@@ -290,8 +287,8 @@ def test_extract_flemish_phone_embeddings_for_models_lifecycle(
     open_calls = []
     extract_calls = []
 
-    def fake_open_model_store(model_name, stores_root, model_paths_file):
-        open_calls.append((model_name, stores_root, model_paths_file))
+    def fake_open_model_store(model_name, stores_root):
+        open_calls.append((model_name, stores_root))
         return stores[model_name]
 
     monkeypatch.setattr(
@@ -301,17 +298,16 @@ def test_extract_flemish_phone_embeddings_for_models_lifecycle(
         lambda phones, **kwargs: extract_calls.append((phones, kwargs)),
     )
 
-    model_paths_file = tmp_path / 'model_paths.json'
     flemish_phones = object()
     store_root = tmp_path / 'flemish-stores'
+    monkeypatch.setattr(
+        locations, 'echoframe_model_flemish_stores', store_root)
     result = (
         extract_embeddings.extract_flemish_phone_embeddings_for_models(
             flemish_phones,
             ['model-a', 'model-b'],
             layers=[8, 9],
             collar=500,
-            store_root=store_root,
-            model_paths_file=model_paths_file,
             gpu=False,
             tags=['flemish'],
             verbose=False,
@@ -319,8 +315,8 @@ def test_extract_flemish_phone_embeddings_for_models_lifecycle(
     )
 
     assert open_calls == [
-        ('model-a', store_root, model_paths_file),
-        ('model-b', store_root, model_paths_file),
+        ('model-a', store_root),
+        ('model-b', store_root),
     ]
     assert [phones for phones, _ in extract_calls] == [
         flemish_phones, flemish_phones]
@@ -330,7 +326,6 @@ def test_extract_flemish_phone_embeddings_for_models_lifecycle(
             layers=[8, 9],
             collar=500,
             store=stores[model_name],
-            model_paths_file=model_paths_file,
             phraser_source_id='cgn-awd',
             gpu=False,
             batch_size=120,
@@ -367,7 +362,7 @@ def test_extract_flemish_phone_embeddings_for_models_cleans_up_after_failure(
 
     with pytest.raises(RuntimeError, match='extraction failed'):
         extract_embeddings.extract_flemish_phone_embeddings_for_models(
-            object(), ['model-a'], store_root=tmp_path)
+            object(), ['model-a'])
 
     assert store.remove_cached_model_calls == 1
     assert store.close_calls == 1

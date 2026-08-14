@@ -144,13 +144,12 @@ def f0_checkpoint_metrics(
 
 
 def load_f0_checkpoint_metrics(
-    output_directory=locations.f0_output_data,
     *,
     thresholds=DEFAULT_ADJACENT_DISTANCE_THRESHOLDS,
 ):
     '''Load every F0 result bundle and return metrics in checkpoint order.'''
 
-    output_directory = Path(output_directory)
+    output_directory = Path(locations.f0_output_data)
     if not output_directory.is_dir():
         message = f'F0 output-data directory not found: {output_directory}'
         raise FileNotFoundError(message)

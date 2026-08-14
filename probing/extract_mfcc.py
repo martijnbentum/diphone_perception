@@ -55,7 +55,6 @@ def _missing_mfcc_segments(segments, store):
 def extract_phone_mfcc(
     phones,
     store=None,
-    store_root=locations.echoframe_mfcc_store,
     phraser_source_id=default_phraser_source_id,
     workers=None,
     recordings_per_batch=30,
@@ -70,9 +69,7 @@ def extract_phone_mfcc(
     phones:             probing.metadata.Phones - phones.phraser_phones must
                         be complete (raises otherwise)
     store:              existing echoframe.Store to write into; if None, one
-                        is opened at store_root
-    store_root:         path for a new echoframe.Store, used only when store
-                        is None
+                        is opened at locations.echoframe_mfcc_store
     phraser_source_id:  label to register phones.store under in this store
     workers:            max worker processes for mfcc_batch; defaults to
                         available CPUs
@@ -93,6 +90,7 @@ def extract_phone_mfcc(
     if not isinstance(keep_segment_cache, bool):
         raise TypeError('keep_segment_cache must be a boolean')
     if store is None:
+        store_root = locations.echoframe_mfcc_store
         _notify(verbose, f'opening Echoframe store at {store_root}')
         store = echoframe.Store(str(store_root))
     _notify(

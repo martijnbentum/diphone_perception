@@ -74,10 +74,14 @@ class _CNNFeature:
         return self.mean
 
 
-def test_select_wav2vec2_nl1_checkpoints_validates_and_orders(tmp_path):
+def test_select_wav2vec2_nl1_checkpoints_validates_and_orders(
+    tmp_path,
+    monkeypatch,
+):
     '''The study checkpoint inventory is returned in numeric order.
 
-    tmp_path:  Temporary directory supplied by pytest.
+    tmp_path:     Temporary directory supplied by pytest.
+    monkeypatch:  Pytest fixture used to replace the model-paths location.
     '''
 
     catalog = [{'model_name': locations.wav2vec2_random_checkpoint_name}]
@@ -86,8 +90,9 @@ def test_select_wav2vec2_nl1_checkpoints_validates_and_orders(tmp_path):
     catalog_path = tmp_path / 'models.json'
     catalog_text = json.dumps(catalog)
     catalog_path.write_text(catalog_text, encoding='utf-8')
+    monkeypatch.setattr(locations, 'model_paths_file', catalog_path)
 
-    names = echoframe_store.select_wav2vec2_nl1_checkpoints(catalog_path)
+    names = echoframe_store.select_wav2vec2_nl1_checkpoints()
 
     assert len(names) == 122
     assert names[0] == locations.wav2vec2_random_checkpoint_name
@@ -95,19 +100,24 @@ def test_select_wav2vec2_nl1_checkpoints_validates_and_orders(tmp_path):
     assert names[-1] == 'wav2vec2_nl1_checkpoint-121'
 
 
-def test_select_wav2vec2_nl1_checkpoints_rejects_wrong_inventory(tmp_path):
+def test_select_wav2vec2_nl1_checkpoints_rejects_wrong_inventory(
+    tmp_path,
+    monkeypatch,
+):
     '''A checkpoint catalog must contain the complete study inventory.
 
-    tmp_path:  Temporary directory supplied by pytest.
+    tmp_path:     Temporary directory supplied by pytest.
+    monkeypatch:  Pytest fixture used to replace the model-paths location.
     '''
 
     catalog = [{'model_name': locations.wav2vec2_random_checkpoint_name}]
     catalog_path = tmp_path / 'models.json'
     catalog_text = json.dumps(catalog)
     catalog_path.write_text(catalog_text, encoding='utf-8')
+    monkeypatch.setattr(locations, 'model_paths_file', catalog_path)
 
     with pytest.raises(ValueError, match='expected 121 NL1 checkpoints'):
-        echoframe_store.select_wav2vec2_nl1_checkpoints(catalog_path)
+        echoframe_store.select_wav2vec2_nl1_checkpoints()
 
 
 def test_create_store_registers_initial_models(tmp_path, monkeypatch):
@@ -134,12 +144,12 @@ def test_create_store_registers_initial_models(tmp_path, monkeypatch):
         return store
 
     monkeypatch.setattr(echoframe_store.echoframe, 'Store', store_constructor)
+    monkeypatch.setattr(locations, 'model_paths_file', catalog_path)
     store_path = tmp_path / 'echoframe'
 
     result = echoframe_store.create_store(
         store_path,
         ('second', 'first'),
-        catalog_path,
         max_shard_size_bytes=1234,
     )
 
@@ -193,12 +203,12 @@ def test_create_store_closes_when_registration_fails(tmp_path, monkeypatch):
         'Store',
         lambda *args, **kwargs: store,
     )
+    monkeypatch.setattr(locations, 'model_paths_file', catalog_path)
 
     with pytest.raises(ValueError, match='already registered'):
         echoframe_store.create_store(
             tmp_path / 'echoframe',
             ('existing',),
-            catalog_path,
         )
 
     assert close_calls == [True]
@@ -207,11 +217,13 @@ def test_create_store_closes_when_registration_fails(tmp_path, monkeypatch):
 @pytest.mark.parametrize('random_count', [0, 2])
 def test_select_wav2vec2_nl1_checkpoints_rejects_random_inventory(
     tmp_path,
+    monkeypatch,
     random_count,
 ):
     '''Exactly one random checkpoint is required.
 
     tmp_path:      Temporary directory supplied by pytest.
+    monkeypatch:   Pytest fixture used to replace the model-paths location.
     random_count:  Invalid number of random checkpoint entries.
     '''
 
@@ -222,15 +234,20 @@ def test_select_wav2vec2_nl1_checkpoints_rejects_random_inventory(
     catalog_path = tmp_path / 'models.json'
     catalog_text = json.dumps(catalog)
     catalog_path.write_text(catalog_text, encoding='utf-8')
+    monkeypatch.setattr(locations, 'model_paths_file', catalog_path)
 
     with pytest.raises(ValueError, match='expected one'):
-        echoframe_store.select_wav2vec2_nl1_checkpoints(catalog_path)
+        echoframe_store.select_wav2vec2_nl1_checkpoints()
 
 
-def test_select_wav2vec2_nl1_checkpoints_rejects_duplicate_steps(tmp_path):
+def test_select_wav2vec2_nl1_checkpoints_rejects_duplicate_steps(
+    tmp_path,
+    monkeypatch,
+):
     '''Numerically duplicate checkpoint steps are ambiguous.
 
-    tmp_path:  Temporary directory supplied by pytest.
+    tmp_path:     Temporary directory supplied by pytest.
+    monkeypatch:  Pytest fixture used to replace the model-paths location.
     '''
 
     catalog = [{'model_name': locations.wav2vec2_random_checkpoint_name}]
@@ -240,9 +257,10 @@ def test_select_wav2vec2_nl1_checkpoints_rejects_duplicate_steps(tmp_path):
     catalog_path = tmp_path / 'models.json'
     catalog_text = json.dumps(catalog)
     catalog_path.write_text(catalog_text, encoding='utf-8')
+    monkeypatch.setattr(locations, 'model_paths_file', catalog_path)
 
     with pytest.raises(ValueError, match='duplicate NL1 checkpoint steps'):
-        echoframe_store.select_wav2vec2_nl1_checkpoints(catalog_path)
+        echoframe_store.select_wav2vec2_nl1_checkpoints()
 
 
 @pytest.mark.parametrize(
@@ -255,21 +273,24 @@ def test_select_wav2vec2_nl1_checkpoints_rejects_duplicate_steps(tmp_path):
 )
 def test_select_wav2vec2_nl1_checkpoints_rejects_malformed_catalog(
     tmp_path,
+    monkeypatch,
     catalog_text,
     match,
 ):
     '''Malformed model catalogs fail before checkpoint selection.
 
     tmp_path:      Temporary directory supplied by pytest.
+    monkeypatch:   Pytest fixture used to replace the model-paths location.
     catalog_text:  Invalid catalog contents.
     match:         Text expected in the error message.
     '''
 
     catalog_path = tmp_path / 'models.json'
     catalog_path.write_text(catalog_text, encoding='utf-8')
+    monkeypatch.setattr(locations, 'model_paths_file', catalog_path)
 
     with pytest.raises(ValueError, match=match):
-        echoframe_store.select_wav2vec2_nl1_checkpoints(catalog_path)
+        echoframe_store.select_wav2vec2_nl1_checkpoints()
 
 
 def test_add_models_registers_selected_models_in_requested_order(tmp_path):

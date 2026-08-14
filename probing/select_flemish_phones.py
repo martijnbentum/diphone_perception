@@ -175,7 +175,6 @@ def _validate_selected_keys(selected):
 
 def save_flemish_phraser_phone_keys(
     store,
-    path=locations.flemish_phraser_phone_key_file,
     seed=42,
     overwrite=False,
     show_progress=True,
@@ -187,7 +186,7 @@ def save_flemish_phraser_phone_keys(
     unique tokens, counts are reported and the output is untouched. Set
     show_progress=False to suppress progress bars.
     '''
-    path = Path(path)
+    path = Path(locations.flemish_phraser_phone_key_file)
     if path.exists() and not overwrite:
         raise FileExistsError(
             f'{path} already exists; pass overwrite=True to replace it'

@@ -1,7 +1,6 @@
 '''Experiment entry points for the pure-tone F0 probe.'''
 
 import json
-from pathlib import Path
 
 import echoframe
 import numpy as np
@@ -142,21 +141,15 @@ def make_f0_x_y(model_name, store, *, aggregation):
     return X, y
 
 
-def save_f0_checkpoint_result(
-    model_name,
-    store,
-    *,
-    output_directory=locations.f0_output_data,
-):
+def save_f0_checkpoint_result(model_name, store):
     '''Save mean CNN features and their F0 UMAP for one checkpoint.
 
-    model_name:        Registered Echoframe model name.
-    store:             Loaded F0 Echoframe Store.
-    output_directory:  Directory receiving the checkpoint NPZ file.
+    model_name:  Registered Echoframe model name.
+    store:       Loaded F0 Echoframe Store.
 
     Existing checkpoint files are skipped. Returns the output path.
     '''
-    output_directory = Path(output_directory)
+    output_directory = locations.f0_output_data
     output_path = output_directory / f'{model_name}.npz'
     if output_path.exists(): return output_path
 
@@ -165,30 +158,20 @@ def save_f0_checkpoint_result(
 
     output_directory.mkdir(parents=True, exist_ok=True)
     with output_path.open('xb') as stream:
-        np.savez_compressed(
-            stream,
-            mean_cnn_features=np.asarray(X),
-            coordinates=coordinates,
-            frequencies=np.asarray(y),
-            random_state=42,
-            metric='cosine',
-            model_name=model_name,
-            aggregation='mean',
-        )
+        np.savez_compressed(stream, mean_cnn_features=np.asarray(X),
+            coordinates=coordinates, frequencies=np.asarray(y),
+            random_state=42, metric='cosine', model_name=model_name,
+            aggregation='mean')
     return output_path
 
 
-def save_f0_checkpoint_results(
-    store,
-    *,
-    output_directory=locations.f0_output_data,
-):
+def save_f0_checkpoint_results(store):
     '''Save F0 result bundles for the complete wav2vec2 checkpoint set.
 
     Existing checkpoint files are skipped. Returns paths grouped under
     ``saved`` and ``skipped``.
     '''
-    output_directory = Path(output_directory)
+    output_directory = locations.f0_output_data
     saved = []
     skipped = []
     for model_name in select_wav2vec2_nl1_checkpoints():
@@ -196,11 +179,7 @@ def save_f0_checkpoint_results(
         if output_path.exists():
             skipped.append(output_path)
             continue
-        path = save_f0_checkpoint_result(
-            model_name,
-            store,
-            output_directory=output_directory,
-        )
+        path = save_f0_checkpoint_result(model_name, store)
         saved.append(path)
     return {'saved': tuple(saved), 'skipped': tuple(skipped)}
 

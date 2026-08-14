@@ -155,12 +155,9 @@ def test_save_f0_checkpoint_result_writes_expected_bundle(
     monkeypatch.setattr(experiment_f0, 'make_f0_x_y', fake_make)
     monkeypatch.setattr(experiment_f0, 'project_umap', fake_project)
     output_directory = tmp_path / 'output_data'
+    monkeypatch.setattr(locations, 'f0_output_data', output_directory)
 
-    output_path = experiment_f0.save_f0_checkpoint_result(
-        model_name,
-        store,
-        output_directory=output_directory,
-    )
+    output_path = experiment_f0.save_f0_checkpoint_result(model_name, store)
 
     assert output_path == output_directory / f'{model_name}.npz'
     assert make_calls == [(model_name, store, 'mean')]
@@ -191,6 +188,7 @@ def test_save_f0_checkpoint_result_skips_existing_file(tmp_path, monkeypatch):
     output_directory.mkdir()
     output_path = output_directory / f'{model_name}.npz'
     output_path.write_bytes(b'existing result')
+    monkeypatch.setattr(locations, 'f0_output_data', output_directory)
 
     def fail(*args, **kwargs):
         pytest.fail('existing output should skip computation')
@@ -198,11 +196,7 @@ def test_save_f0_checkpoint_result_skips_existing_file(tmp_path, monkeypatch):
     monkeypatch.setattr(experiment_f0, 'make_f0_x_y', fail)
     monkeypatch.setattr(experiment_f0, 'project_umap', fail)
 
-    result = experiment_f0.save_f0_checkpoint_result(
-        model_name,
-        object(),
-        output_directory=output_directory,
-    )
+    result = experiment_f0.save_f0_checkpoint_result(model_name, object())
 
     assert result == output_path
     assert output_path.read_bytes() == b'existing result'
@@ -222,10 +216,11 @@ def test_save_f0_checkpoint_results_saves_catalog_and_reports_skips(
     output_directory.mkdir()
     skipped_path = output_directory / f'{model_names[1]}.npz'
     skipped_path.write_bytes(b'existing result')
+    monkeypatch.setattr(locations, 'f0_output_data', output_directory)
     calls = []
 
-    def fake_save(model_name, store, *, output_directory):
-        calls.append((model_name, store, output_directory))
+    def fake_save(model_name, store):
+        calls.append((model_name, store))
         return output_directory / f'{model_name}.npz'
 
     monkeypatch.setattr(
@@ -240,18 +235,15 @@ def test_save_f0_checkpoint_results_saves_catalog_and_reports_skips(
     )
     store = object()
 
-    result = experiment_f0.save_f0_checkpoint_results(
-        store,
-        output_directory=output_directory,
-    )
+    result = experiment_f0.save_f0_checkpoint_results(store)
 
     saved_paths = tuple(
         output_directory / f'{model_name}.npz'
         for model_name in (model_names[0], model_names[2])
     )
     assert calls == [
-        (model_names[0], store, output_directory),
-        (model_names[2], store, output_directory),
+        (model_names[0], store),
+        (model_names[2], store),
     ]
     assert result == {
         'saved': saved_paths,

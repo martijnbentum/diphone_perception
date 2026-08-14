@@ -155,7 +155,7 @@ def test_phone_absolute_start_end_properties():
 
 # -- load_sentences / load_phones (tmp-file integration) -------------------
 
-def test_load_phones_links_and_shares_speakers(tmp_path):
+def test_load_phones_links_and_shares_speakers(tmp_path, monkeypatch):
     sentence_path = tmp_path / 'sentences.tsv'
     metadata_path = tmp_path / 'metadata.csv'
 
@@ -174,7 +174,9 @@ def test_load_phones_links_and_shares_speakers(tmp_path):
         'fn1_sentence-1.wav,0.100,0.160,0.060,d,SOS,e,N02_female_40,False,k,d\n'
     )
 
-    phones = metadata.load_phones(metadata_path, sentence_path)
+    monkeypatch.setattr(locations, 'metadata_file', metadata_path)
+    monkeypatch.setattr(locations, 'sentence_file', sentence_path)
+    phones = metadata.load_phones()
 
     assert len(phones) == 2
     assert phones[0].sentence.identifier == 'fn1_sentence-0.wav'
@@ -416,7 +418,8 @@ def test_flemish_phones_loads_valid_inventory_without_metadata(
         metadata, 'load_phones',
         lambda *args, **kwargs: pytest.fail('metadata should not be loaded'),
     )
-    phones = metadata.FlemishPhones(store=store, phraser_key_path=key_path)
+    monkeypatch.setattr(locations, 'flemish_phraser_phone_key_file', key_path)
+    phones = metadata.FlemishPhones(store=store)
 
     loaded = phones.phraser_phones
 
@@ -441,16 +444,18 @@ def test_flemish_phones_rejects_invalid_key_inventory(
     configure_small_flemish_inventory(monkeypatch)
     key_path = tmp_path / 'flemish.bin'
     write_phraser_keys(key_path, keys)
-    phones = metadata.FlemishPhones(store='unused', phraser_key_path=key_path)
+    monkeypatch.setattr(locations, 'flemish_phraser_phone_key_file', key_path)
+    phones = metadata.FlemishPhones(store='unused')
 
     with pytest.raises(ValueError, match=match):
         phones.phraser_phones
 
 
-def test_flemish_phones_rejects_malformed_key_record(tmp_path):
+def test_flemish_phones_rejects_malformed_key_record(tmp_path, monkeypatch):
     key_path = tmp_path / 'flemish.bin'
     key_path.write_bytes(b'incomplete')
-    phones = metadata.FlemishPhones(store='unused', phraser_key_path=key_path)
+    monkeypatch.setattr(locations, 'flemish_phraser_phone_key_file', key_path)
+    phones = metadata.FlemishPhones(store='unused')
 
     with pytest.raises(ValueError, match='not a multiple'):
         phones.phraser_phones
@@ -462,7 +467,8 @@ def test_flemish_phones_rejects_missing_store_object(tmp_path, monkeypatch):
     store = StubBulkStore(StubAudio(inventory[:-1]))
     key_path = tmp_path / 'flemish.bin'
     write_phraser_keys(key_path, [phone.key for phone in inventory])
-    phones = metadata.FlemishPhones(store=store, phraser_key_path=key_path)
+    monkeypatch.setattr(locations, 'flemish_phraser_phone_key_file', key_path)
+    phones = metadata.FlemishPhones(store=store)
 
     with pytest.raises(ValueError, match='missing object'):
         phones.phraser_phones
@@ -478,8 +484,8 @@ def test_flemish_phones_rejects_none_store_object(tmp_path, monkeypatch):
         def load_many(self, keys):
             return inventory[:-1] + [None]
 
-    phones = metadata.FlemishPhones(
-        store=MissingObjectStore(), phraser_key_path=key_path)
+    monkeypatch.setattr(locations, 'flemish_phraser_phone_key_file', key_path)
+    phones = metadata.FlemishPhones(store=MissingObjectStore())
 
     with pytest.raises(ValueError, match='no stored object'):
         phones.phraser_phones
@@ -497,8 +503,8 @@ def test_flemish_phones_rejects_mismatched_store_object(
         def load_many(self, keys):
             return list(reversed(inventory))
 
-    phones = metadata.FlemishPhones(
-        store=ReorderedStore(), phraser_key_path=key_path)
+    monkeypatch.setattr(locations, 'flemish_phraser_phone_key_file', key_path)
+    phones = metadata.FlemishPhones(store=ReorderedStore())
 
     with pytest.raises(ValueError, match='requested keys'):
         phones.phraser_phones
@@ -520,7 +526,8 @@ def test_flemish_phones_rejects_invalid_label_inventory(
     store = StubBulkStore(StubAudio(inventory))
     key_path = tmp_path / 'flemish.bin'
     write_phraser_keys(key_path, [phone.key for phone in inventory])
-    phones = metadata.FlemishPhones(store=store, phraser_key_path=key_path)
+    monkeypatch.setattr(locations, 'flemish_phraser_phone_key_file', key_path)
+    phones = metadata.FlemishPhones(store=store)
 
     with pytest.raises(ValueError, match=match):
         phones.phraser_phones
@@ -560,12 +567,16 @@ def write_dataset(tmp_path, sentence_rows, phone_rows):
     return sentence_path, metadata_path
 
 
-def build_three_phone_dataset(tmp_path):
+def build_three_phone_dataset(tmp_path, monkeypatch):
     '''one sentence with three phones: d, e (long/tense), f.
 
     only d and f get a stub phraser match built for them in the tests
     below; e is left to also be matched so exactly one phone (f) can be
     made to fail, exercising save_phraser_keys' failure handling.
+
+    also points locations.metadata_file/sentence_file at the written
+    dataset, since load_phones/load_sentences no longer take path
+    arguments.
     '''
     sentence_row = make_sentence_row(
         audio_filename='aud1.wav', identifier='fn1_sentence-0.wav',
@@ -594,12 +605,14 @@ def build_three_phone_dataset(tmp_path):
     ]
     sentence_path, metadata_path = write_dataset(
         tmp_path, [sentence_row], phone_rows)
+    monkeypatch.setattr(locations, 'metadata_file', metadata_path)
+    monkeypatch.setattr(locations, 'sentence_file', sentence_path)
     return sentence_path, metadata_path, e_ipa
 
 
-def test_phones_phones_sets_parent(tmp_path):
-    sentence_path, metadata_path, _ = build_three_phone_dataset(tmp_path)
-    phones_obj = metadata.Phones(path=metadata_path, sentence_path=sentence_path)
+def test_phones_phones_sets_parent(tmp_path, monkeypatch):
+    build_three_phone_dataset(tmp_path, monkeypatch)
+    phones_obj = metadata.Phones()
 
     phones = phones_obj.phones
 
@@ -607,9 +620,9 @@ def test_phones_phones_sets_parent(tmp_path):
     assert all(phone.parent is phones_obj for phone in phones)
 
 
-def test_phones_phoneme_counts(tmp_path):
-    sentence_path, metadata_path, e_ipa = build_three_phone_dataset(tmp_path)
-    phones_obj = metadata.Phones(path=metadata_path, sentence_path=sentence_path)
+def test_phones_phoneme_counts(tmp_path, monkeypatch):
+    _, _, e_ipa = build_three_phone_dataset(tmp_path, monkeypatch)
+    phones_obj = metadata.Phones()
 
     assert phones_obj.phoneme_counts == Counter({'d': 1, e_ipa: 1, 'f': 1})
 
@@ -631,11 +644,10 @@ def test_phones_store_lazy_loads_cgn(monkeypatch):
     assert calls['n'] == 1
 
 
-def test_phones_save_and_load_phraser_keys_roundtrip(tmp_path):
-    sentence_path, metadata_path, e_ipa = build_three_phone_dataset(tmp_path)
+def test_phones_save_and_load_phraser_keys_roundtrip(tmp_path, monkeypatch):
+    _, _, e_ipa = build_three_phone_dataset(tmp_path, monkeypatch)
     key_path = tmp_path / 'keys.bin'
-    phones_obj = metadata.Phones(
-        path=metadata_path, sentence_path=sentence_path, phraser_key_path=key_path)
+    phones_obj = metadata.Phones(phraser_key_path=key_path)
     d_phone, e_phone, f_phone = phones_obj.phones
 
     d_key = b'\x01' * SEGMENT_KEY_LENGTH
@@ -657,11 +669,10 @@ def test_phones_save_and_load_phraser_keys_roundtrip(tmp_path):
     assert metadata.load_phraser_keys(key_path) == [d_key, e_key, None]
 
 
-def test_phones_phraser_phones_raises_when_incomplete(tmp_path):
-    sentence_path, metadata_path, e_ipa = build_three_phone_dataset(tmp_path)
+def test_phones_phraser_phones_raises_when_incomplete(tmp_path, monkeypatch):
+    _, _, e_ipa = build_three_phone_dataset(tmp_path, monkeypatch)
     key_path = tmp_path / 'keys.bin'
-    phones_obj = metadata.Phones(
-        path=metadata_path, sentence_path=sentence_path, phraser_key_path=key_path)
+    phones_obj = metadata.Phones(phraser_key_path=key_path)
     d_phone, e_phone, f_phone = phones_obj.phones
 
     stub_audio = StubAudio([
@@ -685,11 +696,12 @@ def test_phones_phraser_phones_raises_when_incomplete(tmp_path):
     assert key_path.exists()
 
 
-def test_phones_phraser_phones_builds_then_reuses_key_file(tmp_path):
-    sentence_path, metadata_path, e_ipa = build_three_phone_dataset(tmp_path)
+def test_phones_phraser_phones_builds_then_reuses_key_file(
+    tmp_path, monkeypatch,
+):
+    _, _, e_ipa = build_three_phone_dataset(tmp_path, monkeypatch)
     key_path = tmp_path / 'keys.bin'
-    phones_obj = metadata.Phones(
-        path=metadata_path, sentence_path=sentence_path, phraser_key_path=key_path)
+    phones_obj = metadata.Phones(phraser_key_path=key_path)
     d_phone, e_phone, f_phone = phones_obj.phones
 
     d_key = b'\x01' * SEGMENT_KEY_LENGTH
@@ -710,8 +722,7 @@ def test_phones_phraser_phones_builds_then_reuses_key_file(tmp_path):
 
     # a fresh Phones instance reuses the cached key file directly
     phones_obj2 = metadata.Phones(
-        store=phones_obj.store, path=metadata_path, sentence_path=sentence_path,
-        phraser_key_path=key_path)
+        store=phones_obj.store, phraser_key_path=key_path)
     with pytest.warns(RuntimeWarning):
         matched2 = phones_obj2.phraser_phones
     assert [p.key for p in matched2] == [d_key, e_key, f_key]
@@ -1002,11 +1013,10 @@ def test_warn_phraser_inventory_accepts_balanced_unique_labels(monkeypatch):
         phones_obj._warn_phraser_inventory(inventory)
 
 
-def test_phones_label_to_phraser_phone_groups_by_label(tmp_path):
-    sentence_path, metadata_path, e_ipa = build_three_phone_dataset(tmp_path)
+def test_phones_label_to_phraser_phone_groups_by_label(tmp_path, monkeypatch):
+    _, _, e_ipa = build_three_phone_dataset(tmp_path, monkeypatch)
     key_path = tmp_path / 'keys.bin'
-    phones_obj = metadata.Phones(
-        path=metadata_path, sentence_path=sentence_path, phraser_key_path=key_path)
+    phones_obj = metadata.Phones(phraser_key_path=key_path)
     d_phone, e_phone, f_phone = phones_obj.phones
 
     d_key = b'\x01' * SEGMENT_KEY_LENGTH
@@ -1028,9 +1038,9 @@ def test_phones_label_to_phraser_phone_groups_by_label(tmp_path):
     assert [p.key for p in grouped['f']] == [f_key]
 
 
-def test_sentence_edge_position(tmp_path):
-    sentence_path, metadata_path, _ = build_three_phone_dataset(tmp_path)
-    phones_obj = metadata.Phones(path=metadata_path, sentence_path=sentence_path)
+def test_sentence_edge_position(tmp_path, monkeypatch):
+    build_three_phone_dataset(tmp_path, monkeypatch)
+    phones_obj = metadata.Phones()
     d_phone, e_phone, f_phone = phones_obj.phones
 
     # d_phone: previous=SOS, next=e -> sentence-first
@@ -1041,9 +1051,9 @@ def test_sentence_edge_position(tmp_path):
     assert metadata._sentence_edge_position(f_phone) == 'last'
 
 
-def test_phones_analyze_phraser_failures(tmp_path, capsys):
-    sentence_path, metadata_path, e_ipa = build_three_phone_dataset(tmp_path)
-    phones_obj = metadata.Phones(path=metadata_path, sentence_path=sentence_path)
+def test_phones_analyze_phraser_failures(tmp_path, monkeypatch, capsys):
+    _, _, e_ipa = build_three_phone_dataset(tmp_path, monkeypatch)
+    phones_obj = metadata.Phones()
     d_phone, e_phone, f_phone = phones_obj.phones
 
     phones_obj.phraser_match_failures = [
@@ -1083,8 +1093,10 @@ def test_phones_analyze_phraser_failures(tmp_path, capsys):
     assert 'AmbiguousMatchError' in printed
 
 
-def test_phones_analyze_phraser_failures_raises_before_save(tmp_path):
-    sentence_path, metadata_path, _ = build_three_phone_dataset(tmp_path)
-    phones_obj = metadata.Phones(path=metadata_path, sentence_path=sentence_path)
+def test_phones_analyze_phraser_failures_raises_before_save(
+    tmp_path, monkeypatch,
+):
+    build_three_phone_dataset(tmp_path, monkeypatch)
+    phones_obj = metadata.Phones()
     with pytest.raises(ValueError):
         phones_obj.analyze_phraser_failures()

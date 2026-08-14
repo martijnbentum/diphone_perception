@@ -1,4 +1,3 @@
-import inspect
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -49,7 +48,7 @@ def read_keys(path):
     ]
 
 
-def test_default_path_labels_and_duration_bounds_are_complete():
+def test_labels_and_duration_bounds_are_complete():
     expected_labels = (
         'd', 'f', 'ə', 'z', 'p', 'l', 'ɛ', 'eː', 't', 'r', 'ʉ', 'ŋ', 'aː',
         'v', 'ɔ', 'm', 'ɪ', 'ɣ', 'x', 'oː', 'ɑ', 'n', 'h', 'k', 'iː', 'j',
@@ -61,10 +60,6 @@ def test_default_path_labels_and_duration_bounds_are_complete():
     assert select_flemish_phones._duration_bounds['ə'] == (46, 1077)
     assert select_flemish_phones.flemish_phones_per_label == 5_000
     assert select_flemish_phones.flemish_phone_count == 155_000
-    path_default = inspect.signature(
-        select_flemish_phones.save_flemish_phraser_phone_keys,
-    ).parameters['path'].default
-    assert path_default == locations.flemish_phraser_phone_key_file
 
 
 def test_filter_flemish_audios_requires_component_and_vl_path():
@@ -170,9 +165,10 @@ def test_insufficient_inventory_reports_all_counts_without_writing(
     ])])
     path = tmp_path / 'flemish.bin'
     path.write_bytes(b'original')
+    monkeypatch.setattr(locations, 'flemish_phraser_phone_key_file', path)
 
     result = select_flemish_phones.save_flemish_phraser_phone_keys(
-        store, path=path, overwrite=True, show_progress=False)
+        store, overwrite=True, show_progress=False)
 
     assert result == {
         'available_counts': {'a': 2, 'b': 1},
@@ -195,21 +191,23 @@ def test_insufficient_inventory_does_not_create_output(
         make_phone('a', make_key(1)),
     ])])
     path = tmp_path / 'flemish.bin'
+    monkeypatch.setattr(locations, 'flemish_phraser_phone_key_file', path)
 
     result = select_flemish_phones.save_flemish_phraser_phone_keys(
-        store, path=path, show_progress=False)
+        store, show_progress=False)
 
     assert result['written'] is False
     assert not path.exists()
 
 
-def test_existing_output_requires_overwrite(tmp_path):
+def test_existing_output_requires_overwrite(tmp_path, monkeypatch):
     path = tmp_path / 'flemish.bin'
     path.write_bytes(b'original')
+    monkeypatch.setattr(locations, 'flemish_phraser_phone_key_file', path)
 
     with pytest.raises(FileExistsError, match='overwrite=True'):
         select_flemish_phones.save_flemish_phraser_phone_keys(
-            object(), path=path, show_progress=False)
+            object(), show_progress=False)
 
     assert path.read_bytes() == b'original'
 
@@ -258,9 +256,10 @@ def test_success_uses_seed_and_writes_label_major_keys(
 
     monkeypatch.setattr(select_flemish_phones.random, 'sample', sample)
     path = tmp_path / 'flemish.bin'
+    monkeypatch.setattr(locations, 'flemish_phraser_phone_key_file', path)
 
     result = select_flemish_phones.save_flemish_phraser_phone_keys(
-        store, path=path, seed=42, show_progress=False)
+        store, seed=42, show_progress=False)
 
     assert calls == [
         ('seed', 42),

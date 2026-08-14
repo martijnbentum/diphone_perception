@@ -214,8 +214,6 @@ def _validate_final_keys(current_keys, metadata_phones, duplicates,
 
 def save_duplicate_replacement_phraser_keys(
     phones,
-    path=locations.duplicate_replacement_phraser_key_file,
-    counts_path=locations.duplicate_phone_counts_file,
     seed=42,
     overwrite=False,
     show_progress=True,
@@ -227,13 +225,13 @@ def save_duplicate_replacement_phraser_keys(
     metadata order, so they can be substituted without changing alignment.
     Set show_progress=False to suppress progress bars.
     '''
-    path = Path(path)
+    path = Path(locations.duplicate_replacement_phraser_key_file)
     if path.exists() and not overwrite:
         raise FileExistsError(
             f'{path} already exists; pass overwrite=True to replace it'
         )
 
-    counts = _load_replacement_counts(counts_path)
+    counts = _load_replacement_counts(locations.duplicate_phone_counts_file)
     current_keys = _load_current_keys(phones)
     metadata_phones = phones.phones
     duplicates = _duplicate_occurrences(current_keys, metadata_phones)
