@@ -4,7 +4,7 @@ from itertools import product
 
 import numpy as np
 
-from .stimuli import DEFAULT_DURATION, DEFAULT_SAMPLE_RATE, Stimulus
+from .stimuli import DURATION, SAMPLE_RATE, Stimulus
 
 
 def praat_vowel_stimulus(
@@ -12,8 +12,8 @@ def praat_vowel_stimulus(
     f1_hz,
     f2_hz,
     bandwidths_hz=(80.0, 100.0),
-    duration=DEFAULT_DURATION,
-    sample_rate=DEFAULT_SAMPLE_RATE,
+    duration=DURATION,
+    sample_rate=SAMPLE_RATE,
     target_rms=0.1,
     fade_duration=0.01,
     minimum_formant_separation=100.0,

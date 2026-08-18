@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 
 import locations
-import synthetic_acoustic_probes.experiment_f0 as experiment_f0
+import synthetic_acoustic_probes.f0_experiment as f0_experiment
 
 
 class FakeStore:
@@ -57,12 +57,12 @@ def test_create_auditory_stimuli_saves_to_default_location(monkeypatch):
         return expected
 
     monkeypatch.setattr(
-        experiment_f0,
+        f0_experiment,
         'pure_tone_stimuli',
         fake_pure_tone_stimuli,
     )
 
-    result = experiment_f0.create_auditory_stimuli()
+    result = f0_experiment.create_auditory_stimuli()
 
     assert result is expected
     expected_call = {}
@@ -86,14 +86,14 @@ def test_create_f0_pure_tone_phraser_store_populates_store(monkeypatch):
         stores.append(store)
         return store
 
-    monkeypatch.setattr(experiment_f0, 'Store', fake_store)
+    monkeypatch.setattr(f0_experiment, 'Store', fake_store)
     monkeypatch.setattr(
-        experiment_f0,
+        f0_experiment,
         'add_stimuli',
         lambda package, store: add_calls.append((package, store)),
     )
 
-    result = experiment_f0.create_f0_pure_tone_phraser_store()
+    result = f0_experiment.create_f0_pure_tone_phraser_store()
 
     assert result is stores[0]
     assert result.path == locations.f0_pure_tone_phraser_store
@@ -111,7 +111,7 @@ def test_load_f0_pure_tone_phraser_store(tmp_path, monkeypatch):
     missing = tmp_path / 'missing'
     monkeypatch.setattr(locations, 'f0_pure_tone_phraser_store', missing)
     with pytest.raises(FileNotFoundError, match='F0 Phraser store not found'):
-        experiment_f0.load_f0_pure_tone_phraser_store()
+        f0_experiment.load_f0_pure_tone_phraser_store()
 
     store_path = tmp_path / 'phraser'
     store_path.mkdir()
@@ -123,9 +123,9 @@ def test_load_f0_pure_tone_phraser_store(tmp_path, monkeypatch):
         stores.append(store)
         return store
 
-    monkeypatch.setattr(experiment_f0, 'Store', fake_store)
+    monkeypatch.setattr(f0_experiment, 'Store', fake_store)
 
-    result = experiment_f0.load_f0_pure_tone_phraser_store()
+    result = f0_experiment.load_f0_pure_tone_phraser_store()
 
     assert result is stores[0]
     assert result.path == store_path
@@ -152,12 +152,12 @@ def test_save_f0_checkpoint_result_writes_expected_bundle(
         projection_calls.append((values, metric, random_state))
         return coordinates
 
-    monkeypatch.setattr(experiment_f0, 'make_f0_x_y', fake_make)
-    monkeypatch.setattr(experiment_f0, 'project_umap', fake_project)
+    monkeypatch.setattr(f0_experiment, 'make_f0_x_y', fake_make)
+    monkeypatch.setattr(f0_experiment, 'project_umap', fake_project)
     output_directory = tmp_path / 'output_data'
     monkeypatch.setattr(locations, 'f0_output_data', output_directory)
 
-    output_path = experiment_f0.save_f0_checkpoint_result(model_name, store)
+    output_path = f0_experiment.save_f0_checkpoint_result(model_name, store)
 
     assert output_path == output_directory / f'{model_name}.npz'
     assert make_calls == [(model_name, store, 'mean')]
@@ -193,10 +193,10 @@ def test_save_f0_checkpoint_result_skips_existing_file(tmp_path, monkeypatch):
     def fail(*args, **kwargs):
         pytest.fail('existing output should skip computation')
 
-    monkeypatch.setattr(experiment_f0, 'make_f0_x_y', fail)
-    monkeypatch.setattr(experiment_f0, 'project_umap', fail)
+    monkeypatch.setattr(f0_experiment, 'make_f0_x_y', fail)
+    monkeypatch.setattr(f0_experiment, 'project_umap', fail)
 
-    result = experiment_f0.save_f0_checkpoint_result(model_name, object())
+    result = f0_experiment.save_f0_checkpoint_result(model_name, object())
 
     assert result == output_path
     assert output_path.read_bytes() == b'existing result'
@@ -224,18 +224,18 @@ def test_save_f0_checkpoint_results_saves_catalog_and_reports_skips(
         return output_directory / f'{model_name}.npz'
 
     monkeypatch.setattr(
-        experiment_f0,
+        f0_experiment,
         'select_wav2vec2_nl1_checkpoints',
         lambda: model_names,
     )
     monkeypatch.setattr(
-        experiment_f0,
+        f0_experiment,
         'save_f0_checkpoint_result',
         fake_save,
     )
     store = object()
 
-    result = experiment_f0.save_f0_checkpoint_results(store)
+    result = f0_experiment.save_f0_checkpoint_results(store)
 
     saved_paths = tuple(
         output_directory / f'{model_name}.npz'

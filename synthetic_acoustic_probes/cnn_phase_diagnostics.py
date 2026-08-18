@@ -12,7 +12,7 @@ import locations
 from .cnn_extraction import extract_cnn_checkpoint
 from .echoframe_store import create_store
 from .phraser_store import add_stimuli, load_stimuli
-from .stimuli import DEFAULT_DURATION, DEFAULT_SAMPLE_RATE
+from .stimuli import DURATION, SAMPLE_RATE
 from .stimuli import sum_of_sinusoids
 from .storage import write_stimuli
 
@@ -54,8 +54,8 @@ def phase_diagnostic_stimuli(
     frequencies=PHASE_DIAGNOSTIC_FREQUENCIES_HZ,
     sample_offsets=PHASE_DIAGNOSTIC_SAMPLE_OFFSETS,
     *,
-    duration=DEFAULT_DURATION,
-    sample_rate=DEFAULT_SAMPLE_RATE,
+    duration=DURATION,
+    sample_rate=SAMPLE_RATE,
     amplitude=1.0,
 ):
     '''Generate pure tones at five input-sample alignments.

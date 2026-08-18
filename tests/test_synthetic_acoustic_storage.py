@@ -5,10 +5,10 @@ import numpy as np
 import pytest
 from scipy.io import wavfile
 
+import locations
 from synthetic_acoustic_probes import pure_tone_stimuli, write_stimuli
 from synthetic_acoustic_probes.stimuli import sum_of_sinusoids
 import synthetic_acoustic_probes.storage as storage
-import synthetic_acoustic_probes.stimuli as stimuli_module
 
 
 def test_write_stimuli_writes_audio_and_manifest(tmp_path):
@@ -129,11 +129,7 @@ def test_pure_tone_save_flag_writes_default_package(tmp_path, monkeypatch):
     '''
 
     output_root = tmp_path / 'f0_pure_tones'
-    monkeypatch.setattr(
-        stimuli_module,
-        '_DEFAULT_PURE_TONE_OUTPUT_ROOT',
-        output_root,
-    )
+    monkeypatch.setattr(locations, 'f0_pure_tone_stimuli', output_root)
 
     stimuli = pure_tone_stimuli(
         frequencies=(10, 20),

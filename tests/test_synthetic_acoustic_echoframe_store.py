@@ -136,10 +136,9 @@ def test_create_store_registers_initial_models(tmp_path, monkeypatch):
     catalog_path.write_text(catalog_text, encoding='utf-8')
     opened = []
 
-    def store_constructor(path, max_shard_size_bytes):
+    def store_constructor(path):
         store = _ModelStore()
         store.path = path
-        store.max_shard_size_bytes = max_shard_size_bytes
         opened.append(store)
         return store
 
@@ -147,15 +146,10 @@ def test_create_store_registers_initial_models(tmp_path, monkeypatch):
     monkeypatch.setattr(locations, 'model_paths_file', catalog_path)
     store_path = tmp_path / 'echoframe'
 
-    result = echoframe_store.create_store(
-        store_path,
-        ('second', 'first'),
-        max_shard_size_bytes=1234,
-    )
+    result = echoframe_store.create_store(store_path, ('second', 'first'))
 
     assert result is opened[0]
     assert result.path == store_path
-    assert result.max_shard_size_bytes == 1234
     assert [name for name, _ in result.registered] == ['second', 'first']
 
 
@@ -173,8 +167,8 @@ def test_create_store_rejects_existing_path_before_construction(
     store_path.mkdir()
     constructor_calls = []
 
-    def store_constructor(path, max_shard_size_bytes):
-        constructor_calls.append((path, max_shard_size_bytes))
+    def store_constructor(path):
+        constructor_calls.append(path)
 
     monkeypatch.setattr(echoframe_store.echoframe, 'Store', store_constructor)
 
@@ -293,10 +287,11 @@ def test_select_wav2vec2_nl1_checkpoints_rejects_malformed_catalog(
         echoframe_store.select_wav2vec2_nl1_checkpoints()
 
 
-def test_add_models_registers_selected_models_in_requested_order(tmp_path):
+def test_create_store_forwards_full_catalog_metadata(tmp_path, monkeypatch):
     '''Selected catalog metadata is forwarded in requested order.
 
-    tmp_path:  Temporary directory supplied by pytest.
+    tmp_path:     Temporary directory supplied by pytest.
+    monkeypatch:  Pytest fixture used to replace the Echoframe Store.
     '''
 
     catalog = [
@@ -314,14 +309,19 @@ def test_add_models_registers_selected_models_in_requested_order(tmp_path):
     catalog_text = json.dumps(catalog)
     catalog_path.write_text(catalog_text, encoding='utf-8')
     store = _ModelStore()
+    monkeypatch.setattr(
+        echoframe_store.echoframe,
+        'Store',
+        lambda path: store,
+    )
+    monkeypatch.setattr(locations, 'model_paths_file', catalog_path)
 
-    result = echoframe_store.add_models(
+    result = echoframe_store.create_store(
+        tmp_path / 'echoframe',
         ('first', 'second'),
-        catalog_path,
-        store,
     )
 
-    assert result is None
+    assert result is store
     assert [name for name, _ in store.registered] == ['first', 'second']
     first = store.registered[0][1]
     second = store.registered[1][1]
@@ -337,27 +337,25 @@ def test_add_models_registers_selected_models_in_requested_order(tmp_path):
 
 
 @pytest.mark.parametrize(
-    ('model_names', 'catalog_names', 'existing', 'match'),
+    ('model_names', 'catalog_names', 'match'),
     [
-        (('available', 'missing'), ('available',), (), 'not found'),
-        (('duplicate', 'duplicate'), ('duplicate',), (), 'duplicate model'),
-        (('available', 'existing'), ('available', 'existing'),
-            ('existing',), 'already registered'),
+        (('available', 'missing'), ('available',), 'not found'),
+        (('duplicate', 'duplicate'), ('duplicate',), 'duplicate model'),
     ],
 )
-def test_add_models_rejects_invalid_input_before_registration(
+def test_create_store_rejects_invalid_model_names_before_construction(
     tmp_path,
+    monkeypatch,
     model_names,
     catalog_names,
-    existing,
     match,
 ):
-    '''Invalid model selections cause no partial registration.
+    '''Invalid model selections never reach Echoframe Store construction.
 
     tmp_path:       Temporary directory supplied by pytest.
+    monkeypatch:    Pytest fixture used to replace the Echoframe Store.
     model_names:    Requested model names.
     catalog_names:  Model names available in the catalog fixture.
-    existing:       Model names already registered in the fake store.
     match:          Text expected in the error message.
     '''
 
@@ -367,12 +365,18 @@ def test_add_models_rejects_invalid_input_before_registration(
     catalog_path = tmp_path / 'models.json'
     catalog_text = json.dumps(catalog)
     catalog_path.write_text(catalog_text, encoding='utf-8')
-    store = _ModelStore(existing)
+    constructor_calls = []
+    monkeypatch.setattr(
+        echoframe_store.echoframe,
+        'Store',
+        lambda path: constructor_calls.append(path),
+    )
+    monkeypatch.setattr(locations, 'model_paths_file', catalog_path)
 
     with pytest.raises((TypeError, ValueError), match=match):
-        echoframe_store.add_models(model_names, catalog_path, store)
+        echoframe_store.create_store(tmp_path / 'echoframe', model_names)
 
-    assert store.registered == []
+    assert constructor_calls == []
 
 
 def test_load_cnn_features_preserves_phrase_order():

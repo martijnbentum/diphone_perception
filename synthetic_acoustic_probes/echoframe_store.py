@@ -10,7 +10,76 @@ import numpy as np
 import locations
 
 
-NL1_TRAINED_CHECKPOINT_COUNT = 121
+def create_store(store_path, model_names):
+    '''Create an Echoframe store and register its initial models.
+
+    store_path:   Destination for the new Echoframe store.
+    model_names:  Iterable of model names to register.
+
+    Existing paths are rejected. Returns the native Echoframe Store.
+    '''
+    store_path = Path(store_path)
+    if store_path.exists():
+        raise FileExistsError(f'Echoframe store path exists: {store_path}')
+    model_names = _model_names(model_names)
+    entries = _model_entries(model_names, locations.model_paths_file)
+    store = echoframe.Store(store_path)
+    try: _register_models(model_names, entries, store)
+    except Exception:
+        store.close()
+        raise
+    return store
+
+
+def load_cnn_features(phrases, model_name, store, *, collar=0):
+    '''Load native Echoframe CNN features for Phraser Phrases.
+
+    phrases:     Iterable of native Phraser Phrase objects.
+    model_name:  Registered Echoframe model name.
+    store:       Echoframe Store containing the CNN features.
+    collar:      Context in milliseconds used during extraction.
+
+    Results follow the order of ``phrases``.
+    '''
+    phraser_keys = [phrase.key for phrase in phrases]
+    return store.phraser_keys_to_cnn_features(phraser_keys, model_name,
+        collar=collar)
+
+
+def make_x_y(phrases, model_name, store, *, aggregation, collar=0):
+    '''Return aggregated CNN representations and aligned stimulus IDs.
+
+    phrases:      Iterable of native Phraser Phrase objects.
+    model_name:   Registered Echoframe model name.
+    store:        Echoframe Store containing the CNN features.
+    aggregation:  ``center`` selects the middle frame; ``mean`` averages
+                  frames over each Phrase.
+    collar:       Context in milliseconds used during extraction.
+
+    ``y`` contains Phrase labels. Synthetic Phraser stores define those labels
+    as manifest stimulus IDs, for joining experiment-specific targets rather
+    than treating them as the final modeling target.
+    '''
+    phrases = tuple(phrases)
+    if not phrases: raise ValueError('phrases must not be empty')
+    if aggregation not in {'center', 'mean'}:
+        raise ValueError("aggregation must be 'center' or 'mean'")
+
+    features = load_cnn_features(phrases, model_name, store, collar=collar)
+    expected_keys = tuple(phrase.key for phrase in phrases)
+    if features.phraser_keys != expected_keys:
+        message = 'CNN features are missing or not aligned with phrases'
+        raise ValueError(message)
+
+    method = 'middle' if aggregation == 'center' else 'mean'
+    vectors = []
+    pairs = zip(phrases, features.cnn_features, strict=True)
+    for phrase, feature in pairs:
+        vector = feature.aggregate_segment(phrase, method=method)
+        vectors.append(vector)
+    X = np.stack(vectors)
+    y = np.asarray([phrase.label for phrase in phrases])
+    return X, y
 
 
 def select_wav2vec2_nl1_checkpoints():
@@ -19,7 +88,7 @@ def select_wav2vec2_nl1_checkpoints():
     The random checkpoint is returned first, followed by exactly 121 NL1
     checkpoints ordered by numeric training step.
     '''
-
+    trained_checkpoint_count = 121
     path, catalog = _model_catalog(locations.model_paths_file)
     random_name = locations.wav2vec2_random_checkpoint_name
     pattern = re.compile(locations.wav2vec2_nl1_checkpoint_pattern)
@@ -37,8 +106,8 @@ def select_wav2vec2_nl1_checkpoints():
         message = f'expected one {random_name!r} in {path}, found '
         message += str(random_count)
         raise ValueError(message)
-    if len(trained) != NL1_TRAINED_CHECKPOINT_COUNT:
-        message = f'expected {NL1_TRAINED_CHECKPOINT_COUNT} NL1 checkpoints '
+    if len(trained) != trained_checkpoint_count:
+        message = f'expected {trained_checkpoint_count} NL1 checkpoints '
         message += f'in {path}, found {len(trained)}'
         raise ValueError(message)
     steps = [step for step, _ in trained]
@@ -50,114 +119,8 @@ def select_wav2vec2_nl1_checkpoints():
     return (random_name, *trained_names)
 
 
-def create_store(
-    store_path,
-    model_names,
-    max_shard_size_bytes=1_000_000_000,
-):
-    '''Create an Echoframe store and register its initial models.
-
-    store_path:            Destination for the new Echoframe store.
-    model_names:           Iterable of model names to register.
-    max_shard_size_bytes:  Maximum Echoframe HDF5 shard size.
-
-    Existing paths are rejected. Returns the native Echoframe Store.
-    '''
-
-    store_path = Path(store_path)
-    if store_path.exists():
-        raise FileExistsError(f'Echoframe store path exists: {store_path}')
-    model_names = _model_names(model_names)
-    entries = _model_entries(model_names, locations.model_paths_file)
-    store = echoframe.Store(
-        store_path,
-        max_shard_size_bytes=max_shard_size_bytes,
-    )
-    try: _register_models(model_names, entries, store)
-    except Exception:
-        store.close()
-        raise
-    return store
-
-
-def add_models(model_names, model_paths_file, store):
-    '''Register selected models from a model-paths file.
-
-    model_names:       Iterable of model names to register.
-    model_paths_file:  JSON list containing the model definitions.
-    store:             Echoframe Store receiving the registrations.
-
-    All names and existing registrations are checked before the first model
-    is added. Returns None.
-    '''
-
-    model_names = _model_names(model_names)
-    entries = _model_entries(model_names, model_paths_file)
-    _register_models(model_names, entries, store)
-
-
-def load_cnn_features(phrases, model_name, store, *, collar=0):
-    '''Load native Echoframe CNN features for Phraser Phrases.
-
-    phrases:     Iterable of native Phraser Phrase objects.
-    model_name:  Registered Echoframe model name.
-    store:       Echoframe Store containing the CNN features.
-    collar:      Context in milliseconds used during extraction.
-
-    Results follow the order of ``phrases``.
-    '''
-
-    phraser_keys = [phrase.key for phrase in phrases]
-    return store.phraser_keys_to_cnn_features(
-        phraser_keys,
-        model_name,
-        collar=collar,
-    )
-
-
-def make_x_y(phrases, model_name, store, *, aggregation, collar=0):
-    '''Return aggregated CNN representations and aligned stimulus IDs.
-
-    phrases:      Iterable of native Phraser Phrase objects.
-    model_name:   Registered Echoframe model name.
-    store:        Echoframe Store containing the CNN features.
-    aggregation:  ``center`` selects the middle frame; ``mean`` averages
-                  frames over each Phrase.
-    collar:       Context in milliseconds used during extraction.
-
-    ``y`` contains Phrase labels. Synthetic Phraser stores define those labels
-    as manifest stimulus IDs, for joining experiment-specific targets rather
-    than treating them as the final modeling target.
-    '''
-
-    phrases = tuple(phrases)
-    if not phrases: raise ValueError('phrases must not be empty')
-    if aggregation not in {'center', 'mean'}:
-        raise ValueError("aggregation must be 'center' or 'mean'")
-
-    features = load_cnn_features(
-        phrases,
-        model_name,
-        store,
-        collar=collar,
-    )
-    expected_keys = tuple(phrase.key for phrase in phrases)
-    if features.phraser_keys != expected_keys:
-        message = 'CNN features are missing or not aligned with phrases'
-        raise ValueError(message)
-
-    method = 'middle' if aggregation == 'center' else 'mean'
-    vectors = []
-    pairs = zip(phrases, features.cnn_features, strict=True)
-    for phrase, feature in pairs:
-        vector = feature.aggregate_segment(phrase, method=method)
-        vectors.append(vector)
-    X = np.stack(vectors)
-    y = np.asarray([phrase.label for phrase in phrases])
-    return X, y
-
-
 def _register_models(model_names, entries, store):
+    '''Register each model, raising if any name is already registered.'''
     existing = []
     for model_name in model_names:
         metadata = store.load_model_metadata(model_name)
@@ -173,17 +136,13 @@ def _register_models(model_names, entries, store):
         language = entry.get('language')
         size = entry.get('size')
         architecture = entry.get('architecture')
-        store.register_model(
-            model_name,
-            local_path=local_path,
-            huggingface_id=huggingface_id,
-            language=language,
-            size=size,
-            architecture=architecture,
-        )
+        store.register_model(model_name, local_path=local_path,
+            huggingface_id=huggingface_id, language=language, size=size,
+            architecture=architecture)
 
 
 def _model_names(model_names):
+    '''Validate model_names as a non-empty iterable of unique strings.'''
     if isinstance(model_names, str):
         raise TypeError('model_names must be an iterable of strings')
     try: names = tuple(model_names)
@@ -202,6 +161,7 @@ def _model_names(model_names):
 
 
 def _model_entries(model_names, model_paths_file):
+    '''Return one catalog entry per requested model name.'''
     path, catalog = _model_catalog(model_paths_file)
     matches = {name: [] for name in model_names}
     for entry in catalog:
@@ -222,6 +182,7 @@ def _model_entries(model_names, model_paths_file):
 
 
 def _model_catalog(model_paths_file):
+    '''Load and validate the model-paths JSON catalog.'''
     path = Path(model_paths_file)
     try:
         text = path.read_text(encoding='utf-8')

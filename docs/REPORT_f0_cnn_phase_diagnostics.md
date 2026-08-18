@@ -20,7 +20,7 @@ bundle
 `mean_cnn_features` `(799, 512)`, UMAP `coordinates` `(799, 2)`, frequencies,
 stimulus IDs, model name, aggregation, metric, and seed.
 
-[`make_f0_x_y`](../synthetic_acoustic_probes/experiment_f0.py) assembled the
+[`make_f0_x_y`](../synthetic_acoustic_probes/f0_experiment.py) assembled the
 CNN mean representations and frequencies in stimulus-manifest order.
 [`project_umap`](../synthetic_acoustic_probes/umap_projection.py) generated the
 coordinates with cosine distance and seed 42, and

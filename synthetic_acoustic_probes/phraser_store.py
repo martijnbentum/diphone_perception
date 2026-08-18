@@ -8,29 +8,16 @@ from phraser import Audio, Phrase, Speaker
 from scipy.io import wavfile
 
 
-SPEAKER_DATASET = 'synthetic-acoustic-probes'
-SPEAKER_NAME = 'synthetic-stimuli'
-
-
-@dataclass(frozen=True)
-class _ManifestStimulus:
-    stimulus_id: str
-    audio_path: Path
-    sample_rate: int
-    duration_ms: int
-
-
-def add_stimuli(stimulus_package, store):
+def add_stimuli(stimulus_dir, store):
     '''Add a stored stimulus package to a Phraser store.
 
-    stimulus_package:  Directory written by ``write_stimuli``.
+    stimulus_dir:  Directory written by ``write_stimuli``.
     store:  Empty Phraser Store dedicated to this experiment.
 
     Adds one Audio and one full-duration Phrase per manifest row. Returns
     None; call ``load_stimuli`` to retrieve the persisted entries.
     '''
-
-    package_root, stimuli = _load_manifest(stimulus_package)
+    package_root, stimuli = _load_manifest(stimulus_dir)
 
     store.refresh_query_roots()
     existing_audios = list(store.audios)
@@ -39,10 +26,9 @@ def add_stimuli(stimulus_package, store):
         message = 'add_stimuli requires an empty experiment Phraser store'
         raise FileExistsError(message)
 
-    speaker, speaker_is_new = _load_or_create_speaker(store)
+    speaker = store.create(Speaker, name='synthetic-stimuli')
     dataset = package_root.name
-    objects = []
-    if speaker_is_new: objects.append(speaker)
+    objects = [speaker]
     audios = []
     for stimulus in stimuli:
         audio, phrase = _add_stimulus(stimulus, dataset, speaker, store)
@@ -60,52 +46,24 @@ def load_stimuli(store):
 
     store:  Phraser Store dedicated to one synthetic-stimulus experiment.
     '''
-
     store.refresh_query_roots()
     return tuple(store.phrases)
 
 
 def _add_stimulus(stimulus, dataset, speaker, store):
     '''Stage one Audio and full-duration Phrase for the bulk save.'''
-
     filename = str(stimulus.audio_path)
-    audio = store.create(
-        Audio,
-        filename=filename,
-        sample_rate=stimulus.sample_rate,
-        duration=stimulus.duration_ms,
-        n_channels=1,
-        dataset=dataset,
-    )
-    phrase = store.create(
-        Phrase,
-        label=stimulus.stimulus_id,
-        start=0,
-        end=stimulus.duration_ms,
-        audio_id=audio.identifier,
-        speaker_id=speaker.identifier,
-    )
+    audio = store.create(Audio, filename=filename,
+        sample_rate=stimulus.sample_rate, duration=stimulus.duration_ms,
+        n_channels=1, dataset=dataset)
+    phrase = store.create(Phrase, label=stimulus.stimulus_id, start=0,
+        end=stimulus.duration_ms, audio_id=audio.identifier,
+        speaker_id=speaker.identifier)
     return audio, phrase
 
 
-def _load_or_create_speaker(store):
-    matches = []
-    for speaker in store.speakers:
-        if speaker.name != SPEAKER_NAME: continue
-        if speaker.dataset == SPEAKER_DATASET: matches.append(speaker)
-    if len(matches) > 1:
-        raise ValueError('multiple synthetic-stimulus speakers found')
-    if matches: return matches[0], False
-    speaker = store.create(
-        Speaker,
-        name=SPEAKER_NAME,
-        dataset=SPEAKER_DATASET,
-    )
-    return speaker, True
-
-
-def _load_manifest(stimulus_package):
-    package_root = Path(stimulus_package).expanduser().resolve()
+def _load_manifest(stimulus_dir):
+    package_root = Path(stimulus_dir).expanduser().resolve()
     manifest_path = package_root / 'manifest.json'
     if not manifest_path.is_file():
         raise FileNotFoundError(f'stimulus manifest not found: {manifest_path}')
@@ -129,6 +87,14 @@ def _load_manifest(stimulus_package):
     return package_root, tuple(stimuli)
 
 
+@dataclass(frozen=True)
+class _ManifestStimulus:
+    stimulus_id: str
+    audio_path: Path
+    sample_rate: int
+    duration_ms: int
+
+
 def _manifest_stimulus(row, package_root):
     stimulus_id = row['stimulus_id']
     audio_path = (package_root / row['path']).resolve()
@@ -147,12 +113,8 @@ def _manifest_stimulus(row, package_root):
     if len(waveform) != row['n_samples']:
         raise ValueError(f'sample count does not match manifest: {audio_path}')
     duration_ms = round(len(waveform) / sample_rate * 1000)
-    return _ManifestStimulus(
-        stimulus_id,
-        audio_path,
-        sample_rate,
-        duration_ms,
-    )
+    return _ManifestStimulus(stimulus_id, audio_path, sample_rate,
+        duration_ms)
 
 
 def _read_json(path):
