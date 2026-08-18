@@ -12,10 +12,8 @@ import locations
 
 def create_store(store_path, model_names):
     '''Create an Echoframe store and register its initial models.
-
     store_path:   Destination for the new Echoframe store.
     model_names:  Iterable of model names to register.
-
     Existing paths are rejected. Returns the native Echoframe Store.
     '''
     store_path = Path(store_path)
@@ -33,12 +31,10 @@ def create_store(store_path, model_names):
 
 def load_cnn_features(phrases, model_name, store, *, collar=0):
     '''Load native Echoframe CNN features for Phraser Phrases.
-
     phrases:     Iterable of native Phraser Phrase objects.
     model_name:  Registered Echoframe model name.
     store:       Echoframe Store containing the CNN features.
     collar:      Context in milliseconds used during extraction.
-
     Results follow the order of ``phrases``.
     '''
     phraser_keys = [phrase.key for phrase in phrases]
@@ -48,14 +44,12 @@ def load_cnn_features(phrases, model_name, store, *, collar=0):
 
 def make_x_y(phrases, model_name, store, *, aggregation, collar=0):
     '''Return aggregated CNN representations and aligned stimulus IDs.
-
     phrases:      Iterable of native Phraser Phrase objects.
     model_name:   Registered Echoframe model name.
     store:        Echoframe Store containing the CNN features.
     aggregation:  ``center`` selects the middle frame; ``mean`` averages
                   frames over each Phrase.
     collar:       Context in milliseconds used during extraction.
-
     ``y`` contains Phrase labels. Synthetic Phraser stores define those labels
     as manifest stimulus IDs, for joining experiment-specific targets rather
     than treating them as the final modeling target.
@@ -64,13 +58,11 @@ def make_x_y(phrases, model_name, store, *, aggregation, collar=0):
     if not phrases: raise ValueError('phrases must not be empty')
     if aggregation not in {'center', 'mean'}:
         raise ValueError("aggregation must be 'center' or 'mean'")
-
     features = load_cnn_features(phrases, model_name, store, collar=collar)
     expected_keys = tuple(phrase.key for phrase in phrases)
     if features.phraser_keys != expected_keys:
         message = 'CNN features are missing or not aligned with phrases'
         raise ValueError(message)
-
     method = 'middle' if aggregation == 'center' else 'mean'
     vectors = []
     pairs = zip(phrases, features.cnn_features, strict=True)
@@ -84,7 +76,6 @@ def make_x_y(phrases, model_name, store, *, aggregation, collar=0):
 
 def select_wav2vec2_nl1_checkpoints():
     '''Return the validated checkpoint set used by the probe experiments.
-
     The random checkpoint is returned first, followed by exactly 121 NL1
     checkpoints ordered by numeric training step.
     '''
@@ -101,7 +92,6 @@ def select_wav2vec2_nl1_checkpoints():
         match = pattern.fullmatch(model_name)
         if match is None: continue
         trained.append((int(match.group(1)), model_name))
-
     if random_count != 1:
         message = f'expected one {random_name!r} in {path}, found '
         message += str(random_count)
@@ -113,7 +103,6 @@ def select_wav2vec2_nl1_checkpoints():
     steps = [step for step, _ in trained]
     if len(set(steps)) != len(steps):
         raise ValueError(f'duplicate NL1 checkpoint steps in {path}')
-
     trained.sort(key=lambda item: item[0])
     trained_names = tuple(model_name for _, model_name in trained)
     return (random_name, *trained_names)
@@ -128,7 +117,6 @@ def _register_models(model_names, entries, store):
     if existing:
         names = ', '.join(repr(name) for name in existing)
         raise ValueError(f'models already registered in store: {names}')
-
     for model_name in model_names:
         entry = entries[model_name]
         local_path = entry.get('local_path')
@@ -150,7 +138,6 @@ def _model_names(model_names):
         message = 'model_names must be an iterable of strings'
         raise TypeError(message) from error
     if not names: raise ValueError('model_names must not be empty')
-
     seen = set()
     for name in names:
         if not isinstance(name, str) or not name.strip():
@@ -167,7 +154,6 @@ def _model_entries(model_names, model_paths_file):
     for entry in catalog:
         model_name = entry.get('model_name')
         if model_name in matches: matches[model_name].append(entry)
-
     selected = {}
     for model_name in model_names:
         entries = matches[model_name]

@@ -132,11 +132,10 @@ def amplitude_stimuli(frequencies=(100, 700), amplitudes=None,
             'amplitude_0': amplitude_0, 'amplitude_1': amplitude_1,
             'energy_0': energy_0, 'energy_1': energy_1,
             'exact_paper_code': exact_paper_code}
-        stimulus_id = (f'amplitude_a0-{amplitude_0:.8g}'
-            f'_a1-{amplitude_1:.8g}')
+        sid = f'amplitude_a0-{amplitude_0:.8g}_a1-{amplitude_1:.8g}'
         stimulus = sum_of_sinusoids(frequencies,
             amplitudes=(amplitude_0, amplitude_1), duration=duration,
-            sample_rate=sample_rate, stimulus_id=stimulus_id,
+            sample_rate=sample_rate, stimulus_id=sid,
             extra_parameters=extra_parameters)
         output.append(stimulus)
     return output
