@@ -22,12 +22,8 @@ _RESULT_FIELDS = {
 }
 
 
-def f0_smoothness_metrics(
-    representations,
-    frequencies_hz,
-    *,
-    thresholds=DEFAULT_ADJACENT_DISTANCE_THRESHOLDS,
-):
+def f0_smoothness_metrics(representations, frequencies_hz, *,
+    thresholds=DEFAULT_ADJACENT_DISTANCE_THRESHOLDS):
     '''Summarize consecutive-frequency distances in CNN space.
     representations:  Samples by CNN features.
     frequencies_hz:   One positive, unique frequency per sample.
@@ -40,26 +36,18 @@ def f0_smoothness_metrics(
     representations = np.asarray(representations)
     if representations.ndim != 2:
         raise ValueError('representations must be a two-dimensional array')
-    frequencies = _validated_frequencies(
-        frequencies_hz,
-        expected_length=representations.shape[0],
-    )
+    frequencies = _validated_frequencies(frequencies_hz,
+        expected_length=representations.shape[0])
     thresholds = _validated_thresholds(thresholds)
-    result = accumulated_adjacent_cosine_scale(
-        representations,
-        frequencies,
-    )
+    result = accumulated_adjacent_cosine_scale(representations, frequencies)
     ordered_frequencies = result['frequencies_hz']
     adjacent_distances = result['adjacent_distances']
-    frequency_edges = np.column_stack((
-        ordered_frequencies[:-1],
-        ordered_frequencies[1:],
-    ))
+    frequency_edges = np.column_stack((ordered_frequencies[:-1],
+        ordered_frequencies[1:]))
     fractions = np.asarray([
-        np.mean(adjacent_distances > threshold)
-        for threshold in thresholds
+        np.mean(adjacent_distances > threshold) for threshold in thresholds
     ], dtype=float)
-    return {
+    metrics = {
         'frequencies_hz': ordered_frequencies,
         'frequency_edges_hz': frequency_edges,
         'adjacent_distances': adjacent_distances,
@@ -77,29 +65,31 @@ def f0_smoothness_metrics(
         'thresholds': thresholds,
         'fractions_above_threshold': fractions,
     }
+    return metrics
 
 
 def f0_checkpoint_step(model_name):
-    '''Return the numeric training step encoded by an F0 model name.'''
+    '''Return the numeric training step encoded by an F0 model name.
+    model_name:  F0 checkpoint model name to parse.
+    '''
     if not isinstance(model_name, str) or not model_name:
         raise ValueError('model_name must be a non-empty string')
     if model_name == locations.wav2vec2_random_checkpoint_name:
         return 0
-    match = re.fullmatch(
-        locations.wav2vec2_nl1_checkpoint_pattern,
-        model_name,
-    )
+    match = re.fullmatch(locations.wav2vec2_nl1_checkpoint_pattern,
+        model_name)
     if match is None:
         raise ValueError(f'unsupported F0 checkpoint model: {model_name!r}')
     return int(match.group(1))
 
 
-def f0_checkpoint_metrics(
-    result_path,
-    *,
-    thresholds=DEFAULT_ADJACENT_DISTANCE_THRESHOLDS,
-):
-    '''Load and summarize one model-specific F0 result bundle.'''
+def f0_checkpoint_metrics(result_path, *,
+    thresholds=DEFAULT_ADJACENT_DISTANCE_THRESHOLDS):
+    '''Load and summarize one model-specific F0 result bundle.
+    result_path:  Path to one F0 checkpoint result .npz bundle.
+    thresholds:   Cosine-distance thresholds whose exceedance fractions
+                  should be reported.
+    '''
     result_path = Path(result_path)
     if not result_path.is_file():
         raise FileNotFoundError(f'F0 checkpoint result not found: {result_path}')
@@ -115,33 +105,28 @@ def f0_checkpoint_metrics(
                 f'{result_path.name!r} != {model_name!r}'
             )
             raise ValueError(message)
-        metrics = f0_smoothness_metrics(
-            result['mean_cnn_features'],
-            result['frequencies'],
-            thresholds=thresholds,
-        )
+        metrics = f0_smoothness_metrics(result['mean_cnn_features'],
+            result['frequencies'], thresholds=thresholds)
+        aggregation = _scalar_string(result['aggregation'], 'aggregation')
+        random_state = _scalar_integer(result['random_state'],
+            'random_state')
         metrics.update({
             'model_name': model_name,
             'checkpoint_step': f0_checkpoint_step(model_name),
-            'aggregation': _scalar_string(
-                result['aggregation'],
-                'aggregation',
-            ),
+            'aggregation': aggregation,
             'metric': _scalar_string(result['metric'], 'metric'),
-            'random_state': _scalar_integer(
-                result['random_state'],
-                'random_state',
-            ),
+            'random_state': random_state,
             'result_path': result_path,
         })
     return metrics
 
 
-def load_f0_checkpoint_metrics(
-    *,
-    thresholds=DEFAULT_ADJACENT_DISTANCE_THRESHOLDS,
-):
-    '''Load every F0 result bundle and return metrics in checkpoint order.'''
+def load_f0_checkpoint_metrics(*,
+    thresholds=DEFAULT_ADJACENT_DISTANCE_THRESHOLDS):
+    '''Load every F0 result bundle and return metrics in checkpoint order.
+    thresholds:  Cosine-distance thresholds whose exceedance fractions
+                 should be reported.
+    '''
     output_directory = Path(locations.f0_output_data)
     if not output_directory.is_dir():
         message = f'F0 output-data directory not found: {output_directory}'
@@ -160,6 +145,7 @@ def load_f0_checkpoint_metrics(
 
 
 def _validated_frequencies(values, expected_length):
+    '''Validate a per-representation array of finite, unique frequencies.'''
     try:
         frequencies = np.asarray(values, dtype=float)
     except (TypeError, ValueError) as error:
@@ -174,6 +160,7 @@ def _validated_frequencies(values, expected_length):
 
 
 def _validated_thresholds(values):
+    '''Validate values as finite, unique thresholds in (0, 2).'''
     try:
         thresholds = np.asarray(tuple(values), dtype=float)
     except (TypeError, ValueError) as error:
@@ -190,6 +177,7 @@ def _validated_thresholds(values):
 
 
 def _scalar_string(value, name):
+    '''Validate value as a non-empty scalar string array.'''
     value = np.asarray(value)
     if value.ndim != 0 or value.dtype.kind not in 'SU':
         raise ValueError(f'{name} must be a scalar string')
@@ -200,6 +188,7 @@ def _scalar_string(value, name):
 
 
 def _scalar_integer(value, name):
+    '''Validate value as a scalar integer array.'''
     value = np.asarray(value)
     if value.ndim != 0 or value.dtype.kind not in 'iu':
         raise ValueError(f'{name} must be a scalar integer')
