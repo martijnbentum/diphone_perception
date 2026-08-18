@@ -26,19 +26,9 @@ def write_stimuli(stimuli, output_root, *, overwrite=False):
     is preserved unless ``overwrite`` is true.
     '''
     stimuli = _validated_stimuli(stimuli)
-    output_root = Path(output_root)
-    if not output_root.name:
-        message = 'output_root must name a package directory'
-        raise ValueError(message)
-    output_root.parent.mkdir(parents=True, exist_ok=True)
-    if _path_exists(output_root) and not overwrite:
-        message = f'refusing to replace existing output {output_root}; '
-        message += 'pass overwrite=True to replace it'
-        raise FileExistsError(message)
-    staging_path = tempfile.mkdtemp(
-        prefix=f'.{output_root.name}-staging-',
-        dir=output_root.parent,
-    )
+    output_root = _validated_output_root(Path(output_root), overwrite)
+    staging_path = tempfile.mkdtemp(prefix=f'.{output_root.name}-staging-',
+        dir=output_root.parent)
     staging_root = Path(staging_path)
     try:
         _write_package(staging_root, stimuli)
@@ -49,6 +39,7 @@ def write_stimuli(stimuli, output_root, *, overwrite=False):
 
 
 def _validated_stimuli(stimuli):
+    '''Validate stimuli as a non-empty tuple of unique Stimulus objects.'''
     if isinstance(stimuli, Stimulus):
         raise TypeError('stimuli must be an iterable of Stimulus objects')
     try:
@@ -75,21 +66,32 @@ def _validated_stimuli(stimuli):
 
 
 def _validate_stimulus_id(stimulus_id):
+    '''Raise if stimulus_id is not a safe, non-empty filename component.'''
     if not isinstance(stimulus_id, str) or not stimulus_id:
         message = 'stimulus_id must be a non-empty string'
         raise ValueError(message)
-    if (
-        stimulus_id in {'.', '..'}
-        or '/' in stimulus_id
-        or '\\' in stimulus_id
-        or '\x00' in stimulus_id
-    ):
+    bad_chars = ('/', '\\', '\x00')
+    if stimulus_id in {'.', '..'} or any(c in stimulus_id for c in bad_chars):
         message = 'stimulus_id is not a safe filename component: '
         message += repr(stimulus_id)
         raise ValueError(message)
 
 
+def _validated_output_root(output_root, overwrite):
+    '''Validate output_root and ensure its parent directory exists.'''
+    if not output_root.name:
+        message = 'output_root must name a package directory'
+        raise ValueError(message)
+    output_root.parent.mkdir(parents=True, exist_ok=True)
+    if _path_exists(output_root) and not overwrite:
+        message = f'refusing to replace existing output {output_root}; '
+        message += 'pass overwrite=True to replace it'
+        raise FileExistsError(message)
+    return output_root
+
+
 def _write_package(package_root, stimuli):
+    '''Write every stimulus WAV and the package manifest under package_root.'''
     audio_root = package_root / 'audio'
     audio_root.mkdir()
     rows = []
@@ -98,44 +100,39 @@ def _write_package(package_root, stimuli):
         path = package_root / relative_path
         waveform = stimulus.waveform.astype(np.float32, copy=False)
         wavfile.write(path, stimulus.sample_rate, waveform)
-        rows.append({
-            'stimulus_id': stimulus.stimulus_id,
-            'path': relative_path.as_posix(),
-            'sha256': _file_sha256(path),
-            'sample_rate_hz': stimulus.sample_rate,
-            'dtype': str(waveform.dtype),
-            'n_samples': int(waveform.size),
-            'duration_seconds': waveform.size / stimulus.sample_rate,
-            'parameters': _json_value(stimulus.parameters),
-        })
-    manifest = {
-        'schema_version': 1,
-        'stimulus_count': len(stimuli),
+        row = _manifest_row(stimulus, relative_path, path, waveform)
+        rows.append(row)
+    software_versions = {'python': platform.python_version(),
+        'numpy': np.__version__, 'scipy': scipy.__version__}
+    manifest = {'schema_version': 1, 'stimulus_count': len(stimuli),
         'audio_format': {'container': 'WAV', 'sample_format': 'float32'},
-        'software_versions': {
-            'python': platform.python_version(),
-            'numpy': np.__version__,
-            'scipy': scipy.__version__,
-        },
-        'stimuli': rows,
-    }
+        'software_versions': software_versions, 'stimuli': rows}
     _write_json(package_root / 'manifest.json', manifest)
 
 
+def _manifest_row(stimulus, relative_path, path, waveform):
+    '''Return one manifest entry for a persisted stimulus WAV.'''
+    row = {'stimulus_id': stimulus.stimulus_id,
+        'path': relative_path.as_posix(), 'sha256': _file_sha256(path),
+        'sample_rate_hz': stimulus.sample_rate,
+        'dtype': str(waveform.dtype), 'n_samples': int(waveform.size),
+        'duration_seconds': waveform.size / stimulus.sample_rate,
+        'parameters': _json_value(stimulus.parameters)}
+    return row
+
+
 def _commit_package(staging_root, output_root, overwrite):
-    backup_path = tempfile.mkdtemp(
-        prefix=f'.{output_root.name}-backup-',
-        dir=output_root.parent,
-    )
+    '''Atomically replace output_root with the staged package.'''
+    backup_path = tempfile.mkdtemp(prefix=f'.{output_root.name}-backup-',
+        dir=output_root.parent)
     backup_root = Path(backup_path)
     backup = backup_root / output_root.name
     had_output = _path_exists(output_root)
     try:
         if had_output:
-            if not overwrite:
-                message = f'refusing to replace existing output {output_root}; '
-                message += 'pass overwrite=True to replace it'
-                raise FileExistsError(message)
+            message = f'refusing to replace existing output {output_root}; '
+            message += 'pass overwrite=True to replace it'
+            if not overwrite: raise FileExistsError(message)
             os.replace(output_root, backup)
         try:
             os.replace(staging_root, output_root)
@@ -147,16 +144,14 @@ def _commit_package(staging_root, output_root, overwrite):
 
 
 def _write_json(path, value):
-    text = json.dumps(
-        value,
-        indent=2,
-        ensure_ascii=False,
-        allow_nan=False,
-    ) + '\n'
+    '''Write value as indented JSON with a trailing newline.'''
+    text = json.dumps(value, indent=2, ensure_ascii=False,
+        allow_nan=False) + '\n'
     path.write_text(text, encoding='utf-8')
 
 
 def _json_value(value):
+    '''Recursively convert value into JSON-serializable native types.'''
     if isinstance(value, Mapping):
         output = {}
         for key, item in value.items():
@@ -178,6 +173,7 @@ def _json_value(value):
 
 
 def _file_sha256(path):
+    '''Return the SHA-256 hex digest of a file's contents.'''
     digest = hashlib.sha256()
     with path.open('rb') as stream:
         for block in iter(lambda: stream.read(1024 * 1024), b''):
@@ -186,4 +182,5 @@ def _file_sha256(path):
 
 
 def _path_exists(path):
+    '''Return whether path exists, including broken symlinks.'''
     return path.exists() or path.is_symlink()
