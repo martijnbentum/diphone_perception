@@ -9,6 +9,14 @@ def measure_waveform(waveform, sample_rate):
     '''Measure basic level and duration properties of a waveform.
     waveform:     One-dimensional array of audio samples.
     sample_rate:  Number of waveform samples per second.
+    Returns a WaveformMeasurements with:
+    peak:              Maximum absolute sample value.
+    rms:               Root-mean-square level.
+    energy:            Sum of squared samples.
+    dbfs:              RMS level in dB relative to full scale.
+    crest_factor:      Peak divided by RMS.
+    dc_mean:           Mean sample value.
+    duration_seconds:  Waveform duration in seconds.
     '''
     samples = _validated_waveform(waveform, sample_rate)
     peak = float(np.max(np.abs(samples)))
