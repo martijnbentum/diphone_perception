@@ -35,7 +35,6 @@ PHASE_DIAGNOSTIC_SAMPLE_OFFSETS = tuple(range(5))
 @dataclass(frozen=True)
 class CNNPhaseDiagnostics:
     '''Frame-aggregation measurements for one stored CNN representation.'''
-
     stimulus_id: str
     mean_vector: np.ndarray
     middle_vector: np.ndarray
@@ -59,19 +58,16 @@ def phase_diagnostic_stimuli(
     amplitude=1.0,
 ):
     '''Generate pure tones at five input-sample alignments.
-
     A sample offset advances the original sinusoid by that many samples:
     ``x_offset[n] = x_original[n + sample_offset]``. For the default
     one-second, integer-frequency tones, this changes phase while retaining
     frequency, amplitude, duration, and FFT magnitude.
     '''
-
     frequencies = tuple(frequencies)
     sample_offsets = tuple(sample_offsets)
     if not frequencies: raise ValueError('frequencies must not be empty')
     if 0 not in sample_offsets:
         raise ValueError('sample_offsets must include zero')
-
     stimuli = []
     for frequency in frequencies:
         for sample_offset in sample_offsets:
@@ -105,7 +101,6 @@ def phase_diagnostic_stimuli(
 
 def create_phase_diagnostic_stimuli(*, output_root=None, overwrite=False):
     '''Generate and persist the 170-stimulus phase-diagnostic panel.'''
-
     if output_root is None:
         output_root = locations.f0_phase_diagnostic_stimuli
     stimuli = phase_diagnostic_stimuli()
@@ -119,7 +114,6 @@ def create_phase_diagnostic_phraser_store(
     store_path=None,
 ):
     '''Create a Phraser store containing the phase-diagnostic stimuli.'''
-
     if stimulus_package is None:
         stimulus_package = locations.f0_phase_diagnostic_stimuli
     if store_path is None:
@@ -139,7 +133,6 @@ def create_phase_diagnostic_echoframe_store(
     model_name=PHASE_DIAGNOSTIC_MODEL_NAME,
 ):
     '''Create a one-model Echoframe store and attach the Phraser store.'''
-
     if store_path is None:
         store_path = locations.f0_phase_diagnostic_echoframe_store
     store = create_store(store_path, (model_name,))
@@ -163,7 +156,6 @@ def extract_phase_diagnostic_cnn_features(
     overwrite=False,
 ):
     '''Extract final CNN features for the phase-diagnostic stimuli.'''
-
     _, phrases = _phase_rows_and_phrases(store, stimulus_package)
     extract_cnn_checkpoint(
         phrases,
@@ -184,13 +176,11 @@ def run_phase_diagnostics(
     overwrite=False,
 ):
     '''Run diagnostics and persist aligned vectors and measurements.
-
     In addition to the per-stimulus frame measurements, the NPZ stores cosine
     and Euclidean distances from each mean vector to offset zero at the same
     frequency. Those within-frequency comparisons are the direct test of
     sample-alignment sensitivity; no cross-frequency all-pairs matrix is made.
     '''
-
     if output_path is None:
         output_path = locations.f0_phase_diagnostic_results
     rows, phrases = _phase_rows_and_phrases(store, stimulus_package)
@@ -212,13 +202,11 @@ def run_phase_diagnostic_experiment(
     gpu=False,
 ):
     '''Create every artifact, extract features, and save diagnostics.
-
     Creation is intentionally one-shot: existing stimulus or store paths are
     rejected. Interrupted CNN extraction can be resumed with
     ``extract_phase_diagnostic_cnn_features`` and diagnostics can then be run
     separately.
     '''
-
     if output_root is None: output_root = locations.f0_phase_diagnostics
     output_root = Path(output_root)
     stimulus_package = output_root / 'stimuli'
@@ -231,7 +219,6 @@ def run_phase_diagnostic_experiment(
         echoframe_store_path,
         result_path,
     ))
-
     create_phase_diagnostic_stimuli(output_root=stimulus_package)
     phraser_store = create_phase_diagnostic_phraser_store(
         stimulus_package=stimulus_package,
@@ -263,18 +250,14 @@ def run_phase_diagnostic_experiment(
 
 def diagnose_cnn_phase(phrases, model_name, store, *, collar=0):
     '''Measure frame cancellation in stored CNN features for each Phrase.
-
     phrases:     Ordered iterable of native Phraser Phrase objects.
     model_name:  Registered Echoframe model name.
     store:       Echoframe Store containing the CNN features.
     collar:      Context in milliseconds used during extraction.
-
     Returns one ``CNNPhaseDiagnostics`` record per Phrase, in input order.
     '''
-
     phrases = tuple(phrases)
     if not phrases: raise ValueError('phrases must not be empty')
-
     diagnostics = []
     for phrase in phrases:
         feature = store.phraser_key_to_cnn_feature(
@@ -296,18 +279,15 @@ def _diagnose_feature(feature, phrase):
     )
     even_mean_vector = frames[::2].mean(axis=0)
     odd_mean_vector = frames[1::2].mean(axis=0)
-
     mean_norm = _norm(mean_vector)
     middle_norm = _norm(middle_vector)
     frame_norms = np.linalg.norm(frames, axis=1)
     mean_frame_norm = float(frame_norms.mean())
     even_mean_norm = _norm(even_mean_vector)
     odd_mean_norm = _norm(odd_mean_vector)
-
     cancellation_ratio = None
     if mean_frame_norm:
         cancellation_ratio = mean_norm / mean_frame_norm
-
     return CNNPhaseDiagnostics(
         stimulus_id=phrase.label,
         mean_vector=mean_vector,
@@ -457,7 +437,6 @@ def _offset_zero_distances(vectors, frequencies, sample_offsets):
         strict=True,
     )):
         if sample_offset == 0: baseline_by_frequency[frequency] = vectors[index]
-
     cosine = []
     euclidean = []
     for vector, frequency in zip(vectors, frequencies, strict=True):

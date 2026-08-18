@@ -37,9 +37,7 @@ def _spread_annotation_labels(
     trajectory,
 ):
     '''Globally place labels away from text, markers, and the trajectory.'''
-
     if not annotations: return ()
-
     figure.canvas.draw()
     renderer = figure.canvas.get_renderer()
     pixels_per_point = figure.dpi / 72
@@ -96,7 +94,6 @@ def _annotation_candidates(
     trajectory_clearance,
 ):
     from matplotlib.text import Text
-
     anchor = annotation.axes.transData.transform(annotation.xy)
     candidates = []
     for offset in _LABEL_CANDIDATE_OFFSETS:
@@ -422,7 +419,6 @@ def _position_annotation(annotation, offset):
 
 def _padded_bbox(box, padding):
     from matplotlib.transforms import Bbox
-
     return Bbox.from_extents(
         box.x0 - padding,
         box.y0 - padding,

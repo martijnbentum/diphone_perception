@@ -29,17 +29,14 @@ def f0_smoothness_metrics(
     thresholds=DEFAULT_ADJACENT_DISTANCE_THRESHOLDS,
 ):
     '''Summarize consecutive-frequency distances in CNN space.
-
     representations:  Samples by CNN features.
     frequencies_hz:   One positive, unique frequency per sample.
     thresholds:       Cosine-distance thresholds whose exceedance fractions
                       should be reported.
-
     Rows are sorted by frequency before adjacent cosine distances are
     calculated. The returned complete edge arrays support later heatmaps and
     alternative summaries without another model extraction.
     '''
-
     representations = np.asarray(representations)
     if representations.ndim != 2:
         raise ValueError('representations must be a two-dimensional array')
@@ -62,7 +59,6 @@ def f0_smoothness_metrics(
         np.mean(adjacent_distances > threshold)
         for threshold in thresholds
     ], dtype=float)
-
     return {
         'frequencies_hz': ordered_frequencies,
         'frequency_edges_hz': frequency_edges,
@@ -85,7 +81,6 @@ def f0_smoothness_metrics(
 
 def f0_checkpoint_step(model_name):
     '''Return the numeric training step encoded by an F0 model name.'''
-
     if not isinstance(model_name, str) or not model_name:
         raise ValueError('model_name must be a non-empty string')
     if model_name == locations.wav2vec2_random_checkpoint_name:
@@ -105,7 +100,6 @@ def f0_checkpoint_metrics(
     thresholds=DEFAULT_ADJACENT_DISTANCE_THRESHOLDS,
 ):
     '''Load and summarize one model-specific F0 result bundle.'''
-
     result_path = Path(result_path)
     if not result_path.is_file():
         raise FileNotFoundError(f'F0 checkpoint result not found: {result_path}')
@@ -148,7 +142,6 @@ def load_f0_checkpoint_metrics(
     thresholds=DEFAULT_ADJACENT_DISTANCE_THRESHOLDS,
 ):
     '''Load every F0 result bundle and return metrics in checkpoint order.'''
-
     output_directory = Path(locations.f0_output_data)
     if not output_directory.is_dir():
         message = f'F0 output-data directory not found: {output_directory}'

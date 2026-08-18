@@ -21,7 +21,6 @@ F0_PHRASER_SOURCE_ID = 'f0-pure-tones'
 
 def create_auditory_stimuli():
     '''Generate and save the complete pure-tone F0 stimulus grid.
-
     Returns the created stimuli.
     '''
     output_root = locations.f0_pure_tone_stimuli
@@ -32,7 +31,6 @@ def create_auditory_stimuli():
 
 def create_f0_pure_tone_phraser_store():
     '''Create and fill the experiment-specific Phraser store.
-
     Uses the stimuli from ``create_auditory_stimuli``. Returns the new
     Phraser store.
     '''
@@ -43,7 +41,6 @@ def create_f0_pure_tone_phraser_store():
 
 def load_f0_pure_tone_phraser_store():
     '''Open and return the existing experiment-specific Phraser store.
-
     Returns the store created by ``create_f0_pure_tone_phraser_store``.
     '''
     store_path = locations.f0_pure_tone_phraser_store
@@ -55,7 +52,6 @@ def load_f0_pure_tone_phraser_store():
 
 def create_f0_echoframe_store():
     '''Create the shared synthetic Echoframe store initialized for F0.
-
     Registers the complete wav2vec2 checkpoint set and attaches the existing
     F0 Phraser store. Returns the native Echoframe Store.
     '''
@@ -68,7 +64,6 @@ def create_f0_echoframe_store():
 
 def load_f0_echoframe_store():
     '''Load the shared Echoframe store and attach the F0 Phraser store.
-
     Returns the native Echoframe Store.
     '''
     store_path = locations.synthetic_acoustic_probes_echoframe_store
@@ -82,13 +77,11 @@ def load_f0_echoframe_store():
 def extract_f0_cnn_features(echoframe_store, model_names=None, *,
     gpu=False, overwrite=False):
     '''Extract F0 CNN features for registered checkpoints.
-
     echoframe_store:  Loaded F0 Echoframe Store.
     model_names:      Optional checkpoint iterable; defaults to the complete
                        set.
     gpu:              Whether Echoframe should run models on a GPU.
     overwrite:        Whether Echoframe should replace stored CNN features.
-
     Extraction always uses zero collar and returns None.
     '''
     if model_names is None:
@@ -101,7 +94,6 @@ def extract_f0_cnn_features(echoframe_store, model_names=None, *,
 
 def make_f0_x_y(model_name, store, *, aggregation):
     '''Return CNN representations and numeric F0 targets in manifest order.
-
     model_name:   Registered Echoframe model name.
     store:        Loaded F0 Echoframe Store.
     aggregation:  ``center`` or ``mean`` frame reduction.
@@ -114,7 +106,6 @@ def make_f0_x_y(model_name, store, *, aggregation):
         if phrase.label in phrases_by_id:
             raise ValueError(f'duplicate F0 stimulus ID: {phrase.label!r}')
         phrases_by_id[phrase.label] = phrase
-
     row_ids = []
     ordered_phrases = []
     targets = []
@@ -132,7 +123,6 @@ def make_f0_x_y(model_name, store, *, aggregation):
     if extras:
         extras = sorted(extras)
         raise ValueError(f'F0 Phrases missing from manifest: {extras!r}')
-
     X, stimulus_ids = make_x_y(ordered_phrases, model_name, store,
         aggregation=aggregation, collar=0)
     if stimulus_ids.tolist() != row_ids:
@@ -143,19 +133,15 @@ def make_f0_x_y(model_name, store, *, aggregation):
 
 def save_f0_checkpoint_result(model_name, store):
     '''Save mean CNN features and their F0 UMAP for one checkpoint.
-
     model_name:  Registered Echoframe model name.
     store:       Loaded F0 Echoframe Store.
-
     Existing checkpoint files are skipped. Returns the output path.
     '''
     output_directory = locations.f0_output_data
     output_path = output_directory / f'{model_name}.npz'
     if output_path.exists(): return output_path
-
     X, y = make_f0_x_y(model_name, store, aggregation='mean')
     coordinates = project_umap(X, metric='cosine', random_state=42)
-
     output_directory.mkdir(parents=True, exist_ok=True)
     with output_path.open('xb') as stream:
         np.savez_compressed(stream, mean_cnn_features=np.asarray(X),
@@ -167,7 +153,6 @@ def save_f0_checkpoint_result(model_name, store):
 
 def save_f0_checkpoint_results(store):
     '''Save F0 result bundles for the complete wav2vec2 checkpoint set.
-
     Existing checkpoint files are skipped. Returns paths grouped under
     ``saved`` and ``skipped``.
     '''

@@ -21,7 +21,6 @@ _JUMP_NEIGHBORHOOD_SIZE = 5
 
 def plot_f0_checkpoint_result(model_name, *, figsize=None, dpi=300):
     '''Plot the stored F0 UMAP result for one checkpoint.
-
     Loads ``output_data/{model_name}.npz`` and saves the rendered figure as
     ``plots/{model_name}.pdf`` below the F0 experiment directory. Returns the
     Matplotlib figure and primary axis.
@@ -46,19 +45,15 @@ def plot_f0_checkpoint_comparison(
     dpi=300,
 ):
     '''Plot two stored F0 checkpoint results in one horizontal figure.
-
     left_model_name:   Checkpoint shown in the left panel.
     right_model_name:  Checkpoint shown in the right panel.
     figsize:           Optional Matplotlib figure size; defaults to 16 by 7.
     dpi:               Resolution used when saving.
-
     Both panels use one F0 color scale and colorbar. The rendered figure is
     saved below the F0 plots directory as ``{left}_vs_{right}.pdf``. Returns
     the Matplotlib figure and its two panel axes.
     '''
-
     from matplotlib import colors, pyplot
-
     model_names = (left_model_name, right_model_name)
     results = tuple(
         _load_f0_checkpoint_result(model_name)
@@ -113,7 +108,6 @@ def plot_f0_checkpoint_comparison(
             coordinates=coordinates,
             trajectory=trajectory,
         )
-
     output_path = locations.f0_plots / (
         f'{left_model_name}_vs_{right_model_name}.pdf')
     _save_figure(figure, output_path, dpi)
@@ -128,19 +122,15 @@ def plot_f0_checkpoint_smoothness(
     dpi=300,
 ):
     '''Plot adjacent-distance summaries against numeric checkpoint step.
-
     checkpoint_metrics:  Iterable returned by
                          ``load_f0_checkpoint_metrics``.
     output_path:         Optional destination; omit it to disable saving.
     figsize:             Optional Matplotlib figure size.
     dpi:                 Resolution used when saving.
-
     Returns the Matplotlib figure and three axes for typical distances,
     extreme distances, and threshold-exceedance fractions.
     '''
-
     from matplotlib import pyplot
-
     rows = _validated_checkpoint_metrics(checkpoint_metrics)
     steps = np.asarray([row['checkpoint_step'] for row in rows])
     figure, axes = pyplot.subplots(
@@ -167,7 +157,6 @@ def plot_f0_checkpoint_smoothness(
             marker='o',
             label=label,
         )
-
     thresholds = rows[0]['thresholds']
     fractions = np.vstack([
         row['fractions_above_threshold']
@@ -180,7 +169,6 @@ def plot_f0_checkpoint_smoothness(
             marker='o',
             label=f'> {threshold:g}',
         )
-
     axes[0].set_ylabel('Adjacent cosine distance')
     axes[1].set_ylabel('Adjacent cosine distance')
     axes[2].set_ylabel('Fraction of edges')
@@ -208,7 +196,6 @@ def plot_f0_checkpoint_distance_heatmap(
     max_checkpoint_labels=10,
 ):
     '''Plot every adjacent-frequency distance across checkpoints.
-
     checkpoint_metrics:  Iterable returned by
                          ``load_f0_checkpoint_metrics``.
     output_path:         Optional destination; omit it to disable saving.
@@ -220,14 +207,11 @@ def plot_f0_checkpoint_distance_heatmap(
                          training-step spacing, or ``categorical`` for equal
                          column widths.
     max_checkpoint_labels:  Maximum number of sampled checkpoint tick labels.
-
     Frequency edges retain their physical Hz boundaries. Tick labels are
     sampled across the displayed checkpoint positions and placed at their
     exact column centers. Returns the Matplotlib figure and primary axis.
     '''
-
     from matplotlib import pyplot
-
     rows = _validated_checkpoint_metrics(
         checkpoint_metrics,
         require_edges=True,
@@ -241,7 +225,6 @@ def plot_f0_checkpoint_distance_heatmap(
         or max_checkpoint_labels < 1
     ):
         raise ValueError('max_checkpoint_labels must be a positive integer')
-
     frequency_edges = rows[0]['frequency_edges_hz']
     frequency_boundaries = np.concatenate((
         frequency_edges[:1, 0],
@@ -262,7 +245,6 @@ def plot_f0_checkpoint_distance_heatmap(
         checkpoint_positions,
         max_checkpoint_labels,
     )
-
     if figsize is None:
         width = max(8, min(16, len(rows) * 0.3))
         figsize = (width, 7)
@@ -297,7 +279,6 @@ def plot_f0_checkpoint_distance_heatmap(
 
 def _checkpoint_axis_geometry(steps, scale):
     '''Return checkpoint column centers and boundaries for one axis scale.'''
-
     if scale == 'log1p':
         positions = np.log10(steps + 1)
     elif scale == 'linear':
@@ -307,13 +288,11 @@ def _checkpoint_axis_geometry(steps, scale):
     else:
         message = 'checkpoint_scale must be log1p, linear, or categorical'
         raise ValueError(message)
-
     if positions.size == 1:
         boundaries = np.array([positions[0] - 0.5, positions[0] + 0.5])
         return positions, boundaries
     if np.any(np.diff(positions) <= 0):
         raise ValueError('checkpoint positions must increase')
-
     boundaries = np.empty(positions.size + 1, dtype=float)
     boundaries[1:-1] = (positions[:-1] + positions[1:]) / 2
     boundaries[0] = positions[0] - (boundaries[1] - positions[0])
@@ -362,7 +341,6 @@ def plot_f0_umap(
     dpi=300,
 ):
     '''Plot the ordered pure-tone trajectory in UMAP space.
-
     X:             Samples by CNN features, normally mean-aggregated frames.
     y:             Numeric fundamental frequencies in Hz.
     random_state:  Seed controlling the UMAP projection.
@@ -371,19 +349,16 @@ def plot_f0_umap(
                    written with ``plot_f0_checkpoint_result``.
     figsize:       Optional Matplotlib figure size.
     dpi:            Resolution used when saving.
-
     Points are colored by frequency and connected in ascending-frequency
     order. Paper landmarks are marked with red stars and annotated when
     present. Isolated points whose distances to both frequency neighbors are
     markedly larger than nearby steps are annotated as jumps. Returns the
     Matplotlib figure and primary axis.
     '''
-
     frequencies = _validated_frequencies(y)
     if np.ndim(X) != 2: raise ValueError('X must be a two-dimensional array')
     if np.shape(X)[0] != frequencies.size:
         raise ValueError('X and y must contain the same number of samples')
-
     coordinates = project_umap(
         X,
         metric='cosine',
@@ -409,7 +384,6 @@ def _plot_f0_coordinates(
     title,
 ):
     from matplotlib import pyplot
-
     figure, axis = pyplot.subplots(figsize=figsize)
     points, annotations, ordered_coordinates = _draw_f0_coordinates(
         axis,
@@ -427,7 +401,6 @@ def _plot_f0_coordinates(
         coordinates=coordinates,
         trajectory=ordered_coordinates,
     )
-
     if output_path:
         _save_figure(figure, output_path, dpi)
     return figure, axis
@@ -441,7 +414,6 @@ def _draw_f0_coordinates(axis, coordinates, frequencies, *, title, norm=None):
         raise ValueError(message)
     if not np.all(np.isfinite(coordinates)):
         raise ValueError('coordinates contain non-finite values')
-
     order = np.argsort(frequencies, kind='stable')
     ordered_coordinates = coordinates[order]
     ordered_frequencies = frequencies[order]
@@ -468,7 +440,6 @@ def _draw_f0_coordinates(axis, coordinates, frequencies, *, title, norm=None):
         ordered_frequencies,
         jump_indices=jump_indices,
     ))
-
     axis.set_xlabel('UMAP 1')
     axis.set_ylabel('UMAP 2')
     axis.set_title(title)
@@ -502,7 +473,6 @@ def _validated_checkpoint_metrics(values, *, require_edges=False):
         ) from error
     if not rows:
         raise ValueError('checkpoint_metrics must not be empty')
-
     required = {
         'checkpoint_step',
         'fractions_above_threshold',
@@ -515,7 +485,6 @@ def _validated_checkpoint_metrics(values, *, require_edges=False):
     }
     if require_edges:
         required.update({'adjacent_distances', 'frequency_edges_hz'})
-
     output = []
     seen_steps = set()
     reference_thresholds = None
@@ -538,7 +507,6 @@ def _validated_checkpoint_metrics(values, *, require_edges=False):
         if step in seen_steps:
             raise ValueError(f'duplicate checkpoint_step: {step}')
         seen_steps.add(step)
-
         normalized = dict(row)
         normalized['checkpoint_step'] = step
         summary = np.asarray([
@@ -549,7 +517,6 @@ def _validated_checkpoint_metrics(values, *, require_edges=False):
             raise ValueError('cosine-distance summaries must be in [0, 2]')
         if not summary[1] <= summary[2] <= summary[3] <= summary[4]:
             raise ValueError('cosine-distance quantiles are not ordered')
-
         thresholds = _metric_vector(row['thresholds'], 'thresholds')
         if np.any(thresholds <= 0) or np.any(thresholds >= 2):
             raise ValueError('thresholds must lie strictly between zero and two')
@@ -567,7 +534,6 @@ def _validated_checkpoint_metrics(values, *, require_edges=False):
             raise ValueError('checkpoint thresholds do not match')
         normalized['thresholds'] = thresholds
         normalized['fractions_above_threshold'] = fractions
-
         if require_edges:
             adjacent = _metric_vector(
                 row['adjacent_distances'],
@@ -593,7 +559,6 @@ def _validated_checkpoint_metrics(values, *, require_edges=False):
             normalized['adjacent_distances'] = adjacent
             normalized['frequency_edges_hz'] = edges
         output.append(normalized)
-
     output.sort(key=lambda row: row['checkpoint_step'])
     return tuple(output)
 
@@ -724,7 +689,6 @@ def _label_background():
 
 def _large_jump_indices(coordinates):
     '''Return isolated points with two unusually long trajectory steps.'''
-
     if len(coordinates) < 4: return np.empty(0, dtype=int)
     step_distances = np.linalg.norm(np.diff(coordinates, axis=0), axis=1)
     jump_indices = []

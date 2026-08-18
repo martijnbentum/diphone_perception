@@ -20,7 +20,6 @@ def praat_vowel_stimulus(
     stimulus_id=None,
 ):
     '''Synthesize a voiced source filtered by a two-formant Praat grid.'''
-
     _validate_formants(
         f0_hz,
         f1_hz,
@@ -39,7 +38,6 @@ def praat_vowel_stimulus(
         raise ImportError(
             'Praat vowel synthesis requires praat-parselmouth'
         ) from error
-
     pitch_tier = call('Create PitchTier', 'f0', 0, duration)
     call(pitch_tier, 'Add point', 0, f0_hz)
     call(pitch_tier, 'Add point', duration, f0_hz)
@@ -115,7 +113,6 @@ def praat_formant_stimuli(
     **kwargs,
 ):
     '''Generate a speech-plausible F0/F1/F2 grid with crossed pairs omitted.'''
-
     output = []
     for f0_hz, f1_hz, f2_hz in product(
         f0_values, f1_values, f2_values

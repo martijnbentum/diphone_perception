@@ -84,12 +84,10 @@ def vowel_anchor_stimuli(
     bandwidths_hz=(80, 100),
 ):
     '''Synthesize every gender/vowel anchor for one supported source.'''
-
     spec = _source_spec(source_id)
     table, rows = _load_anchor_rows(source_id, spec, data_root)
     rows = _validated_anchor_rows(source_id, spec, rows)
     provenance = _anchor_provenance(table, data_root)
-
     stimuli = []
     for row in rows:
         stimulus_id = (
@@ -130,12 +128,10 @@ def write_vowel_anchor_materials(
     overwrite=False,
 ):
     '''Write source-separated float32 WAV packages and JSON manifests.
-
     Existing source directories are left untouched unless ``overwrite`` is
     true. All requested packages are built in a staging directory before any
     destination is replaced.
     '''
-
     source_ids = _validated_source_ids(source_ids)
     output_root = (
         Path(output_root) if output_root is not None
@@ -153,7 +149,6 @@ def write_vowel_anchor_materials(
             f'refusing to replace existing source directories: {paths}; '
             'pass overwrite=True to replace them'
         )
-
     staging_root = Path(tempfile.mkdtemp(
         prefix='.vowel-formants-staging-',
         dir=output_root,
@@ -240,7 +235,6 @@ def _validated_anchor_rows(source_id, spec, rows):
             raise ValueError(
                 f'{source_id!r} anchor {key!r} has no aggregation method'
             )
-
     duplicates = sorted({key for key in observed if observed.count(key) > 1})
     observed_set = set(observed)
     if duplicates or observed_set != expected:
@@ -310,7 +304,6 @@ def _stage_source_package(staging_root, source_id):
             'f2_hz': stimulus.parameters['f2_hz'],
             'aggregation': stimulus.parameters['aggregation'],
         })
-
     first = stimuli[0]
     provenance = first.parameters['anchor_provenance']
     manifest = {
@@ -409,7 +402,6 @@ def _file_sha256(path):
 
 def _software_versions():
     import scipy
-
     versions = {
         'python': platform.python_version(),
         'numpy': np.__version__,

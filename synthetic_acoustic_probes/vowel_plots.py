@@ -99,16 +99,13 @@ def plot_vowel_formant_space(
     dpi=300,
 ):
     '''Plot Dutch vowel anchors with panels organized by source or gender.
-
     ``panel_by`` must be either ``'source'`` or ``'gender'``. ``source_ids``
     and ``genders`` explicitly control which data are included. The returned
     axes are a one-dimensional NumPy array in panel order. Set
     ``add_examples=True`` to append an aligned vowel/example-word panel.
     When ``output_path`` is provided, the same figure is also saved there.
     '''
-
     from matplotlib import pyplot
-
     source_ids = _validated_source_ids(source_ids)
     genders = _validated_genders(genders)
     if panel_by not in {'source', 'gender'}:
@@ -118,7 +115,6 @@ def plot_vowel_formant_space(
     rows = _selected_rows(source_ids, genders, data_root)
     if not rows:
         raise ValueError('no vowel anchors match the selected sources/genders')
-
     panel_values = source_ids if panel_by == 'source' else genders
     figure, axes = _figure_and_axes(
         len(panel_values) + int(add_examples),
@@ -142,7 +138,6 @@ def plot_vowel_formant_space(
         _plot_examples_panel(axes[-1])
     figure.suptitle('Dutch vowel formant space')
     figure.tight_layout()
-
     if output_path:
         output_path = Path(output_path)
         output_path.parent.mkdir(parents=True, exist_ok=True)

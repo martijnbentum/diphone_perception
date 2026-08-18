@@ -11,7 +11,6 @@ from sklearn.preprocessing import StandardScaler
 
 def cosine_distance_matrix(representations):
     '''Return pairwise cosine distances after strict input validation.'''
-
     representations = _representations(representations)
     return cdist(representations, representations, metric='cosine')
 
@@ -22,7 +21,6 @@ def pairwise_geometry_spearman(
     coordinate_spans=None,
 ):
     '''Correlate representation distances with normalized target distances.'''
-
     representations = _representations(representations)
     coordinates = _coordinates(
         coordinates, representations.shape[0], coordinate_spans
@@ -44,7 +42,6 @@ def local_neighbor_preservation(
     coordinate_spans=None,
 ):
     '''Mean recall of target-space neighbors in representation space.'''
-
     representations = _representations(representations)
     n_samples = representations.shape[0]
     if not 1 <= n_neighbors < n_samples:
@@ -78,7 +75,6 @@ def cross_validated_ridge_scores(
     seed=0,
 ):
     '''Cross-validated R² for every controlled target dimension.'''
-
     representations = _representations(representations)
     target_values, names = _named_targets(targets, target_names)
     if target_values.shape[0] != representations.shape[0]:
@@ -118,7 +114,6 @@ def conditional_axis_monotonicity(
     coordinate_names=None,
 ):
     '''Distance monotonicity for one axis while all other axes are fixed.'''
-
     representations = _representations(representations)
     coordinate_values, names = _named_targets(
         coordinates, coordinate_names
@@ -174,7 +169,6 @@ def conditional_axis_monotonicity(
 
 def frequency_scale(frequencies_hz, scale):
     '''Map positive frequencies to Hz, log-Hz, Mel, or Bark coordinates.'''
-
     frequencies = np.asarray(frequencies_hz, dtype=float)
     if frequencies.ndim != 1 or not frequencies.size:
         raise ValueError('frequencies_hz must be a non-empty vector')
@@ -193,7 +187,6 @@ def frequency_scale(frequencies_hz, scale):
 
 def accumulated_adjacent_cosine_scale(representations, frequencies_hz):
     '''Cumulative cosine distance after sorting stimuli by frequency.'''
-
     representations = _representations(representations)
     frequencies = np.asarray(frequencies_hz, dtype=float)
     if frequencies.shape != (representations.shape[0],):
@@ -216,7 +209,6 @@ def accumulated_adjacent_cosine_scale(representations, frequencies_hz):
 
 def compare_frequency_scales(representations, frequencies_hz):
     '''Compare the learned adjacent-distance scale with common transforms.'''
-
     result = accumulated_adjacent_cosine_scale(
         representations, frequencies_hz
     )
@@ -241,7 +233,6 @@ def structure_report(
     seed=0,
 ):
     '''Compute the complementary primary structure scores.'''
-
     values, names = _named_targets(coordinates, coordinate_names)
     return {
         'pairwise_geometry_spearman': pairwise_geometry_spearman(

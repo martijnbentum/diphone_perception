@@ -18,7 +18,6 @@ class WaveformMeasurements:
 
 def measure_waveform(waveform, sample_rate):
     '''Measure basic level and duration properties of a waveform.'''
-
     samples = _validated_waveform(waveform, sample_rate)
     peak = float(np.max(np.abs(samples)))
     rms = float(np.sqrt(np.mean(np.square(samples))))
@@ -43,7 +42,6 @@ def dominant_fft_peaks(
     minimum_frequency=0.0,
 ):
     '''Return the strongest non-repeated real-FFT frequency bins.'''
-
     samples = _validated_waveform(waveform, sample_rate)
     if count < 1:
         raise ValueError('count must be at least 1')
@@ -63,7 +61,6 @@ def designed_formant_response(
     bandwidths_hz,
 ):
     '''Approximate cascaded resonator response for design verification.'''
-
     frequencies = np.asarray(frequencies_hz, dtype=float)
     if frequencies.ndim != 1 or not np.all(np.isfinite(frequencies)):
         raise ValueError('frequencies_hz must be a finite one-dimensional array')

@@ -10,22 +10,18 @@ from scipy.io import wavfile
 
 def add_stimuli(stimulus_dir, store):
     '''Add a stored stimulus package to a Phraser store.
-
     stimulus_dir:  Directory written by ``write_stimuli``.
     store:  Empty Phraser Store dedicated to this experiment.
-
     Adds one Audio and one full-duration Phrase per manifest row. Returns
     None; call ``load_stimuli`` to retrieve the persisted entries.
     '''
     package_root, stimuli = _load_manifest(stimulus_dir)
-
     store.refresh_query_roots()
     existing_audios = list(store.audios)
     existing_phrases = list(store.phrases)
     if existing_audios or existing_phrases:
         message = 'add_stimuli requires an empty experiment Phraser store'
         raise FileExistsError(message)
-
     speaker = store.create(Speaker, name='synthetic-stimuli')
     dataset = package_root.name
     objects = [speaker]
@@ -34,7 +30,6 @@ def add_stimuli(stimulus_dir, store):
         audio, phrase = _add_stimulus(stimulus, dataset, speaker, store)
         objects.extend((audio, phrase))
         audios.append(audio)
-
     store.save_many(objects)
     for audio in audios:
         speaker.add_audio(audio)
@@ -43,7 +38,6 @@ def add_stimuli(stimulus_dir, store):
 
 def load_stimuli(store):
     '''Load every native Phraser Phrase from an experiment store.
-
     store:  Phraser Store dedicated to one synthetic-stimulus experiment.
     '''
     store.refresh_query_roots()
@@ -73,7 +67,6 @@ def _load_manifest(stimulus_dir):
         raise ValueError(f'invalid stimulus manifest: {manifest_path}')
     if manifest.get('stimulus_count') != len(rows):
         raise ValueError('stimulus_count does not match the manifest rows')
-
     seen = set()
     stimuli = []
     for row in rows:
@@ -104,7 +97,6 @@ def _manifest_stimulus(row, package_root):
         raise ValueError(message) from error
     if not audio_path.is_file():
         raise FileNotFoundError(f'stimulus WAV not found: {audio_path}')
-
     sample_rate, waveform = wavfile.read(audio_path, mmap=True)
     if waveform.ndim != 1:
         raise ValueError(f'stimulus WAV must be mono: {audio_path}')

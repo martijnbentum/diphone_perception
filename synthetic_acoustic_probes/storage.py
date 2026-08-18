@@ -18,16 +18,13 @@ from .stimuli import Stimulus
 
 def write_stimuli(stimuli, output_root, *, overwrite=False):
     '''Write stimuli as float32 WAV files with a provenance manifest.
-
     stimuli:  Iterable of ``Stimulus`` objects to persist in input order.
     output_root:  Destination package directory.
     overwrite:  Replace an existing package only when explicitly enabled.
-
     The package is assembled in a staging directory and moved into place only
     after every WAV file and the manifest have been written. Existing output
     is preserved unless ``overwrite`` is true.
     '''
-
     stimuli = _validated_stimuli(stimuli)
     output_root = Path(output_root)
     if not output_root.name:
@@ -38,7 +35,6 @@ def write_stimuli(stimuli, output_root, *, overwrite=False):
         message = f'refusing to replace existing output {output_root}; '
         message += 'pass overwrite=True to replace it'
         raise FileExistsError(message)
-
     staging_path = tempfile.mkdtemp(
         prefix=f'.{output_root.name}-staging-',
         dir=output_root.parent,
@@ -61,7 +57,6 @@ def _validated_stimuli(stimuli):
         message = 'stimuli must be an iterable of Stimulus objects'
         raise TypeError(message) from error
     if not stimuli: raise ValueError('at least one stimulus is required')
-
     identifiers = []
     for index, stimulus in enumerate(stimuli):
         if not isinstance(stimulus, Stimulus):
@@ -113,7 +108,6 @@ def _write_package(package_root, stimuli):
             'duration_seconds': waveform.size / stimulus.sample_rate,
             'parameters': _json_value(stimulus.parameters),
         })
-
     manifest = {
         'schema_version': 1,
         'stimulus_count': len(stimuli),

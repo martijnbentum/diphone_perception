@@ -5,15 +5,12 @@ import numpy as np
 
 def project_umap(X, *, metric='cosine', random_state=42):
     '''Project a representation matrix into two UMAP dimensions.
-
     X:             Samples by representation features.
     metric:        UMAP distance metric.
     random_state:  Seed controlling the stochastic projection.
-
     All UMAP settings other than the metric and seed retain their defaults.
     Returns a samples-by-two NumPy array.
     '''
-
     representations = _validated_representations(X, metric)
     UMAP = _umap_class()
     reducer = UMAP(
