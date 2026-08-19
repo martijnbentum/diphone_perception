@@ -17,6 +17,7 @@ from .umap_projection import project_umap
 _F0_LANDMARKS_HZ = (10, 1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000)
 _JUMP_DISTANCE_FACTOR = 8
 _JUMP_NEIGHBORHOOD_SIZE = 5
+_SWEEP_MARKERS = ('o', 's', '^', 'D', 'v', 'P', 'X', '*', 'h', '<')
 
 
 def plot_f0_checkpoint_result(model_name, *, figsize=None, dpi=300):
@@ -179,6 +180,80 @@ def plot_f0_checkpoint_smoothness(
         axis.grid(alpha=0.25)
         axis.legend()
     figure.suptitle('F0 trajectory smoothness over checkpoints')
+    figure.tight_layout()
+    _save_figure(figure, output_path, dpi)
+    return figure, axes
+
+
+def pairwise_correlation(checkpoint_numbers, correlations, *,
+    output_path=None, figsize=None, dpi=300):
+    '''Plot pairwise cosine/frequency correlation over checkpoint step.
+    checkpoint_numbers:  Numeric training step per checkpoint.
+    correlations:        Spearman correlation per checkpoint, same order.
+    output_path:         Optional destination; omit it to disable saving.
+    figsize:             Optional Matplotlib figure size.
+    dpi:                 Resolution used when saving.
+    Returns the Matplotlib figure and primary axis.
+    '''
+    from matplotlib import pyplot
+    figure, axis = pyplot.subplots(figsize=figsize)
+    axis.plot(checkpoint_numbers, correlations, marker='o')
+    axis.set_xlabel('Checkpoint step')
+    axis.set_ylabel('Pairwise correlation')
+    axis.set_title('F0 pairwise distance/frequency correlation')
+    axis.grid(alpha=0.25)
+    axis.ticklabel_format(style='plain', axis='x')
+    figure.tight_layout()
+    _save_figure(figure, output_path, dpi)
+    return figure, axis
+
+
+def pairwise_correlation_sweep(checkpoint_numbers, max_frequency_distances,
+    results, *, split_at=500, log_x=False, output_path=None, figsize=None,
+    dpi=300):
+    '''Plot swept CNN distance/frequency correlation over training step.
+    checkpoint_numbers:       Numeric training step per checkpoint.
+    max_frequency_distances:  Hz thresholds swept, same order as each row
+                              of results.
+    results:                  Per-checkpoint list of correlations, one per
+                              threshold, same order as checkpoint_numbers.
+    split_at:                 Hz boundary; thresholds below it are drawn in
+                              the left panel, at or above it in the right.
+    log_x:                    Use a symmetric log x-axis (safe for a step
+                              0 checkpoint) instead of a linear one.
+    output_path:              Optional destination; omit it to disable
+                              saving.
+    figsize:                  Optional Matplotlib figure size.
+    dpi:                      Resolution used when saving.
+    One line per threshold, each with its own marker, labeled by its Hz
+    value under a "Max Δf" legend title so it reads as an upper bound
+    rather than a frequency. Both panels share a y-axis. Returns the
+    Matplotlib figure and its two panel axes.
+    '''
+    from matplotlib import pyplot
+    correlations = np.asarray(results, dtype=float)
+    distances = np.asarray(max_frequency_distances, dtype=float)
+    if correlations.shape != (len(checkpoint_numbers), distances.size):
+        raise ValueError('results must have one row per checkpoint and '
+            'one column per max_frequency_distance')
+    figure, axes = pyplot.subplots(1, 2, figsize=figsize, sharey=True)
+    narrow_mask = distances < split_at
+    for axis, mask in ((axes[0], narrow_mask), (axes[1], ~narrow_mask)):
+        for local_index, index in enumerate(np.flatnonzero(mask)):
+            marker = _SWEEP_MARKERS[local_index % len(_SWEEP_MARKERS)]
+            axis.plot(checkpoint_numbers, correlations[:, index],
+                marker=marker, markersize=4, label=f'{distances[index]:g}')
+        included = distances[mask]
+        if included.size:
+            axis.set_title(
+                f'{included.min():g}–{included.max():g} Hz')
+        axis.set_xlabel('Training step')
+        axis.grid(alpha=0.25)
+        if log_x: axis.set_xscale('symlog')
+        else: axis.ticklabel_format(style='plain', axis='x')
+        axis.legend(title='Max Δf (Hz)')
+    axes[0].set_ylabel('Spearman ρ')
+    figure.suptitle('CNN pairwise distance/frequency correlation')
     figure.tight_layout()
     _save_figure(figure, output_path, dpi)
     return figure, axes

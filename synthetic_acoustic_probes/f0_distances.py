@@ -42,22 +42,37 @@ def f0_pairwise_distances(cnn, frequencies_hz):
     return result
 
 
-def f0_pairwise_frequency_correlation(cnn, frequencies_hz, scale='hz'):
+def f0_pairwise_frequency_correlation(cnn, frequencies_hz, scale='hz',
+        max_frequency_distance=8000):
     '''Spearman-correlate pairwise cosine distance with frequency distance.
-    cnn:              Samples by CNN features.
-    frequencies_hz:   One positive, unique frequency per sample.
-    scale:            Frequency scale for the target distance: hz, log_hz,
-                      mel, or bark.
+    cnn:                     Samples by CNN features.
+    frequencies_hz:          One positive, unique frequency per sample.
+    scale:                   Frequency scale for the target distance: hz,
+                             log_hz, mel, or bark.
+    max_frequency_distance:  Maximum allowed frequency distance in Hz
+                             between a pair; pairs exceeding it (default
+                             8000) are excluded, regardless of scale.
     Returns their Spearman rank correlation, then cnn_distances and
-    frequency_distances (condensed pairwise vectors).
+    frequency_distances (condensed pairwise vectors, after exclusion).
     '''
     cnn = _as_2d_array(cnn, 'cnn')
     frequencies = _validated_frequencies(frequencies_hz, cnn.shape[0])
+    max_frequency_distance = _validated_max_frequency_distance(
+        max_frequency_distance)
     scaled_frequencies = frequency_scale(frequencies, scale)
     # Condensed, unsorted form of cosine_distance_matrix; correlation is
     # pairwise and order-invariant, so no sort or full matrix is needed.
     cnn_distances = pdist(cnn, metric='cosine')
     frequency_distances = pdist(scaled_frequencies[:, None])
+    # Filtering is always in raw Hz, independent of scale, since a mel/
+    # bark/log_hz distance is not comparable to max_frequency_distance.
+    hz_distances = pdist(frequencies[:, None])
+    mask = hz_distances <= max_frequency_distance
+    if np.count_nonzero(mask) < 2:
+        raise ValueError(
+            'fewer than two pairs remain within max_frequency_distance')
+    cnn_distances = cnn_distances[mask]
+    frequency_distances = frequency_distances[mask]
     _validated_nonconstant(cnn_distances, 'cnn')
     _validated_nonconstant(frequency_distances, 'frequency')
     result = spearmanr(frequency_distances, cnn_distances)
@@ -77,6 +92,14 @@ def _validated_nonconstant(distances, name):
     '''Validate that a condensed distance vector is not constant.'''
     if np.ptp(distances) == 0:
         raise ValueError(f'{name} distances are constant')
+
+
+def _validated_max_frequency_distance(value):
+    '''Validate max_frequency_distance as a finite, positive number.'''
+    if not np.isfinite(value) or value <= 0:
+        raise ValueError('max_frequency_distance must be finite and '
+            'positive')
+    return value
 
 
 def _validated_frequencies(values, expected_length):

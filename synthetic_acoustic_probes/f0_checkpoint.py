@@ -4,11 +4,15 @@ from pathlib import Path
 import re
 
 import numpy as np
+from progressbar import progressbar
 
 import locations
 
 from .f0_distances import (f0_adjacent_distances, f0_pairwise_distances,
     f0_pairwise_frequency_correlation)
+
+_DEFAULT_MAX_FREQUENCY_DISTANCES = (8000, 4000, 2000, 1000, 500, 250, 100,
+    50, 30)
 
 
 class F0Checkpoint:
@@ -63,13 +67,26 @@ class F0Checkpoint:
             self.frequencies)
         return self._pairwise_distances
 
-    def pairwise_frequency_correlation(self, scale='hz'):
-        '''Cached f0_pairwise_frequency_correlation, keyed by scale.'''
+    def pairwise_frequency_correlation(self, scale='hz',
+        max_frequency_distance=8000):
+        '''Cached f0_pairwise_frequency_correlation, keyed by scale and
+        max_frequency_distance.'''
         cache = self._pairwise_frequency_correlation
-        if scale in cache: return cache[scale]
-        cache[scale] = f0_pairwise_frequency_correlation(self.cnn,
-            self.frequencies, scale=scale)
-        return cache[scale]
+        key = (scale, max_frequency_distance)
+        if key in cache: return cache[key]
+        cache[key] = f0_pairwise_frequency_correlation(self.cnn,
+            self.frequencies, scale=scale,
+            max_frequency_distance=max_frequency_distance)
+        return cache[key]
+
+    def sweep_pairwise_frequency_correlation(self, scale='hz',
+        max_frequency_distances=_DEFAULT_MAX_FREQUENCY_DISTANCES):
+        '''max_frequency_distances paired with each pairwise correlation.
+        Each value reuses pairwise_frequency_correlation's cache, so
+        repeated or overlapping sweeps only compute new thresholds.'''
+        correlations = [self.pairwise_frequency_correlation(scale,
+            distance)[0] for distance in max_frequency_distances]
+        return tuple(max_frequency_distances), correlations
 
     def _validate(self, result):
         '''Check that a loaded npz result has the expected fields.'''
@@ -114,13 +131,27 @@ class F0Checkpoints:
         results = [c.pairwise_distances() for c in self.checkpoints]
         return self.checkpoint_numbers, results
 
-    def pairwise_frequency_correlation(self, scale='hz'):
+    def pairwise_frequency_correlation(self, scale='hz',
+            max_frequency_distance=8000):
         '''checkpoint_numbers paired with each pairwise correlation.'''
         results = []
-        for checkpoint in self.checkpoints:
-            correlation, _, _ = checkpoint.pairwise_frequency_correlation(scale)
+        for checkpoint in progressbar(self.checkpoints):
+            correlation, _, _ = checkpoint.pairwise_frequency_correlation(
+                scale, max_frequency_distance)
             results.append(correlation)
         return self.checkpoint_numbers, results
+
+    def sweep_pairwise_frequency_correlation(self, scale='hz',
+            max_frequency_distances=_DEFAULT_MAX_FREQUENCY_DISTANCES):
+        '''checkpoint_numbers and max_frequency_distances paired with each
+        checkpoint's swept correlations.'''
+        results = []
+        for checkpoint in progressbar(self.checkpoints):
+            _, correlations = checkpoint.sweep_pairwise_frequency_correlation(
+                scale, max_frequency_distances)
+            results.append(correlations)
+        return (self.checkpoint_numbers, tuple(max_frequency_distances),
+            results)
 
     def _validate(self):
         '''Check that the output directory exists and has results.'''

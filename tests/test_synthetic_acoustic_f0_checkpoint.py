@@ -77,6 +77,51 @@ def test_f0_checkpoint_distance_methods_are_cached(tmp_path, monkeypatch):
     assert first is second
 
 
+def test_f0_checkpoint_correlation_cache_keyed_by_max_frequency_distance(
+    tmp_path, monkeypatch,
+):
+    '''Distinct max_frequency_distance values get distinct cache entries.'''
+
+    monkeypatch.setattr(locations, 'f0_output_data', tmp_path)
+    model_name = 'wav2vec2_checkpoint-0'
+    _write_checkpoint(tmp_path, model_name,
+        mean_cnn_features=np.array([[1.0, 0.0], [0.9, 0.2], [0.3, 0.7],
+            [-0.8, 0.4]]),
+        frequencies=np.array([10.0, 20.0, 40.0, 80.0]))
+    checkpoint = F0Checkpoint(model_name)
+
+    default = checkpoint.pairwise_frequency_correlation('hz')
+    narrow = checkpoint.pairwise_frequency_correlation(
+        'hz', max_frequency_distance=25)
+    default_again = checkpoint.pairwise_frequency_correlation('hz')
+
+    assert default is not narrow
+    assert default is default_again
+    assert len(narrow[1]) < len(default[1])
+
+
+def test_f0_checkpoint_sweep_pairwise_frequency_correlation(
+    tmp_path, monkeypatch,
+):
+    '''Sweep returns one correlation per threshold, reusing the cache.'''
+
+    monkeypatch.setattr(locations, 'f0_output_data', tmp_path)
+    model_name = 'wav2vec2_checkpoint-0'
+    _write_checkpoint(tmp_path, model_name,
+        mean_cnn_features=np.array([[1.0, 0.0], [0.9, 0.2], [0.3, 0.7],
+            [-0.8, 0.4]]),
+        frequencies=np.array([10.0, 20.0, 40.0, 80.0]))
+    checkpoint = F0Checkpoint(model_name)
+
+    distances, correlations = checkpoint.sweep_pairwise_frequency_correlation(
+        'hz', max_frequency_distances=(25, 100))
+
+    assert distances == (25, 100)
+    assert correlations == [
+        checkpoint.pairwise_frequency_correlation('hz', 25)[0],
+        checkpoint.pairwise_frequency_correlation('hz', 100)[0]]
+
+
 def test_f0_checkpoints_loads_all_in_checkpoint_order(tmp_path, monkeypatch):
     '''Every result under the output directory loads in checkpoint order.'''
 
@@ -111,9 +156,14 @@ def test_f0_checkpoints_distance_methods_pair_with_checkpoint_numbers(
 ):
     '''Collection-level distance methods align results with step numbers.'''
 
+    asymmetric_cnn = np.array([[1.0, 0.0], [0.9, 0.2], [0.3, 0.7],
+        [-0.8, 0.4]])
+    wide_frequencies = np.array([10.0, 20.0, 40.0, 80.0])
     monkeypatch.setattr(locations, 'f0_output_data', tmp_path)
-    _write_checkpoint(tmp_path, 'wav2vec2_checkpoint-0')
-    _write_checkpoint(tmp_path, 'wav2vec2_nl1_checkpoint-100000')
+    _write_checkpoint(tmp_path, 'wav2vec2_checkpoint-0',
+        mean_cnn_features=asymmetric_cnn, frequencies=wide_frequencies)
+    _write_checkpoint(tmp_path, 'wav2vec2_nl1_checkpoint-100000',
+        mean_cnn_features=asymmetric_cnn, frequencies=wide_frequencies)
     checkpoints = F0Checkpoints()
 
     numbers, adjacent = checkpoints.adjacent_distances()
@@ -123,3 +173,34 @@ def test_f0_checkpoints_distance_methods_pair_with_checkpoint_numbers(
     numbers, correlations = checkpoints.pairwise_frequency_correlation('hz')
     assert numbers == checkpoints.checkpoint_numbers
     assert all(isinstance(value, float) for value in correlations)
+
+    numbers, narrow_correlations = checkpoints.pairwise_frequency_correlation(
+        'hz', max_frequency_distance=25)
+    assert numbers == checkpoints.checkpoint_numbers
+    assert all(isinstance(value, float) for value in narrow_correlations)
+
+
+def test_f0_checkpoints_sweep_pairwise_frequency_correlation(
+    tmp_path, monkeypatch,
+):
+    '''Collection-level sweep aligns step numbers, thresholds, and results.'''
+
+    asymmetric_cnn = np.array([[1.0, 0.0], [0.9, 0.2], [0.3, 0.7],
+        [-0.8, 0.4]])
+    wide_frequencies = np.array([10.0, 20.0, 40.0, 80.0])
+    monkeypatch.setattr(locations, 'f0_output_data', tmp_path)
+    _write_checkpoint(tmp_path, 'wav2vec2_checkpoint-0',
+        mean_cnn_features=asymmetric_cnn, frequencies=wide_frequencies)
+    _write_checkpoint(tmp_path, 'wav2vec2_nl1_checkpoint-100000',
+        mean_cnn_features=asymmetric_cnn, frequencies=wide_frequencies)
+    checkpoints = F0Checkpoints()
+
+    numbers, distances, results = (
+        checkpoints.sweep_pairwise_frequency_correlation(
+            'hz', max_frequency_distances=(25, 100))
+    )
+
+    assert numbers == checkpoints.checkpoint_numbers
+    assert distances == (25, 100)
+    assert len(results) == 2
+    assert all(len(per_checkpoint) == 2 for per_checkpoint in results)

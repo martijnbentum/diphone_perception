@@ -137,6 +137,72 @@ def test_plot_checkpoint_smoothness_uses_numeric_checkpoint_order(
     )
 
 
+def test_pairwise_correlation_sweep_splits_panels_by_hz(tmp_path):
+    '''Thresholds below split_at plot in the left panel, others the right.'''
+
+    output_path = tmp_path / 'plots' / 'sweep.pdf'
+    checkpoint_numbers = (0, 100, 200)
+    max_frequency_distances = (10, 250, 500, 8000)
+    results = [
+        [0.1, 0.2, 0.3, 0.4],
+        [0.5, 0.6, 0.7, 0.8],
+        [0.9, 1.0, 1.1, 1.2],
+    ]
+
+    figure, axes = f0_plot.pairwise_correlation_sweep(
+        checkpoint_numbers,
+        max_frequency_distances,
+        results,
+        output_path=output_path,
+        dpi=120,
+    )
+
+    assert output_path.is_file()
+    assert output_path.stat().st_size > 0
+    assert len(axes) == 2
+    assert [line.get_label() for line in axes[0].lines] == ['10', '250']
+    assert [line.get_label() for line in axes[1].lines] == ['500', '8000']
+    assert [line.get_marker() for line in axes[0].lines] == ['o', 's']
+    assert [line.get_marker() for line in axes[1].lines] == ['o', 's']
+    assert all(line.get_markersize() == 4 for line in axes[0].lines)
+    np.testing.assert_array_equal(
+        axes[0].lines[0].get_ydata(), [0.1, 0.5, 0.9]
+    )
+    np.testing.assert_array_equal(
+        axes[1].lines[1].get_ydata(), [0.4, 0.8, 1.2]
+    )
+    assert axes[0].get_ylabel() == 'Spearman ρ'
+    assert axes[0].get_xlabel() == 'Training step'
+    assert axes[0].get_legend().get_title().get_text() == 'Max Δf (Hz)'
+    assert figure._suptitle.get_text() == (
+        'CNN pairwise distance/frequency correlation'
+    )
+
+
+def test_pairwise_correlation_sweep_log_x_uses_symlog_scale():
+    '''log_x switches both panels to a symlog x-axis (safe for step 0).'''
+
+    checkpoint_numbers = (0, 100, 200)
+    max_frequency_distances = (10, 8000)
+    results = [[0.1, 0.4], [0.5, 0.8], [0.9, 1.2]]
+
+    figure, axes = f0_plot.pairwise_correlation_sweep(
+        checkpoint_numbers, max_frequency_distances, results, log_x=True
+    )
+
+    assert axes[0].get_xscale() == 'symlog'
+    assert axes[1].get_xscale() == 'symlog'
+
+
+def test_pairwise_correlation_sweep_rejects_mismatched_results():
+    '''results must have one row per checkpoint and one column per Hz.'''
+
+    with pytest.raises(ValueError, match='one row per checkpoint'):
+        f0_plot.pairwise_correlation_sweep(
+            (0, 100), (10, 500), [[0.1, 0.2]]
+        )
+
+
 def test_plot_checkpoint_distance_heatmap_uses_all_edges(
     checkpoint_metrics,
     tmp_path,
