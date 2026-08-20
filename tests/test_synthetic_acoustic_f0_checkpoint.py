@@ -122,6 +122,25 @@ def test_f0_checkpoint_sweep_pairwise_frequency_correlation(
         checkpoint.pairwise_frequency_correlation('hz', 100)[0]]
 
 
+def test_f0_checkpoint_sweep_accepts_one_shot_iterable():
+    '''Sweep materializes thresholds before iterating over them.'''
+
+    checkpoint = object.__new__(F0Checkpoint)
+
+    def correlation(scale, distance):
+        return float(distance), None, None
+
+    checkpoint.pairwise_frequency_correlation = correlation
+    distances = iter((25, 100))
+
+    returned_distances, correlations = (
+        checkpoint.sweep_pairwise_frequency_correlation(
+            max_frequency_distances=distances))
+
+    assert returned_distances == (25, 100)
+    assert correlations == [25.0, 100.0]
+
+
 def test_f0_checkpoints_loads_all_in_checkpoint_order(tmp_path, monkeypatch):
     '''Every result under the output directory loads in checkpoint order.'''
 

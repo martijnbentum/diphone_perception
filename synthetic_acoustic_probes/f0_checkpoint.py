@@ -8,8 +8,9 @@ from progressbar import progressbar
 
 import locations
 
-from .f0_distances import (f0_adjacent_distances, f0_pairwise_distances,
-    f0_pairwise_frequency_correlation)
+from .f0_distances import f0_adjacent_distances, f0_pairwise_distances
+from .f0_distances import f0_correlation_from_distances
+from .f0_distances import f0_pairwise_distance_vectors
 
 _DEFAULT_MAX_FREQUENCY_DISTANCES = (8000, 4000, 2000, 1000, 500, 250, 100,
     50, 30)
@@ -37,6 +38,7 @@ class F0Checkpoint:
             self._set_info(result)
         self._adjacent_distances = None
         self._pairwise_distances = None
+        self._pairwise_distance_vectors = {}
         self._pairwise_frequency_correlation = {}
 
     def __repr__(self):
@@ -69,14 +71,15 @@ class F0Checkpoint:
 
     def pairwise_frequency_correlation(self, scale='hz',
         max_frequency_distance=8000):
-        '''Cached f0_pairwise_frequency_correlation, keyed by scale and
-        max_frequency_distance.'''
+        '''Cached f0_correlation_from_distances, keyed by scale and
+        max_frequency_distance; reuses distance vectors cached per scale
+        rather than recomputing pdist(cnn) for every threshold.'''
         cache = self._pairwise_frequency_correlation
         key = (scale, max_frequency_distance)
         if key in cache: return cache[key]
-        cache[key] = f0_pairwise_frequency_correlation(self.cnn,
-            self.frequencies, scale=scale,
-            max_frequency_distance=max_frequency_distance)
+        vectors = self._distance_vectors(scale)
+        cache[key] = f0_correlation_from_distances(*vectors,
+            max_frequency_distance)
         return cache[key]
 
     def sweep_pairwise_frequency_correlation(self, scale='hz',
@@ -84,9 +87,21 @@ class F0Checkpoint:
         '''max_frequency_distances paired with each pairwise correlation.
         Each value reuses pairwise_frequency_correlation's cache, so
         repeated or overlapping sweeps only compute new thresholds.'''
-        correlations = [self.pairwise_frequency_correlation(scale,
-            distance)[0] for distance in max_frequency_distances]
-        return tuple(max_frequency_distances), correlations
+        max_frequency_distances = tuple(max_frequency_distances)
+        correlations = []
+        for distance in max_frequency_distances:
+            result = self.pairwise_frequency_correlation(scale, distance)
+            correlations.append(result[0])
+        return max_frequency_distances, correlations
+
+    def _distance_vectors(self, scale):
+        '''Cached f0_pairwise_distance_vectors for this checkpoint, keyed
+        by scale.'''
+        cache = self._pairwise_distance_vectors
+        if scale in cache: return cache[scale]
+        cache[scale] = f0_pairwise_distance_vectors(self.cnn,
+            self.frequencies, scale)
+        return cache[scale]
 
     def _validate(self, result):
         '''Check that a loaded npz result has the expected fields.'''
@@ -179,10 +194,8 @@ def _path_to_model_name(result_path):
 
 def _checkpoint_step(model_name):
     '''Return the numeric training step encoded by an F0 model name.'''
-    if model_name == locations.wav2vec2_random_checkpoint_name:
-        return 0
-    match = re.fullmatch(locations.wav2vec2_nl1_checkpoint_pattern,
-        model_name)
+    if model_name == locations.wav2vec2_random_checkpoint_name: return 0
+    match = re.fullmatch(locations.wav2vec2_nl1_checkpoint_pattern, model_name)
     if match is None:
         raise ValueError(f'unsupported F0 checkpoint model: {model_name!r}')
     return int(match.group(1))
