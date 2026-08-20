@@ -56,7 +56,7 @@ def create_f0_echoframe_store():
     F0 Phraser store. Returns the native Echoframe Store.
     '''
     model_names = select_wav2vec2_nl1_checkpoints()
-    store_path = locations.synthetic_acoustic_probes_echoframe_store
+    store_path = locations.f0_echoframe_store
     store = create_store(store_path, model_names)
     _attach_f0_phraser_store(store)
     return store
@@ -66,7 +66,7 @@ def load_f0_echoframe_store():
     '''Load the shared Echoframe store and attach the F0 Phraser store.
     Returns the native Echoframe Store.
     '''
-    store_path = locations.synthetic_acoustic_probes_echoframe_store
+    store_path = locations.f0_echoframe_store
     if not store_path.is_dir():
         raise FileNotFoundError(f'Echoframe store not found: {store_path}')
     store = echoframe.Store(store_path)

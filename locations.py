@@ -20,8 +20,7 @@ f0_plots = f0_experiment / 'plots'
 f0_pure_tone_stimuli = f0_experiment / 'f0_pure_tones'
 f0_pure_tone_phraser_store = (
     f0_experiment / 'f0_pure_tones_phraser_store')
-synthetic_acoustic_probes_echoframe_store = (
-    f0_experiment / 'echoframe_store')
+f0_echoframe_store = f0_experiment / 'echoframe_store'
 f0_phase_diagnostics = f0_experiment / 'phase_diagnostics'
 f0_phase_diagnostic_stimuli = f0_phase_diagnostics / 'stimuli'
 f0_phase_diagnostic_phraser_store = f0_phase_diagnostics / 'phraser_store'

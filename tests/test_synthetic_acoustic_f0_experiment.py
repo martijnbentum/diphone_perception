@@ -30,7 +30,7 @@ def test_f0_locations_share_experiment_directory():
     assert locations.f0_plots.parent == root
     assert locations.f0_pure_tone_stimuli.parent == root
     assert locations.f0_pure_tone_phraser_store.parent == root
-    assert locations.synthetic_acoustic_probes_echoframe_store.parent == root
+    assert locations.f0_echoframe_store.parent == root
     phase_root = root / 'phase_diagnostics'
     assert locations.f0_phase_diagnostics == phase_root
     assert locations.f0_phase_diagnostic_stimuli.parent == phase_root
