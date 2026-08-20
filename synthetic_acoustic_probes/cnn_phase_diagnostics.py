@@ -1,7 +1,6 @@
 '''Sample-offset experiment and temporal diagnostics for CNN features.'''
 
 from dataclasses import dataclass
-import json
 from pathlib import Path
 
 import numpy as np
@@ -14,7 +13,7 @@ from .echoframe_store import create_store
 from .phraser_store import add_stimuli, load_stimuli
 from .stimuli import DURATION, SAMPLE_RATE
 from .stimuli import sum_of_sinusoids
-from .storage import write_stimuli
+from .storage import read_manifest, write_stimuli
 
 
 PHASE_DIAGNOSTIC_MODEL_NAME = 'wav2vec2_nl1_checkpoint-200000'
@@ -321,7 +320,7 @@ def _cosine_distance(left, right):
 def _phase_rows_and_phrases(store, stimulus_package):
     if stimulus_package is None:
         stimulus_package = locations.f0_phase_diagnostic_stimuli
-    rows = _phase_manifest_rows(stimulus_package)
+    rows = read_manifest(stimulus_package)
     phraser_store = store.load_phraser_store(
         PHASE_DIAGNOSTIC_PHRASER_SOURCE_ID
     )
@@ -333,20 +332,6 @@ def _phase_rows_and_phrases(store, stimulus_package):
         message = f'phase-diagnostic Phrase not found: {error.args[0]!r}'
         raise ValueError(message) from error
     return rows, ordered
-
-
-def _phase_manifest_rows(stimulus_package):
-    manifest_path = Path(stimulus_package) / 'manifest.json'
-    if not manifest_path.is_file():
-        raise FileNotFoundError(f'stimulus manifest not found: {manifest_path}')
-    try:
-        manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
-    except json.JSONDecodeError as error:
-        raise ValueError(f'invalid stimulus manifest: {error}') from error
-    rows = manifest.get('stimuli')
-    if manifest.get('schema_version') != 1 or not isinstance(rows, list):
-        raise ValueError(f'invalid stimulus manifest: {manifest_path}')
-    return tuple(rows)
 
 
 def _write_phase_diagnostics(

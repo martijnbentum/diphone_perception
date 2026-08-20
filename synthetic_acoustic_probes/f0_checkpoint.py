@@ -1,13 +1,14 @@
 '''Loaded, validated F0 checkpoint results read from result archives.'''
 
 from pathlib import Path
-import re
 
 import numpy as np
 from progressbar import progressbar
 
 import locations
 
+from ._checkpoint_naming import checkpoint_step, model_name_to_path
+from ._checkpoint_naming import path_to_model_name
 from .f0_distances import f0_adjacent_distances, f0_pairwise_distances
 from .f0_distances import f0_correlation_from_distances
 from .f0_distances import f0_pairwise_distance_vectors
@@ -32,7 +33,8 @@ class F0Checkpoint:
     '''
     def __init__(self, model_name):
         self.model_name = model_name
-        self.result_path = _model_name_to_path(model_name)
+        self.result_path = model_name_to_path(model_name,
+            locations.f0_output_data)
         with np.load(self.result_path, allow_pickle=False) as result:
             self._validate(result)
             self._set_info(result)
@@ -53,7 +55,7 @@ class F0Checkpoint:
         self.umap_metric = result['metric'].item()
         self.umap_coordinates = result['coordinates']
         self.random_state = result['random_state'].item()
-        self.checkpoint_step = _checkpoint_step(self.model_name)
+        self.checkpoint_step = checkpoint_step(self.model_name)
 
     def adjacent_distances(self):
         '''Cached f0_adjacent_distances for this checkpoint.'''
@@ -124,7 +126,7 @@ class F0Checkpoints:
         self.output_directory = Path(locations.f0_output_data)
         self.result_paths = tuple(self.output_directory.glob('*.npz'))
         self._validate()
-        model_names = [_path_to_model_name(p) for p in self.result_paths]
+        model_names = [path_to_model_name(p) for p in self.result_paths]
         checkpoints = [F0Checkpoint(name) for name in model_names]
         checkpoints.sort(key=lambda c: (c.checkpoint_step, c.model_name))
         self.checkpoints = tuple(checkpoints)
@@ -176,26 +178,3 @@ class F0Checkpoints:
         if not self.result_paths:
             m = f'no F0 checkpoint results found in: {self.output_directory}'
             raise FileNotFoundError(m)
-
-
-def _model_name_to_path(model_name):
-    '''Return the existing npz path for one F0 checkpoint model name.'''
-    result_path = Path(locations.f0_output_data) / f'{model_name}.npz'
-    if not result_path.is_file():
-        message = f'F0 checkpoint result not found: {result_path}'
-        raise FileNotFoundError(message)
-    return result_path
-
-
-def _path_to_model_name(result_path):
-    '''Return the F0 checkpoint model name encoded by an npz path.'''
-    return result_path.stem
-
-
-def _checkpoint_step(model_name):
-    '''Return the numeric training step encoded by an F0 model name.'''
-    if model_name == locations.wav2vec2_random_checkpoint_name: return 0
-    match = re.fullmatch(locations.wav2vec2_nl1_checkpoint_pattern, model_name)
-    if match is None:
-        raise ValueError(f'unsupported F0 checkpoint model: {model_name!r}')
-    return int(match.group(1))

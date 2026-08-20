@@ -1,12 +1,12 @@
 '''F0 trajectory metrics collected across wav2vec2 checkpoints.'''
 
 from pathlib import Path
-import re
 
 import numpy as np
 
 import locations
 
+from ._checkpoint_naming import checkpoint_step
 from .metrics import accumulated_adjacent_cosine_scale
 
 
@@ -68,21 +68,6 @@ def f0_smoothness_metrics(representations, frequencies_hz, *,
     return metrics
 
 
-def f0_checkpoint_step(model_name):
-    '''Return the numeric training step encoded by an F0 model name.
-    model_name:  F0 checkpoint model name to parse.
-    '''
-    if not isinstance(model_name, str) or not model_name:
-        raise ValueError('model_name must be a non-empty string')
-    if model_name == locations.wav2vec2_random_checkpoint_name:
-        return 0
-    match = re.fullmatch(locations.wav2vec2_nl1_checkpoint_pattern,
-        model_name)
-    if match is None:
-        raise ValueError(f'unsupported F0 checkpoint model: {model_name!r}')
-    return int(match.group(1))
-
-
 def f0_checkpoint_metrics(result_path, *,
     thresholds=DEFAULT_ADJACENT_DISTANCE_THRESHOLDS):
     '''Load and summarize one model-specific F0 result bundle.
@@ -112,7 +97,7 @@ def f0_checkpoint_metrics(result_path, *,
             'random_state')
         metrics.update({
             'model_name': model_name,
-            'checkpoint_step': f0_checkpoint_step(model_name),
+            'checkpoint_step': checkpoint_step(model_name),
             'aggregation': aggregation,
             'metric': _scalar_string(result['metric'], 'metric'),
             'random_state': random_state,

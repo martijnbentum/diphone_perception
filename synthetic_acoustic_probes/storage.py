@@ -38,6 +38,28 @@ def write_stimuli(stimuli, output_root, *, overwrite=False):
     return output_root
 
 
+def read_manifest(package_root):
+    '''Load and schema-validate one stimulus package's manifest.
+    package_root:  Directory written by write_stimuli.
+    Returns the manifest's stimuli rows in file order.
+    '''
+    manifest_path = Path(package_root) / 'manifest.json'
+    if not manifest_path.is_file():
+        message = f'stimulus manifest not found: {manifest_path}'
+        raise FileNotFoundError(message)
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
+    except json.JSONDecodeError as error:
+        message = f'invalid JSON in {manifest_path}: {error}'
+        raise ValueError(message) from error
+    rows = manifest.get('stimuli')
+    if manifest.get('schema_version') != 1 or not isinstance(rows, list):
+        raise ValueError(f'invalid stimulus manifest: {manifest_path}')
+    if manifest.get('stimulus_count') != len(rows):
+        raise ValueError('stimulus_count does not match the manifest rows')
+    return tuple(rows)
+
+
 def _validated_stimuli(stimuli):
     '''Validate stimuli as a non-empty tuple of unique Stimulus objects.'''
     if isinstance(stimuli, Stimulus):

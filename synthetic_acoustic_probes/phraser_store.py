@@ -1,11 +1,12 @@
 '''Map persisted synthetic-stimulus packages to a Phraser store.'''
 
 from dataclasses import dataclass
-import json
 from pathlib import Path
 
 from phraser import Audio, Phrase, Speaker
 from scipy.io import wavfile
+
+from .storage import read_manifest
 
 
 def add_stimuli(stimulus_dir, store):
@@ -44,6 +45,41 @@ def load_stimuli(store):
     return tuple(store.phrases)
 
 
+def align_phrases_to_manifest(phrases, rows, extract_target):
+    '''Order phrases by manifest row and extract one target per row.
+    phrases:         Native Phraser Phrase objects, each labeled by its
+                      manifest stimulus_id.
+    rows:            Manifest stimuli rows, e.g. from storage.read_manifest.
+    extract_target:  Callable mapping one manifest row to its target value.
+    Every row's stimulus_id must match exactly one Phrase label, and every
+    Phrase's label must appear in rows. Returns ordered_phrases, row_ids,
+    and targets, all aligned to the row order.
+    '''
+    phrases_by_id = {}
+    for phrase in phrases:
+        if phrase.label in phrases_by_id:
+            raise ValueError(f'duplicate stimulus ID: {phrase.label!r}')
+        phrases_by_id[phrase.label] = phrase
+    row_ids = []
+    ordered_phrases = []
+    targets = []
+    for row in rows:
+        stimulus_id = row['stimulus_id']
+        if stimulus_id in row_ids:
+            message = f'duplicate manifest stimulus ID: {stimulus_id!r}'
+            raise ValueError(message)
+        if stimulus_id not in phrases_by_id:
+            raise ValueError(f'Phrase not found for {stimulus_id!r}')
+        row_ids.append(stimulus_id)
+        ordered_phrases.append(phrases_by_id[stimulus_id])
+        targets.append(extract_target(row))
+    extras = set(phrases_by_id) - set(row_ids)
+    if extras:
+        extras = sorted(extras)
+        raise ValueError(f'Phrases missing from manifest: {extras!r}')
+    return tuple(ordered_phrases), row_ids, targets
+
+
 def _add_stimulus(stimulus, dataset, speaker, store):
     '''Stage one Audio and full-duration Phrase for the bulk save.'''
     filename = str(stimulus.audio_path)
@@ -58,15 +94,7 @@ def _add_stimulus(stimulus, dataset, speaker, store):
 
 def _load_manifest(stimulus_dir):
     package_root = Path(stimulus_dir).expanduser().resolve()
-    manifest_path = package_root / 'manifest.json'
-    if not manifest_path.is_file():
-        raise FileNotFoundError(f'stimulus manifest not found: {manifest_path}')
-    manifest = _read_json(manifest_path)
-    rows = manifest.get('stimuli')
-    if manifest.get('schema_version') != 1 or not isinstance(rows, list):
-        raise ValueError(f'invalid stimulus manifest: {manifest_path}')
-    if manifest.get('stimulus_count') != len(rows):
-        raise ValueError('stimulus_count does not match the manifest rows')
+    rows = read_manifest(package_root)
     seen = set()
     stimuli = []
     for row in rows:
@@ -107,11 +135,3 @@ def _manifest_stimulus(row, package_root):
     duration_ms = round(len(waveform) / sample_rate * 1000)
     return _ManifestStimulus(stimulus_id, audio_path, sample_rate,
         duration_ms)
-
-
-def _read_json(path):
-    try:
-        text = path.read_text(encoding='utf-8')
-        return json.loads(text)
-    except json.JSONDecodeError as error:
-        raise ValueError(f'invalid JSON in {path}: {error}') from error

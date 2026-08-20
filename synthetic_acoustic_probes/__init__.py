@@ -12,7 +12,6 @@ from .formants import (
 )
 from .f0_metrics import (
     f0_checkpoint_metrics,
-    f0_checkpoint_step,
     f0_smoothness_metrics,
     load_f0_checkpoint_metrics,
 )
@@ -74,7 +73,6 @@ __all__ = [
     'dominant_fft_peaks',
     'energy_spaced_amplitudes',
     'f0_checkpoint_metrics',
-    'f0_checkpoint_step',
     'f0_smoothness_metrics',
     'load_f0_checkpoint_metrics',
     'local_neighbor_preservation',

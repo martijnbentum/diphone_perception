@@ -6,7 +6,6 @@ import pytest
 import locations
 from synthetic_acoustic_probes.f0_metrics import (
     f0_checkpoint_metrics,
-    f0_checkpoint_step,
     f0_smoothness_metrics,
     load_f0_checkpoint_metrics,
 )
@@ -138,28 +137,6 @@ def test_f0_smoothness_metrics_rejects_invalid_thresholds(
             [10.0, 20.0],
             thresholds=thresholds,
         )
-
-
-@pytest.mark.parametrize(
-    ('model_name', 'expected'),
-    (
-        ('wav2vec2_checkpoint-0', 0),
-        ('wav2vec2_nl1_checkpoint-1', 1),
-        ('wav2vec2_nl1_checkpoint-200000', 200000),
-    ),
-)
-def test_f0_checkpoint_step_parses_supported_models(model_name, expected):
-    '''Random and trained checkpoint names map to numeric steps.'''
-
-    assert f0_checkpoint_step(model_name) == expected
-
-
-@pytest.mark.parametrize('model_name', ('', None, 'checkpoint-20'))
-def test_f0_checkpoint_step_rejects_unsupported_models(model_name):
-    '''Unsupported checkpoint names are not silently assigned a step.'''
-
-    with pytest.raises(ValueError):
-        f0_checkpoint_step(model_name)
 
 
 def test_f0_checkpoint_metrics_loads_arrays_and_metadata(tmp_path):
