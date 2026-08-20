@@ -13,6 +13,7 @@ duplicate_phone_counts_file = data / 'duplicate_phone_counts.json'
 model_paths_file = data / 'model_paths.json'
 
 synthetic_acoustic_probes_data = data / 'synthetic_acoustic_probes'
+formant_grid_stimuli = synthetic_acoustic_probes_data / 'formant_grid'
 f0_experiment = synthetic_acoustic_probes_data / 'experiment_f0'
 f0_output_data = f0_experiment / 'output_data'
 f0_plots = f0_experiment / 'plots'

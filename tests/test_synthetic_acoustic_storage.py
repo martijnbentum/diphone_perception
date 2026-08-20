@@ -6,7 +6,9 @@ import pytest
 from scipy.io import wavfile
 
 import locations
-from synthetic_acoustic_probes import pure_tone_stimuli, write_stimuli
+from synthetic_acoustic_probes import pure_tone_stimuli
+from synthetic_acoustic_probes import sinusoidal_component_formant_stimuli
+from synthetic_acoustic_probes import write_stimuli
 from synthetic_acoustic_probes.stimuli import sum_of_sinusoids
 import synthetic_acoustic_probes.storage as storage
 
@@ -145,6 +147,51 @@ def test_pure_tone_save_flag_writes_default_package(tmp_path, monkeypatch):
     assert [row['stimulus_id'] for row in manifest['stimuli']] == [
         'pure-tone_f-10', 'pure-tone_f-20'
     ]
+
+
+def test_formant_grid_save_flag_writes_and_overwrites_default_package(
+    tmp_path,
+    monkeypatch,
+):
+    '''The formant-grid convenience options delegate to storage.
+
+    tmp_path:     Temporary output root supplied by pytest.
+    monkeypatch:  Pytest fixture used to replace the default data path.
+    '''
+
+    output_root = tmp_path / 'formant_grid'
+    monkeypatch.setattr(locations, 'formant_grid_stimuli', output_root)
+
+    stimuli = sinusoidal_component_formant_stimuli(
+        f1_values=(235,),
+        f2_values=(595,),
+        duration=0.01,
+        save=True,
+    )
+
+    assert len(stimuli) == 1
+    manifest_path = output_root / 'manifest.json'
+    manifest_text = manifest_path.read_text(encoding='utf-8')
+    manifest = json.loads(manifest_text)
+    assert manifest['stimulus_count'] == 1
+    assert manifest['stimuli'][0]['stimulus_id'] == (
+        'sinusoidal-formants_f0-120_f1-235_f2-595'
+    )
+
+    replacement = sinusoidal_component_formant_stimuli(
+        f1_values=(300,),
+        f2_values=(700,),
+        duration=0.01,
+        save=True,
+        overwrite=True,
+    )
+
+    assert len(replacement) == 1
+    manifest_text = manifest_path.read_text(encoding='utf-8')
+    manifest = json.loads(manifest_text)
+    assert manifest['stimuli'][0]['stimulus_id'] == (
+        'sinusoidal-formants_f0-120_f1-300_f2-700'
+    )
 
 
 def _stimulus(frequency, stimulus_id):

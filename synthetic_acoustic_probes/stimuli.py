@@ -77,7 +77,8 @@ def bias_stimuli(frequencies=(100, 200, 300, 400, 500),
 
 def sinusoidal_component_formant_stimuli(f0_values=(120,), f1_values=None,
     f2_values=None, amplitudes=(0.5, 0.35, 0.15),
-    duration=DURATION, sample_rate=SAMPLE_RATE):
+    duration=DURATION, sample_rate=SAMPLE_RATE, save=False,
+    output_root=None, overwrite=False):
     '''Reproduce the paper's three-sinusoid “formant” experiment.
     f0_values:    F0 values in Hz for the fixed source component.
     f1_values:    F1 values in Hz, or the paper grid when omitted.
@@ -85,7 +86,11 @@ def sinusoidal_component_formant_stimuli(f0_values=(120,), f1_values=None,
     amplitudes:   Amplitude for the F0, F1, and F2 components.
     duration:     Signal duration in seconds.
     sample_rate:  Number of waveform samples per second.
+    save:         Persist the generated stimuli when true.
+    output_root:  Optional package directory used when saving.
+    overwrite:    Replace an existing package only when saving.
     '''
+    _validate_save_options(save, output_root, overwrite)
     f1_values = np.linspace(235, 850, 30) if f1_values is None else f1_values
     f2_values = np.linspace(595, 2400, 30) if f2_values is None else f2_values
     output = []
@@ -99,6 +104,12 @@ def sinusoidal_component_formant_stimuli(f0_values=(120,), f1_values=None,
             duration=duration, sample_rate=sample_rate,
             stimulus_id=stimulus_id, extra_parameters=extra_parameters)
         output.append(stimulus)
+    if save:
+        from .storage import write_stimuli
+
+        if output_root is None: destination = locations.formant_grid_stimuli
+        else: destination = output_root
+        write_stimuli(output, destination, overwrite=overwrite)
     return output
 
 
