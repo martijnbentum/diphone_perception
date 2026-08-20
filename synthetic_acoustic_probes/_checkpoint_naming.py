@@ -37,3 +37,21 @@ def path_to_model_name(result_path):
     result_path:  Path to one checkpoint result .npz bundle.
     '''
     return Path(result_path).stem
+
+
+def discover_checkpoints(output_directory):
+    '''Return every checkpoint model name under output_directory, sorted by
+    training step.
+    output_directory:  Directory holding one npz result file per checkpoint.
+    '''
+    output_directory = Path(output_directory)
+    if not output_directory.is_dir():
+        message = f'checkpoint directory not found: {output_directory}'
+        raise FileNotFoundError(message)
+    result_paths = tuple(output_directory.glob('*.npz'))
+    if not result_paths:
+        message = f'no checkpoint results found in: {output_directory}'
+        raise FileNotFoundError(message)
+    model_names = [path_to_model_name(path) for path in result_paths]
+    model_names.sort(key=lambda name: (checkpoint_step(name), name))
+    return tuple(model_names)

@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 
 from synthetic_acoustic_probes._checkpoint_naming import checkpoint_step
+from synthetic_acoustic_probes._checkpoint_naming import discover_checkpoints
 from synthetic_acoustic_probes._checkpoint_naming import model_name_to_path
 from synthetic_acoustic_probes._checkpoint_naming import path_to_model_name
 
@@ -50,3 +51,28 @@ def test_path_to_model_name_returns_the_stem():
 
     path = Path('/some/dir/wav2vec2_nl1_checkpoint-200000.npz')
     assert path_to_model_name(path) == 'wav2vec2_nl1_checkpoint-200000'
+
+
+def test_discover_checkpoints_sorts_by_training_step(tmp_path):
+    '''Discovered model names are ordered by step, not directory order.'''
+
+    for model_name in ('wav2vec2_nl1_checkpoint-200000',
+        'wav2vec2_checkpoint-0', 'wav2vec2_nl1_checkpoint-100000'):
+        (tmp_path / f'{model_name}.npz').touch()
+    assert discover_checkpoints(tmp_path) == (
+        'wav2vec2_checkpoint-0', 'wav2vec2_nl1_checkpoint-100000',
+        'wav2vec2_nl1_checkpoint-200000')
+
+
+def test_discover_checkpoints_rejects_missing_directory(tmp_path):
+    '''A non-existent output_directory fails clearly.'''
+
+    with pytest.raises(FileNotFoundError, match='directory not found'):
+        discover_checkpoints(tmp_path / 'missing')
+
+
+def test_discover_checkpoints_rejects_empty_directory(tmp_path):
+    '''An existing but empty output_directory fails clearly.'''
+
+    with pytest.raises(FileNotFoundError, match='no checkpoint results'):
+        discover_checkpoints(tmp_path)

@@ -7,8 +7,8 @@ from progressbar import progressbar
 
 import locations
 
-from ._checkpoint_naming import checkpoint_step, model_name_to_path
-from ._checkpoint_naming import path_to_model_name
+from ._checkpoint_naming import checkpoint_step, discover_checkpoints
+from ._checkpoint_naming import model_name_to_path
 from .f0_distances import f0_adjacent_distances, f0_pairwise_distances
 from .f0_distances import f0_correlation_from_distances
 from .f0_distances import f0_pairwise_distance_vectors
@@ -124,12 +124,8 @@ class F0Checkpoints:
     '''Every F0 checkpoint result under locations.f0_output_data.'''
     def __init__(self):
         self.output_directory = Path(locations.f0_output_data)
-        self.result_paths = tuple(self.output_directory.glob('*.npz'))
-        self._validate()
-        model_names = [path_to_model_name(p) for p in self.result_paths]
-        checkpoints = [F0Checkpoint(name) for name in model_names]
-        checkpoints.sort(key=lambda c: (c.checkpoint_step, c.model_name))
-        self.checkpoints = tuple(checkpoints)
+        model_names = discover_checkpoints(self.output_directory)
+        self.checkpoints = tuple(F0Checkpoint(name) for name in model_names)
         checkpoint_numbers = [c.checkpoint_step for c in self.checkpoints]
         self.checkpoint_numbers = tuple(checkpoint_numbers)
 
@@ -169,12 +165,3 @@ class F0Checkpoints:
             results.append(correlations)
         return (self.checkpoint_numbers, tuple(max_frequency_distances),
             results)
-
-    def _validate(self):
-        '''Check that the output directory exists and has results.'''
-        if not self.output_directory.is_dir():
-            m = f'F0 output-data directory not found: {self.output_directory}'
-            raise FileNotFoundError(m)
-        if not self.result_paths:
-            m = f'no F0 checkpoint results found in: {self.output_directory}'
-            raise FileNotFoundError(m)

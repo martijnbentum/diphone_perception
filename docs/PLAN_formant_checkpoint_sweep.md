@@ -91,3 +91,15 @@ aggregation baked into the name), `umap_coordinates`, `umap_metric`,
 loader validates required fields the way `F0Checkpoint._validate` does, its
 field set should be defined independently rather than shared with F0's,
 since the two bundles are no longer field-compatible by design.
+
+## Decision: checkpoint discovery is shared, npz field validation isn't
+
+`_checkpoint_naming.discover_checkpoints(output_directory)` globs a
+directory's `*.npz` files, converts each to a model name, and returns them
+sorted by training step — this part genuinely is identical for any
+checkpoint sweep regardless of what's inside the npz files, so it now lives
+in `_checkpoint_naming.py` and `F0Checkpoints.__init__` calls it directly
+(replacing its own glob/sort/`_validate` logic). A future
+`FormantCheckpoints` should do the same. What stays per-experiment is the
+npz field validation and distance/metric logic inside each `*Checkpoint`
+class, per the schema decision above.

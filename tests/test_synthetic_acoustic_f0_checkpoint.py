@@ -166,7 +166,7 @@ def test_f0_checkpoints_requires_results_directory(tmp_path, monkeypatch):
         F0Checkpoints()
 
     monkeypatch.setattr(locations, 'f0_output_data', tmp_path)
-    with pytest.raises(FileNotFoundError, match='no F0 checkpoint results'):
+    with pytest.raises(FileNotFoundError, match='no checkpoint results'):
         F0Checkpoints()
 
 
