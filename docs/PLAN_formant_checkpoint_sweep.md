@@ -11,8 +11,40 @@ lost before the formant experiment module is actually written.
 
 Naming: the codebase's established noun for this axis is "formant"
 (`formants.py`, `formant_stimuli`, `praat_formant_stimuli`,
-`locations.formant_grid_stimuli`), not "F1/F2" or "f1f2". The new module
-should be `formant_experiment.py`, matching `f0_experiment.py`.
+`locations.formant_grid_stimuli`). The module was nonetheless built as
+`f1f2_experiment.py` (`f1f2_` prefix throughout, including `locations.py`)
+per explicit instruction, kept distinct from the existing
+`locations.formant_grid_stimuli`/`sinusoidal_component_formant_stimuli`
+default location rather than reusing it — `locations.f1f2_stimuli` lives
+nested under a new `f1f2_experiment/` root, mirroring `f0_experiment/`
+exactly.
+
+## Status: implemented
+
+`f1f2_experiment.py`, `locations.f1f2_*`, and
+`tests/test_synthetic_acoustic_f1f2_experiment.py` exist, mirroring
+`f0_experiment.py` structurally: own Phraser store
+(`F1F2_PHRASER_SOURCE_ID = 'f1f2-formant-grid'`), own Echoframe store
+(`locations.f1f2_echoframe_store`), `make_f1f2_x_y` built on
+`checkpoint_naming`/`storage.read_manifest`/
+`phraser_store.align_phrases_to_manifest`, and
+`save_f1f2_checkpoint_result(s)` using the `cnn`/`umap_*`/no-`aggregation`
+npz schema decided below. Stimuli are the fixed-F0=120Hz, 30x30 F1xF2 grid
+(`sinusoidal_component_formant_stimuli()` defaults) -- the paper's Fig. 7
+setup, not the extended F0xF1xF2 Fig. 8 sweep. `aggregation` is hardcoded
+to `'mean'` inside `make_f1f2_x_y` rather than exposed as a parameter, per
+the decision that F0's `'center'`/`'mean'` flexibility won't be exercised
+here. `_f1f2_targets(row)` returns `(f1_hz, f2_hz)` as a single tuple
+"target" per manifest row -- `align_phrases_to_manifest`'s `extract_target`
+callback was already generic enough to carry a multi-value target without
+any change to that function.
+
+Not yet done: actually running the CNN extraction and checkpoint sweep
+(`create_f1f2_echoframe_store`, `extract_f1f2_cnn_features`,
+`save_f1f2_checkpoint_results`) against real wav2vec2 checkpoints, and any
+formant-side analysis/plotting (§3.4's grid-structure and vowel-space
+questions) -- that's the `metrics.py` Feature-3 functions plus new plotting
+code, not a port of `f0_distances.py`/`f0_plot.py`.
 
 ## Decision: keep the Phraser store and Echoframe store F0-specific
 

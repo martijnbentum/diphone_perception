@@ -29,6 +29,13 @@ f0_phase_diagnostic_echoframe_store = (
 f0_phase_diagnostic_results = (
     f0_phase_diagnostics / 'cnn_phase_diagnostics.npz')
 
+f1f2_experiment = synthetic_acoustic_probes_data / 'experiment_f1f2'
+f1f2_output_data = f1f2_experiment / 'output_data'
+f1f2_plots = f1f2_experiment / 'plots'
+f1f2_stimuli = f1f2_experiment / 'f1f2_formant_grid'
+f1f2_phraser_store = f1f2_experiment / 'f1f2_formant_grid_phraser_store'
+f1f2_echoframe_store = f1f2_experiment / 'echoframe_store'
+
 echoframe_store = data / 'echoframe_store'
 echoframe_mfcc_store = data / 'echoframe_mfcc_store'
 echoframe_model_stores = data / 'echoframe_model_stores'
