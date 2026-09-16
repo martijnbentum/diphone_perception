@@ -24,6 +24,9 @@ def make_manifest(cgn_store, components = None, region = None, n_samples = None)
     f.mkdir(parents=True, exist_ok=True)
     comps = '_'.join([x.split('-')[-1] for x in components])
     output_filename = f / f'region-{region}_comps-{comps}.json'
+    if output_filename.exists():
+        raise FileExistsError(f'manifest already exists at {output_filename}. '
+            'delete it first if you want to replace it.')
     selected_audios = filter_audios_on_component(cgn_store.audios, components)
     audio_infos= sample_frames(selected_audios, n_samples)
     manifest = {'n_samples': n_samples, 'region': region,
@@ -35,7 +38,8 @@ def make_manifest(cgn_store, components = None, region = None, n_samples = None)
     return manifest
 
 
-def filter_audios_on_component(audios, components=None, region='nl'):
+def filter_audios_on_component(audios, components=None, region='nl',
+    min_duration_ms=1000):
     '''Describe eligible recordings without loading audio or phone trees.
 
     audios:      iterable of unique Phraser Audio objects
@@ -44,6 +48,7 @@ def filter_audios_on_component(audios, components=None, region='nl'):
     selected_audios= []
     if components is None: components = ('comp-k', 'comp-o')
     for audio in audios:
+        if audio.duration < min_duration_ms: continue
         parts = set(Path(audio.filename).parts)
         matches = parts.intersection(components)
         if region not in parts or not matches: continue
@@ -90,13 +95,13 @@ def save_manifest(manifest, path):
 
 def load_manifest(region = 'nl', components = ('comp-k', 'comp-o')):
     f = locations.decomposition_random_frames_base
-    comps = '_'.join([x.split('-') for x in components])
+    comps = '_'.join([x.split('-')[-1] for x in components])
     input_filename = f / f'region-{region}_comps-{comps}.json'
     if not input_filename.exists():
         m = f'no manifest found at {input_filename}. please run:\n' 
         m += f'cgn_store = load_cgn_store()\n make_manifest('
         m += f'cgn_store, region="{region}", components={components})\n first.'
-        raise filenotfounderror(m)
+        raise FileNotFoundError(m)
     with input_filename.open('r', encoding='utf-8') as handle:
         d = json.load(handle)
     return d
@@ -108,17 +113,18 @@ def iter_samples(manifest, collar_seconds = 2):
     '''
     for info in manifest['audio_infos']:
         frames = Frames(info['n_frames'])
+        duration = info['duration_ms'] / 1000
         for frame_index in info['frame_indices']:
             selected = frames[frame_index]
-            audio_key = recording['audio_key']
+            audio_key = info['audio_key']
             sample_id = f'{audio_key}:{frame_index}'
-            d = {'sample_id': sample_id, 'audio_key': recording['audio_key'],
-                'filename': recording['filename'],
-                'component': recording['component'],
-                'split': recording['split'], 'frame_index': frame_index,
+            d = {'sample_id': sample_id, 'audio_key': info['audio_key'],
+                'filename': info['filename'],
+                'component': info['component'],
+                'split': info['split'], 'frame_index': frame_index,
                 'start_second': selected.start,
                 'collar_start_second': max(0, selected.start - collar_seconds),
-                'collar_end_second': selected.end + collar_seconds}
+                'collar_end_second': min(duration,selected.end + collar_seconds}
             yield d
 
 
@@ -139,7 +145,7 @@ def audio_to_component(audio):
     return component
 
 def load_cgn_store():
-    store = store(locations.cgn_lmdb)
+    store = Store(locations.cgn_lmdb)
     return store
 
 
