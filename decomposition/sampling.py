@@ -6,6 +6,7 @@ import itertools
 import json
 import random
 from pathlib import Path
+from progressbar import progressbar
 
 from frame import Frames, make_frames_from_duration
 import locations
@@ -21,16 +22,17 @@ def make_manifest(cgn_store, components = None, region = None, n_samples = None)
     if region == None: region = 'nl'
     f = locations.decomposition_random_frames_base
     f.mkdir(parents=True, exist_ok=True)
-    comps = '_'.join([x.split('-') for x in components])
+    comps = '_'.join([x.split('-')[-1] for x in components])
     output_filename = f / f'region-{region}_comps-{comps}.json'
     selected_audios = filter_audios_on_component(cgn_store.audios, components)
     audio_infos= sample_frames(selected_audios, n_samples)
     manifest = {'n_samples': n_samples, 'region': region,
         'components': components,'sampling_unit': 'uniform_unique_frame',
-        'include_all_audio': True,'audio_infos': audio_infos
-        'phraser_store' : str(args.store)}
+        'include_all_audio': True,'audio_infos': audio_infos,
+        'phraser_store' : str(cgn_store)}
     save_manifest(manifest, output_filename)
     print(f'manifest saved to {output_filename}')
+    return manifest
 
 
 def filter_audios_on_component(audios, components=None, region='nl'):
@@ -57,19 +59,49 @@ def sample_frames(audios, n_samples=None):
     seed:       seed controlling recording splits and frame selection
     '''
     if n_samples is None: n_samples = DEFAULT_SAMPLE_COUNT
-    audio_infos = [audio_to_info(audio) for audio in selected_audios]
+    audio_infos = []
+    print('making audio infos...')
+    for audio in progressbar(audios):
+        audio_infos.append(audio_to_info(audio))
     n_frames = [row['n_frames'] for row in audio_infos]
     cumulative = list(itertools.accumulate(n_frames))
     total = cumulative[-1] if cumulative else 0
     rng = random.Random(42)
     selected = rng.sample(range(total), n_samples)
-    for global_index in sorted(selected):
+    print('sampling frames...')
+    for global_index in progressbar(sorted(selected)):
         index = bisect.bisect_right(cumulative, global_index)
         offset = cumulative[index - 1] if index else 0
         audio_infos[index]['frame_indices'].append(global_index - offset)
     return audio_infos
 
-def iter_samples(manifest, collar = 2):
+
+def save_manifest(manifest, path):
+    '''write a new manifest, refusing to replace an existing selection.
+
+    manifest:  sample manifest, including inventory and selected indices
+    path:      destination json file
+    '''
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open('x', encoding='utf-8') as handle:
+        json.dump(manifest, handle, ensure_ascii=False)
+        handle.write('\n')
+
+def load_manifest(region = 'nl', components = ('comp-k', 'comp-o')):
+    f = locations.decomposition_random_frames_base
+    comps = '_'.join([x.split('-') for x in components])
+    input_filename = f / f'region-{region}_comps-{comps}.json'
+    if not input_filename.exists():
+        m = f'no manifest found at {input_filename}. please run:\n' 
+        m += f'cgn_store = load_cgn_store()\n make_manifest('
+        m += f'cgn_store, region="{region}", components={components})\n first.'
+        raise filenotfounderror(m)
+    with input_filename.open('r', encoding='utf-8') as handle:
+        d = json.load(handle)
+    return d
+
+def iter_samples(manifest, collar_seconds = 2):
     '''Yield sample identities and recording-relative frame timestamps.
 
     manifest:  dictionary returned by sample_frames or loaded from JSON
@@ -85,25 +117,13 @@ def iter_samples(manifest, collar = 2):
                 'component': recording['component'],
                 'split': recording['split'], 'frame_index': frame_index,
                 'start_second': selected.start,
-                'collar_start_second': max(0, selected.start - collar),}
-                'collar_end_second': selected.end + collar}
+                'collar_start_second': max(0, selected.start - collar_seconds),
+                'collar_end_second': selected.end + collar_seconds}
             yield d
-
-def save_manifest(manifest, path):
-    '''Write a new manifest, refusing to replace an existing selection.
-
-    manifest:  sample manifest, including inventory and selected indices
-    path:      destination JSON file
-    '''
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open('x', encoding='utf-8') as handle:
-        json.dump(manifest, handle, ensure_ascii=False)
-        handle.write('\n')
 
 
 def audio_to_info(audio):
-    '''Read stable identity, timing, and frame capacity from one audio.'''
+    '''read stable identity, timing, and frame capacity from one audio.'''
     duration = audio.duration
     component = audio_to_component(audio)
     frames = make_frames_from_duration(duration / 1000)
@@ -119,7 +139,7 @@ def audio_to_component(audio):
     return component
 
 def load_cgn_store():
-    store = Store(locations.cgn_lmdb)
+    store = store(locations.cgn_lmdb)
     return store
 
 
