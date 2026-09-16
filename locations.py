@@ -93,4 +93,4 @@ mls_phrases_json = Path('../mls_phrases.json')
 textgrid_directory = Path('textgrids/')
 
 
-decomposition_random_frames= data / 'decomposition' / 'random_frames.json'
+decomposition_random_frames_base = data / 'decomposition' / 'random_frames'
