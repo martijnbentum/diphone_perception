@@ -32,7 +32,7 @@ def make_manifest(cgn_store, components = None, region = None, n_samples = None)
     manifest = {'n_samples': n_samples, 'region': region,
         'components': components,'sampling_unit': 'uniform_unique_frame',
         'include_all_audio': True,'audio_infos': audio_infos,
-        'phraser_store' : str(cgn_store)}
+        'phraser_store_path' : str(cgn_store.path)}
     save_manifest(manifest, output_filename)
     print(f'manifest saved to {output_filename}')
     return manifest
@@ -83,7 +83,6 @@ def sample_frames(audios, n_samples=None):
 
     audios:     iterable of Phraser Audio objects, normally store.audios
     n_samples:  total samples across fitting and evaluation recordings
-    seed:       seed controlling recording splits and frame selection
     '''
     if n_samples is None: n_samples = DEFAULT_SAMPLE_COUNT
     audio_infos = []
@@ -113,7 +112,7 @@ def save_manifest(manifest, path):
     '''
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open('x', encoding='utf-8') as handle:
+    with path.open('w', encoding='utf-8') as handle:
         json.dump(manifest, handle, ensure_ascii=False)
         handle.write('\n')
 
@@ -130,26 +129,21 @@ def load_manifest(region = 'nl', components = ('comp-k', 'comp-o')):
         d = json.load(handle)
     return d
 
-def iter_samples(manifest, collar_seconds = 2):
+def iter_marker_info(manifest, label = 'decomp_random_frames', collar_ms= 2000):
     '''Yield sample identities and recording-relative frame timestamps.
 
     manifest:  dictionary returned by sample_frames or loaded from JSON
     '''
     for info in manifest['audio_infos']:
         frames = Frames(info['n_frames'])
-        duration = info['duration_ms'] / 1000
+        duration = info['duration_ms'] 
         for frame_index in info['frame_indices']:
             selected = frames[frame_index]
-            start, end = selected.start_time, selected.end_time
+            start, end = selected.start_time/1000, selected.end_time/1000
             audio_key = info['audio_key']
             sample_id = f'{audio_key}:{frame_index}'
-            d = {'sample_id': sample_id, 'audio_key': info['audio_key'],
-                'filename': info['filename'],
-                'component': info['component'],
-                'split': info['split'], 'frame_index': frame_index,
-                'start_second': start,
-                'collar_start_second': max(0, start - collar_seconds),
-                'collar_end_second': min(duration,end + collar_seconds)}
+            d = {'audio_key': info['audio_key'],'start': start, 'end': end,
+                'label': label}
             yield d
 
 
