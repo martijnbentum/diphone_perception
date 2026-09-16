@@ -91,3 +91,6 @@ common_voice_phrases_json = Path('../common_voice_phrases.json')
 mls_phrases_json = Path('../mls_phrases.json')
 
 textgrid_directory = Path('textgrids/')
+
+
+decomposition_random_frames= data / 'decomposition' / 'random_frames.json'
