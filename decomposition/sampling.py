@@ -27,8 +27,8 @@ def make_manifest(cgn_store, components = None, region = None, n_samples = None)
     if output_filename.exists():
         raise FileExistsError(f'manifest already exists at {output_filename}. '
             'delete it first if you want to replace it.')
-    selected_audios = filter_audios_on_component(cgn_store.audios, components)
-    audio_infos= sample_frames(selected_audios, n_samples)
+    sa = filter_audios_on_component(cgn_store.audios, components, region)
+    audio_infos= sample_frames(sa, n_samples)
     manifest = {'n_samples': n_samples, 'region': region,
         'components': components,'sampling_unit': 'uniform_unique_frame',
         'include_all_audio': True,'audio_infos': audio_infos,
@@ -56,6 +56,28 @@ def filter_audios_on_component(audios, components=None, region='nl',
     return selected_audios
 
 
+def assign_fit_and_eval_splits(audio_infos, seed=42):
+    '''Assign fitting/evaluation per recording, within each component.
+
+    Updates audio_infos in place and returns it. Odd counts give the extra
+    recording to evaluation.
+    '''
+    groups = {}
+    for info in audio_infos:
+        groups.setdefault(info['component'], []).append(info)
+
+    rng = random.Random(seed)
+    for component in sorted(groups):
+        rows = sorted(groups[component],
+            key=lambda row: row['audio_key'])
+        rng.shuffle(rows)
+        midpoint = len(rows) // 2
+        for index, row in enumerate(rows):
+            row['split'] = (
+                'fitting' if index < midpoint else 'evaluation')
+    return audio_infos
+
+
 def sample_frames(audios, n_samples=None):
     '''Sample uniformly without replacement over all eligible frame slots.
 
@@ -68,6 +90,8 @@ def sample_frames(audios, n_samples=None):
     print('making audio infos...')
     for audio in progressbar(audios):
         audio_infos.append(audio_to_info(audio))
+    audio_infos.sort(key=lambda info: info['audio_key'])
+    assign_fit_and_eval_splits(audio_infos)
     n_frames = [row['n_frames'] for row in audio_infos]
     cumulative = list(itertools.accumulate(n_frames))
     total = cumulative[-1] if cumulative else 0
@@ -116,15 +140,16 @@ def iter_samples(manifest, collar_seconds = 2):
         duration = info['duration_ms'] / 1000
         for frame_index in info['frame_indices']:
             selected = frames[frame_index]
+            start, end = selected.start_time, selected.end_time
             audio_key = info['audio_key']
             sample_id = f'{audio_key}:{frame_index}'
             d = {'sample_id': sample_id, 'audio_key': info['audio_key'],
                 'filename': info['filename'],
                 'component': info['component'],
                 'split': info['split'], 'frame_index': frame_index,
-                'start_second': selected.start,
-                'collar_start_second': max(0, selected.start - collar_seconds),
-                'collar_end_second': min(duration,selected.end + collar_seconds}
+                'start_second': start,
+                'collar_start_second': max(0, start - collar_seconds),
+                'collar_end_second': min(duration,end + collar_seconds)}
             yield d
 
 
@@ -147,5 +172,3 @@ def audio_to_component(audio):
 def load_cgn_store():
     store = Store(locations.cgn_lmdb)
     return store
-
-
