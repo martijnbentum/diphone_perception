@@ -94,5 +94,6 @@ textgrid_directory = Path('textgrids/')
 
 
 decomposition_random_frames_base = data / 'decomposition' / 'random_frames'
-d = decomposition_random_frames_echoframe_store
+d = decomposition_random_frames_base
 decomposition_random_frames_echoframe_store = d / 'echoframe_store'
+decomposition_random_frames_echoframe_model_stores = d / 'echoframe_model_stores'

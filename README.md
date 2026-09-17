@@ -271,14 +271,15 @@ For extracting many training checkpoints,
 registered model under `data/echoframe_model_stores`. Each model is removed
 from the store cache and CUDA memory before the next model is loaded:
 
-	from probing.extract_embeddings import (
-	    extract_phone_embeddings_for_models, model_store_path)
+	import locations
+	from model_store import model_store_path
+	from probing.extract_embeddings import extract_phone_embeddings_for_models
 
 	store_paths = extract_phone_embeddings_for_models(
 	    phones, checkpoint_model_names, layers=[9], gpu=True)
 
 Probe functions can open the matching checkpoint store by passing
-`store_root=model_store_path(model_name)`.
+`store_root=model_store_path(model_name, locations.echoframe_model_stores)`.
 
 Embedding and CNN extraction is incremental at the model / phone / layer
 level. `compute_embeddings_batch` checks the requested

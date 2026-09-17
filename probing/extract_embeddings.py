@@ -2,24 +2,16 @@ import echoframe
 from echoframe.batch_segment_features import compute_embeddings_batch
 
 import locations
-from probing import model_store
+import model_store
 
 default_model_name = 'wav2vec2_nl1_checkpoint-200000'
 default_phraser_source_id = 'cgn-awd'
 
 
-def extract_phone_embeddings(
-    phones,
-    model_name=default_model_name,
-    layers=[9],
-    collar=2000,
-    store=None,
-    phraser_source_id=default_phraser_source_id,
-    gpu=False,
-    batch_size=120,
-    tags=None,
-    verbose=True,
-):
+def extract_phone_embeddings(phones, model_name=default_model_name,
+    layers=[9], collar=2000, store=None,
+    phraser_source_id=default_phraser_source_id, gpu=False, batch_size=120,
+    tags=None, verbose=True):
     '''Compute and store wav2vec2 hidden-state embeddings and CNN frontend
     features for every phone in `phones` into an echoframe Store, via
     compute_embeddings_batch (stores every frame overlapping each phone's own
@@ -57,27 +49,16 @@ def extract_phone_embeddings(
 
     segments = phones.phraser_phones
     requested_layers = list(layers)
-    if 'cnn' not in requested_layers:
-        requested_layers.append('cnn')
-    compute_embeddings_batch(
-        segments, requested_layers, model_name, store,
+    if 'cnn' not in requested_layers: requested_layers.append('cnn')
+    compute_embeddings_batch(segments, requested_layers, model_name, store,
         collar=collar, gpu=gpu, tags=tags, batch_size=batch_size,
-        verbose=verbose,
-    )
+        verbose=verbose)
     return store
 
 
-def extract_phone_embeddings_for_models(
-    phones,
-    model_names,
-    layers=[9],
-    collar=2000,
-    phraser_source_id=default_phraser_source_id,
-    gpu=False,
-    batch_size=120,
-    tags=None,
-    verbose=True,
-):
+def extract_phone_embeddings_for_models(phones, model_names,
+    layers=[9], collar=2000, phraser_source_id=default_phraser_source_id,
+    gpu=False, batch_size=120, tags=None, verbose=True):
     '''Compute phone embeddings and CNN features in a dedicated store for
     every model.
 
@@ -91,30 +72,15 @@ def extract_phone_embeddings_for_models(
     Returns a dictionary mapping each model name to its store path.
     '''
     return _extract_phone_embeddings_for_models(
-        phones,
-        model_names,
-        layers=layers,
-        collar=collar,
+        phones, model_names, layers=layers, collar=collar,
         store_root=locations.echoframe_model_stores,
-        phraser_source_id=phraser_source_id,
-        gpu=gpu,
-        batch_size=batch_size,
-        tags=tags,
-        verbose=verbose,
-    )
+        phraser_source_id=phraser_source_id, gpu=gpu, batch_size=batch_size,
+        tags=tags, verbose=verbose)
 
 
-def extract_flemish_phone_embeddings_for_models(
-    flemish_phones,
-    model_names,
-    layers=[9],
-    collar=2000,
-    phraser_source_id=default_phraser_source_id,
-    gpu=False,
-    batch_size=120,
-    tags=None,
-    verbose=True,
-):
+def extract_flemish_phone_embeddings_for_models(flemish_phones, model_names,
+    layers=[9], collar=2000, phraser_source_id=default_phraser_source_id,
+    gpu=False, batch_size=120, tags=None, verbose=True):
     '''Compute Flemish phone embeddings and CNN features in a dedicated store
     per model.
 
@@ -127,54 +93,26 @@ def extract_flemish_phone_embeddings_for_models(
     Returns a dictionary mapping each model name to its store path.
     '''
     return _extract_phone_embeddings_for_models(
-        flemish_phones,
-        model_names,
-        layers=layers,
-        collar=collar,
+        flemish_phones, model_names, layers=layers, collar=collar,
         store_root=locations.echoframe_model_flemish_stores,
-        phraser_source_id=phraser_source_id,
-        gpu=gpu,
-        batch_size=batch_size,
-        tags=tags,
-        verbose=verbose,
-    )
+        phraser_source_id=phraser_source_id, gpu=gpu, batch_size=batch_size,
+        tags=tags, verbose=verbose)
 
 
-def _extract_phone_embeddings_for_models(
-    phones,
-    model_names,
-    layers,
-    collar,
-    store_root,
-    phraser_source_id,
-    gpu,
-    batch_size,
-    tags,
-    verbose,
-):
+def _extract_phone_embeddings_for_models(phones, model_names, layers, collar,
+    store_root, phraser_source_id, gpu, batch_size, tags, verbose):
     '''Run the shared dedicated-store lifecycle for a phone inventory.'''
     if isinstance(model_names, str):
         raise TypeError('model_names must be an iterable, not a string')
 
     store_paths = {}
     for model_name in model_names:
-        store = model_store.open_model_store(
-            model_name,
-            stores_root=store_root,
-        )
+        store = model_store.open_model_store(model_name, stores_root=store_root)
         try:
-            extract_phone_embeddings(
-                phones,
-                model_name=model_name,
-                layers=layers,
-                collar=collar,
-                store=store,
-                phraser_source_id=phraser_source_id,
-                gpu=gpu,
-                batch_size=batch_size,
-                tags=tags,
-                verbose=verbose,
-            )
+            extract_phone_embeddings(phones, model_name=model_name,
+                layers=layers, collar=collar, store=store,
+                phraser_source_id=phraser_source_id, gpu=gpu,
+                batch_size=batch_size, tags=tags, verbose=verbose)
             store_paths[model_name] = model_store.model_store_path(
                 model_name, store_root)
         finally:
@@ -184,6 +122,5 @@ def _extract_phone_embeddings_for_models(
                 try:
                     store.close()
                 finally:
-                    if gpu:
-                        model_store.release_cuda_memory()
+                    if gpu: model_store.release_cuda_memory()
     return store_paths

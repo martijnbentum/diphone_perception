@@ -1,5 +1,6 @@
 phone_mapper @ git+https://github.com/martijnbentum/phone_mapper
 phraser @ git+https://github.com/martijnbentum/phraser.git
+frame @ git+https://github.com/martijnbentum/frame.git
 progressbar2
 pytest
 ipython
