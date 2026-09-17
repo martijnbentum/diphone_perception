@@ -105,7 +105,7 @@ def sample_frames(audios, n_samples=None):
 
 
 def save_manifest(manifest, path):
-    '''write a new manifest, refusing to replace an existing selection.
+    '''Write a manifest, replacing the destination if it exists.
 
     manifest:  sample manifest, including inventory and selected indices
     path:      destination json file
@@ -148,7 +148,7 @@ def iter_marker_info(manifest, store, label = 'decomp_random_frames'):
             yield d
 
 def s_to_ms(seconds):
-    return int(seconds * 1000)
+    return round(seconds * 1000)
 
 def audio_to_info(audio):
     '''read stable identity, timing, and frame capacity from one audio.'''
