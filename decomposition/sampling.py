@@ -15,7 +15,8 @@ from phraser import Store
 
 DEFAULT_SAMPLE_COUNT = 418_500
 
-def make_manifest(cgn_store, components = None, region = None, n_samples = None):
+def make_manifest(cgn_store, components = None, region = None, n_samples = None,
+    overwrite = False):
     '''Select CGN frames from an existing Phraser store and save a manifest.'''
     if n_samples == None: n_samples = DEFAULT_SAMPLE_COUNT
     if components == None: components = ('comp-k', 'comp-o')
@@ -24,9 +25,8 @@ def make_manifest(cgn_store, components = None, region = None, n_samples = None)
     f.mkdir(parents=True, exist_ok=True)
     comps = '_'.join([x.split('-')[-1] for x in components])
     output_filename = f / f'region-{region}_comps-{comps}.json'
-    if output_filename.exists():
-        raise FileExistsError(f'manifest already exists at {output_filename}. '
-            'delete it first if you want to replace it.')
+    if output_filename.exists() and not overwrite:
+        raise FileExistsError(f'manifest already exists at {output_filename}.')
     sa = filter_audios_on_component(cgn_store.audios, components, region)
     audio_infos= sample_frames(sa, n_samples)
     manifest = {'n_samples': n_samples, 'region': region,
@@ -129,23 +129,26 @@ def load_manifest(region = 'nl', components = ('comp-k', 'comp-o')):
         d = json.load(handle)
     return d
 
-def iter_marker_info(manifest, label = 'decomp_random_frames', collar_ms= 2000):
+def iter_marker_info(manifest, store, label = 'decomp_random_frames'):
     '''Yield sample identities and recording-relative frame timestamps.
 
     manifest:  dictionary returned by sample_frames or loaded from JSON
     '''
-    for info in manifest['audio_infos']:
+    for info in progressbar(manifest['audio_infos']):
         frames = Frames(info['n_frames'])
         duration = info['duration_ms'] 
         for frame_index in info['frame_indices']:
             selected = frames[frame_index]
-            start, end = selected.start_time/1000, selected.end_time/1000
-            audio_key = info['audio_key']
-            sample_id = f'{audio_key}:{frame_index}'
-            d = {'audio_key': info['audio_key'],'start': start, 'end': end,
-                'label': label}
+            start = s_to_ms(selected.start_time)
+            end = s_to_ms(selected.end_time) 
+            audio_key = bytes.fromhex(info['audio_key'])
+            audio = store.load(audio_key)
+            l = f'{label}_{frame_index}'
+            d = {'audio': audio,'start': start, 'end': end, 'label': l}
             yield d
 
+def s_to_ms(seconds):
+    return int(seconds * 1000)
 
 def audio_to_info(audio):
     '''read stable identity, timing, and frame capacity from one audio.'''
