@@ -206,3 +206,111 @@ and leaves the markers' Phraser store open. Both extraction functions assume
 a non-empty marker iterable whose markers all belong to the same open store. Load markers separately to inspect
 or subset them before starting extraction; fitting/evaluation assignments
 remain in the sampling manifest.
+
+## Load saved marker embeddings
+
+`load_embeddings.py` opens the decomposition store, loads saved markers, and
+retrieves their stored features without running inference. `load_cgn()` reuses
+the default CGN loader in `sampling.py`.
+
+```python
+from decomposition.load_embeddings import load_cgn, load_store, load_markers
+from decomposition.load_embeddings import load_embedding, load_embeddings
+
+cgn = load_cgn()
+try:
+    store = load_store(phraser_store=cgn)
+    try:
+        markers = load_markers(cgn)
+        embedding = load_embedding(markers[0], store)
+        array = embedding.data
+        embeddings = load_embeddings(markers[:100], store)
+        cnn_features = load_embeddings(markers[:100], store, layer='cnn')
+    finally:
+        store.close()
+finally:
+    cgn.close()
+```
+
+The example assumes at least one saved marker. Defaults match extraction:
+model `wav2vec2_nl1_checkpoint-200000`, layer 9, and a 2,000 ms collar.
+Pass matching `model_name` arguments to both store and feature loaders when
+using another model. Feature loaders return full stored objects, with no frame
+selection or pooling. `load_embedding()` returns one `Embedding` or, for
+`layer='cnn'`, one `CNNFeature`. Missing metadata or payload raises `ValueError`.
+
+`load_embeddings()` uses Echoframe's batched reads and returns an `Embeddings`
+collection or, for `layer='cnn'`, a `CNNFeatures` collection. Access the individual
+objects through `.embeddings` or `.cnn_features`, respectively; both attributes
+contain tuples. Echoframe warns and skips missing or invalid features, preserving
+the order of retained markers. Use each object's `.phraser_key` to match it to
+its marker when entries are skipped. Empty input or no valid features raises
+`ValueError`. Supply unique marker keys; duplicate keys among loaded features
+also raise `ValueError`.
+
+Use `embeddings_to_matrix(embeddings)` to convert either collection to a NumPy
+matrix, or pass `to_matrix=True` to `load_embeddings()` to return the matrix
+directly. Each row corresponds to a retained marker and averages its stored
+frames, giving shape `(n_markers, embedding_dimension)`. Matrix output does not
+include marker identities; retain the collection when you need its Phraser keys.
+
+`load_store()` can open default CGN automatically. Retrieve that attached store
+with `store.load_phraser_store('cgn-awd')`; the caller must close both stores.
+The existing `extract_embeddings.load_markers` import remains available.
+
+## Fit centered SVD
+
+`svd.py` operates on NumPy matrices with one sample per row and one embedding
+dimension per column. Use the manifest's recording assignments to separate
+fitting and evaluation markers before loading their matrices. Keep model,
+layer, collar, and pooling settings consistent across both splits.
+
+```python
+from decomposition.svd import fit_svd, transform, summarize_spectrum
+from decomposition.svd import evaluate_svd, save_svd, load_svd
+
+# X_fit and X_eval are matrices from the respective recording splits.
+decomposition = fit_svd(X_fit)
+scores = transform(X_eval, decomposition)
+summary = summarize_spectrum(decomposition)
+evaluation = evaluate_svd(X_eval, decomposition)
+save_svd(decomposition, 'final_layer9_svd.npz')
+decomposition = load_svd('final_layer9_svd.npz')
+```
+
+`fit_svd` gives rows equal weight, subtracts the fitting column mean, and runs
+NumPy's reduced SVD in float64 without normalization or coordinate scaling.
+It returns a dictionary containing `mean`, `directions`, `singular_values`,
+`eigenvalues`, and `n_rows`. Directions are orthonormal **columns**, ordered by
+decreasing singular value. There are `min(n_rows - 1, n_dimensions)` components,
+including any zero modes; eigenvalues are `singular_values ** 2 / (n_rows - 1)`.
+Fitting requires at least two rows and one dimension, with finite real values.
+This implementation loads the full matrix and computes all components in memory.
+
+`transform` uses the saved fitting mean and returns sample-by-component scores.
+Pass `n_components=k` to retain the first `k` directions. `summarize_spectrum`
+returns total variance, variance fractions, cumulative variance fractions,
+component counts for 90% and 95% variance, participation ratio, row count, and
+the centered rank ceiling. For zero total variance, fractions, component counts,
+and participation ratio are zero.
+
+`evaluate_svd` requires at least two evaluation rows. It reports sample variance
+along fitted directions, total evaluation variance, and their ratios. It also
+reports the evaluation-minus-fitting mean in embedding coordinates (`mean_shift`)
+and fitted coordinates (`score_mean_shift`). Variances are measured around
+evaluation means with `ddof=1`, separately from those shifts. Fractions can sum
+below one when the fitted basis does not span the evaluation variation.
+
+`save_svd` creates parent directories and refuses to overwrite an existing file.
+It saves the fitted dictionary only; keep model and sample provenance separately.
+`load_svd` reads it without enabling pickle.
+
+Run the SVD tests from the repository root:
+
+```sh
+../diphone_env/bin/python -m pytest tests/test_decomposition_svd.py
+```
+
+These tests use synthetic matrices and temporary files; no corpus or model
+stores are needed. They cover reconstruction, covariance, spectrum summaries,
+held-out variance and mean shifts, input validation, and persistence.

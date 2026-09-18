@@ -4,19 +4,9 @@ from echoframe.batch_segment_features import compute_embeddings_batch
 
 import locations
 import model_store
-
-default_model_name = 'wav2vec2_nl1_checkpoint-200000'
-default_phraser_source_id = 'cgn-awd'
-
-
-def load_markers(phraser_store, label='decomp_random_frames'):
-    '''Load saved markers with a label prefix into a reusable list.
-
-    phraser_store:  open Phraser store containing the markers
-    label:          marker label prefix used when saving the sample
-    '''
-    m = phraser_store.markers.filter(label__startswith=label)
-    return list(m)
+from decomposition.load_embeddings import default_model_name
+from decomposition.load_embeddings import default_phraser_source_id
+from decomposition.load_embeddings import load_markers
 
 
 def extract_marker_embeddings(markers, model_name=default_model_name,
