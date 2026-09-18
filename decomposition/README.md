@@ -81,6 +81,36 @@ manifest = load_manifest(region='vl', components=('comp-o',))
 
 ### Lower-level sampling and custom output
 
+Use `load_splits` to retrieve the saved recording assignments. Its `region`
+and `components` arguments have the same defaults as `load_manifest`:
+
+```python
+from decomposition.sampling import load_splits
+
+filenames = load_splits()  # {'fit': [filenames...], 'eval': [filenames...]}
+marker_splits = load_splits(per_marker=True)  # ['fit', 'fit', 'eval', ...]
+```
+
+Filename lists include all manifest recordings, even those with no selected
+frames. With `per_marker=True`, each recording's label is repeated once per
+selected frame. The result follows manifest order, matching `iter_marker_info`;
+do not assume it matches the order returned by the Phraser marker store or a
+collection with missing embeddings skipped.
+
+Check that loaded markers match this order before using per-marker splits:
+
+```python
+from decomposition.load_embeddings import check_marker_alignment
+
+check_marker_alignment(markers)  # True, or ValueError describing the mismatch
+```
+
+The check compares marker count, `marker.label`, and `marker.audio.filename`
+against every selected frame in manifest order. It loads the default manifest,
+accepts the same `region` and `components` options, or takes an already loaded
+dictionary as `manifest=manifest`. It does not reorder markers. Run it on the
+full marker list; it does not check whether embedding loading skipped entries.
+
 `sample_frames` returns a **list of audio-info dictionaries**, not a manifest.
 It does not filter region, component, or duration. Supply unique recordings with
 valid durations sufficient for at least one complete frame. The normal filter

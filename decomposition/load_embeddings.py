@@ -4,7 +4,7 @@ import numpy as np
 
 import locations
 import model_store
-from decomposition.sampling import load_cgn_store
+from decomposition.sampling import load_cgn_store, load_manifest
 
 default_model_name = 'wav2vec2_nl1_checkpoint-200000'
 default_phraser_source_id = 'cgn-awd'
@@ -45,6 +45,42 @@ def load_embedding(marker, store, model_name=default_model_name, layer=9,
     else:
         o = store.phraser_key_to_embedding(marker.key, model_name, layer, collar=collar)
     return o
+
+def check_marker_alignment(markers, manifest=None, region='nl',
+    components=('comp-k', 'comp-o'), label='decomp_random_frames'):
+    '''Check marker count and order against the manifest; return True on success.
+
+    markers:     iterable of markers in the order to check
+    manifest:    manifest dictionary; None loads it through sampling
+    region:      region passed to load_manifest when manifest is omitted
+    components:  components passed to load_manifest when manifest is omitted
+    label:       marker label prefix, followed by _{frame_index}
+
+    Compare marker.label and marker.audio.filename against every selected
+    frame in audio_infos order. Filenames are compared as strings. Raise
+    ValueError on a count mismatch or the first mismatching marker. Does not
+    reorder markers. A supplied iterator is consumed by this check.
+    '''
+    if manifest is None:
+        manifest = load_manifest(region=region, components=components)
+    markers = list(markers)
+    n_expected = sum(len(info['frame_indices'])
+        for info in manifest['audio_infos'])
+    if len(markers) != n_expected:
+        message = f'expected {n_expected} markers, got {len(markers)}'
+        raise ValueError(message)
+    index = 0
+    for info in manifest['audio_infos']:
+        for frame_index in info['frame_indices']:
+            marker = markers[index]
+            expected = (str(info['filename']), f'{label}_{frame_index}')
+            actual = (str(marker.audio.filename), marker.label)
+            if actual != expected:
+                message = f'marker {index}: expected {expected!r}, '
+                raise ValueError(message + f'got {actual!r}')
+            index += 1
+    return True
+
 
 def embeddings_to_matrix(embeddings):
     '''Convert Embeddings or CNNFeatures to a (markers, dimensions) matrix.

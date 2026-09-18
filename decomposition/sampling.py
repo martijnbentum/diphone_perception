@@ -15,6 +15,33 @@ from phraser import Store
 
 DEFAULT_SAMPLE_COUNT = 418_500
 
+def load_splits(region='nl', components=('comp-k', 'comp-o'),
+    per_marker=False):
+    '''Load fitting/evaluation filenames or one split label per marker.
+
+    region:      manifest region, as in load_manifest
+    components:  manifest components, as in load_manifest
+    per_marker:  return a list of 'fit'/'eval' labels instead of filenames
+
+    By default, return {'fit': [...], 'eval': [...]} with filenames from all
+    manifest recordings, including recordings with no selected frames.
+    Marker labels follow audio_infos and frame_indices order, matching
+    iter_marker_info. Store-loaded markers may have a different order.
+    '''
+    manifest = load_manifest(region=region, components=components)
+    filenames = {'fit': [], 'eval': []}
+    labels = []
+    split_names = {'fitting': 'fit', 'evaluation': 'eval'}
+    for info in manifest['audio_infos']:
+        split = split_names[info['split']]
+        if per_marker:
+            labels.extend([split] * len(info['frame_indices']))
+        else:
+            filenames[split].append(info['filename'])
+    if per_marker: return labels
+    return filenames
+
+
 def make_manifest(cgn_store, components = None, region = None, n_samples = None,
     overwrite = False):
     '''Select CGN frames from an existing Phraser store and save a manifest.'''
