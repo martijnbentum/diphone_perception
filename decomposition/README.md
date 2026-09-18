@@ -117,7 +117,7 @@ loaded collection, including whether entries were skipped:
 ```python
 from decomposition.load_embeddings import check_embedding_alignment
 
-embeddings = load_embeddings(markers, store)
+embeddings = load_embeddings(markers, phraser_store=cgn)
 check_embedding_alignment(embeddings)
 ```
 
@@ -261,6 +261,7 @@ the default CGN loader in `sampling.py`.
 ```python
 from decomposition.load_embeddings import load_cgn, load_store, load_markers
 from decomposition.load_embeddings import load_embedding, load_embeddings
+from decomposition.load_embeddings import embeddings_to_matrix
 
 cgn = load_cgn()
 try:
@@ -269,18 +270,25 @@ try:
         markers = load_markers(cgn)
         embedding = load_embedding(markers[0], store)
         array = embedding.data
-        embeddings = load_embeddings(markers[:100], store)
-        cnn_features = load_embeddings(markers[:100], store, layer='cnn')
     finally:
         store.close()
+    embeddings = load_embeddings(markers[:100], phraser_store=cgn)
+    try:
+        matrix = embeddings_to_matrix(embeddings)
+    finally:
+        embeddings.store.close()
+    cnn_matrix = load_embeddings(markers[:100], phraser_store=cgn,
+        layer='cnn', to_matrix=True)
 finally:
     cgn.close()
 ```
 
 The example assumes at least one saved marker. Defaults match extraction:
 model `wav2vec2_nl1_checkpoint-200000`, layer 9, and a 2,000 ms collar.
-Pass matching `model_name` arguments to both store and feature loaders when
-using another model. Feature loaders return full stored objects, with no frame
+For `load_embedding`, pass matching `model_name` arguments to the store and
+single-embedding loader. `load_embeddings` opens the appropriate Echoframe store
+itself using `model_name`; pass a Phraser store through `phraser_store`, or omit
+it to open default CGN. Feature loaders return full stored objects, with no frame
 selection or pooling. `load_embedding()` returns one `Embedding` or, for
 `layer='cnn'`, one `CNNFeature`. Missing metadata or payload raises `ValueError`.
 
@@ -292,6 +300,12 @@ the order of retained markers. Use each object's `.phraser_key` to match it to
 its marker when entries are skipped. Empty input or no valid features raises
 `ValueError`. Supply unique marker keys; duplicate keys among loaded features
 also raise `ValueError`.
+
+The bulk collection keeps its Echoframe store open as `.store`. Close it after
+use. If you omitted `phraser_store`, also call
+`embeddings.store.close_phraser_stores()` to close the CGN store opened for you.
+With `to_matrix=True`, the loader closes its internally opened stores before
+returning. It leaves a supplied Phraser store open.
 
 Use `embeddings_to_matrix(embeddings)` to convert either collection to a NumPy
 matrix, or pass `to_matrix=True` to `load_embeddings()` to return the matrix

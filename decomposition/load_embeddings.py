@@ -10,9 +10,15 @@ default_model_name = 'wav2vec2_nl1_checkpoint-200000'
 default_phraser_source_id = 'cgn-awd'
 
 
-def load_embeddings(markers, store, model_name=default_model_name, layer=9,
+def load_embeddings(markers, phraser_store=None, model_name=default_model_name, layer=9,
     collar=2000, to_matrix=False):
     '''Bulk-load an Echoframe Embeddings or CNNFeatures collection.
+
+    Opens the Echoframe store selected by model_name and attaches phraser_store.
+    If phraser_store is None, opens default CGN. The returned collection owns
+    the open Echoframe store through .store; the caller closes it and any CGN
+    store opened here. Matrix output and failed loads close internally opened
+    stores. A supplied Phraser store is never closed here.
 
     Returns CNNFeatures when layer is 'cnn', otherwise Embeddings. Individual
     objects are available through .cnn_features or .embeddings, respectively.
@@ -25,12 +31,24 @@ def load_embeddings(markers, store, model_name=default_model_name, layer=9,
     retained marker, averaging its frames through embeddings_to_matrix.
     '''
     keys = [marker.key for marker in markers]
-    if layer == 'cnn':
-        o = store.phraser_keys_to_cnn_features(keys, model_name, collar=collar)
-    else:
-        o = store.phraser_keys_to_embeddings(keys, model_name, layer, collar=collar)
-    if to_matrix: return embeddings_to_matrix(o)
-    return o
+    store = load_store(model_name=model_name, phraser_store=phraser_store)
+    keep_open = False
+    try:
+        if layer == 'cnn':
+            o = store.phraser_keys_to_cnn_features(keys, model_name,
+                collar=collar)
+        else:
+            o = store.phraser_keys_to_embeddings(keys, model_name, layer,
+                collar=collar)
+        if to_matrix: return embeddings_to_matrix(o)
+        keep_open = True
+        return o
+    finally:
+        if not keep_open:
+            try:
+                if phraser_store is None: store.close_phraser_stores()
+            finally:
+                store.close()
 
 def load_embedding(marker, store, model_name=default_model_name, layer=9,
     collar=2000):
