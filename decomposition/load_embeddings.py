@@ -5,6 +5,7 @@ import numpy as np
 import locations
 import model_store
 from decomposition.sampling import load_cgn_store, load_manifest
+from decomposition.sampling import load_splits
 
 default_model_name = 'wav2vec2_nl1_checkpoint-200000'
 default_phraser_source_id = 'cgn-awd'
@@ -122,6 +123,22 @@ def check_marker_alignment(markers, manifest=None, region='nl',
                 raise ValueError(message + f'got {actual!r}')
             index += 1
     return True
+
+
+def split_matrix(matrix, split_list):
+    '''Return fit and eval matrices using the supplied per-row split labels.
+
+    matrix:      NumPy matrix with one row per sample
+    split_list:  sequence of 'fit'/'eval' labels in matrix row order
+
+    Use load_splits(per_marker=True) to obtain labels in manifest order.
+    Only validate that matrix and split_list have equal length. Other labels
+    are omitted from both outputs. Preserve row order within each split.
+    '''
+    if len(matrix) != len(split_list):
+        raise ValueError('matrix and split_list must have equal length')
+    splits = np.asarray(split_list)
+    return {'fit': matrix[splits == 'fit'], 'eval': matrix[splits == 'eval']}
 
 
 def embeddings_to_matrix(embeddings):

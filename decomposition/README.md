@@ -313,6 +313,24 @@ directly. Each row corresponds to a retained marker and averages its stored
 frames, giving shape `(n_markers, embedding_dimension)`. Matrix output does not
 include marker identities; retain the collection when you need its Phraser keys.
 
+To obtain separate fitting and evaluation matrices:
+
+```python
+from decomposition.load_embeddings import split_matrix
+from decomposition.sampling import load_splits
+
+matrix = embeddings_to_matrix(embeddings)
+split_list = load_splits(per_marker=True)
+matrices = split_matrix(matrix, split_list)
+X_fit, X_eval = matrices['fit'], matrices['eval']
+```
+
+`split_matrix` only checks that the matrix and split list have equal length,
+raising `ValueError` otherwise. It preserves row order within each split and
+omits rows with labels other than `'fit'` or `'eval'`. A split with no matching
+rows retains the matrix's column count. Ensure the split labels correspond to
+matrix row order; alignment is not checked by this function.
+
 `load_store()` can open default CGN automatically. Retrieve that attached store
 with `store.load_phraser_store('cgn-awd')`; the caller must close both stores.
 The existing `extract_embeddings.load_markers` import remains available.
