@@ -46,6 +46,30 @@ def load_embedding(marker, store, model_name=default_model_name, layer=9,
         o = store.phraser_key_to_embedding(marker.key, model_name, layer, collar=collar)
     return o
 
+def check_embedding_alignment(embeddings, manifest=None, region='nl',
+    components=('comp-k', 'comp-o'), label='decomp_random_frames'):
+    '''Check a loaded collection against manifest marker count and order.
+
+    embeddings:  Echoframe Embeddings or CNNFeatures collection, not a matrix
+    manifest:    manifest dictionary; None loads it through sampling
+    region:      region passed to load_manifest when manifest is omitted
+    components:  components passed to load_manifest when manifest is omitted
+    label:       marker label prefix, followed by _{frame_index}
+
+    Resolve each embedding's phraser_object through its attached store and
+    delegate to check_marker_alignment. Return True on success; missing,
+    extra, or reordered markers raise ValueError. Keep Phraser open while
+    checking. Errors resolving linked Phraser objects propagate unchanged.
+    '''
+    if hasattr(embeddings, 'embeddings'):
+        embeddings = embeddings.embeddings
+    else:
+        embeddings = embeddings.cnn_features
+    markers = [embedding.phraser_object for embedding in embeddings]
+    return check_marker_alignment(markers, manifest=manifest, region=region,
+        components=components, label=label)
+
+
 def check_marker_alignment(markers, manifest=None, region='nl',
     components=('comp-k', 'comp-o'), label='decomp_random_frames'):
     '''Check marker count and order against the manifest; return True on success.

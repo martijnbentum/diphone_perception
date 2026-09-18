@@ -111,6 +111,21 @@ accepts the same `region` and `components` options, or takes an already loaded
 dictionary as `manifest=manifest`. It does not reorder markers. Run it on the
 full marker list; it does not check whether embedding loading skipped entries.
 
+After loading embeddings, use `check_embedding_alignment` to check the actual
+loaded collection, including whether entries were skipped:
+
+```python
+from decomposition.load_embeddings import check_embedding_alignment
+
+embeddings = load_embeddings(markers, store)
+check_embedding_alignment(embeddings)
+```
+
+It accepts both `Embeddings` and `CNNFeatures`, resolves each item's
+`.phraser_object`, and delegates to `check_marker_alignment` with the same
+manifest options. Keep the attached Phraser store open and check before
+converting to a NumPy matrix. It returns `True` or raises on a mismatch.
+
 `sample_frames` returns a **list of audio-info dictionaries**, not a manifest.
 It does not filter region, component, or duration. Supply unique recordings with
 valid durations sufficient for at least one complete frame. The normal filter
