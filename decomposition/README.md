@@ -252,6 +252,52 @@ a non-empty marker iterable whose markers all belong to the same open store. Loa
 or subset them before starting extraction; fitting/evaluation assignments
 remain in the sampling manifest.
 
+## Extract marker-start MFCCs
+
+`extract_mfcc.py` stores one MFCC row per saved random-frame marker in a
+separate Echoframe store at
+`locations.decomposition_random_frames_echoframe_mfcc_store`. The store is
+distinct from the phone-probing MFCC store and the decomposition model stores.
+
+```python
+from decomposition.extract_mfcc import extract_marker_mfcc
+from decomposition.extract_mfcc import find_unaligned_markers
+from decomposition.load_embeddings import load_cgn, load_markers
+
+cgn = load_cgn()
+try:
+    markers = load_markers(cgn)
+    unaligned = find_unaligned_markers(markers)
+    mfcc_store = extract_marker_mfcc(markers, workers=8)
+    try:
+        keys = [mfcc_store.make_echoframe_key('acoustic_feature',
+            feature_name='mfcc', phraser_key=marker.key)
+            for marker in markers]
+        vectors = mfcc_store.load_many_frames(keys, frame='center',
+            keep_missing=True)
+    finally:
+        mfcc_store.close()
+finally:
+    cgn.close()
+```
+
+Each stored payload has shape `(1, 39)`: 13 static MFCCs, 13 deltas, and 13
+delta-deltas. The 25 ms MFCC window starts exactly at `marker.start`. The
+extractor uses Phraser's efficient recording-aligned batch output when that
+grid matches the marker. Otherwise it reads a short audio interval and anchors
+the MFCC grid at the marker start. Both paths use neighboring recording audio
+for delta calculations, clipped at recording boundaries. Markers need enough
+remaining audio for one complete 25 ms window; they need not follow Phraser's
+recording-aligned grid. Existing payloads are skipped after a shape check;
+`vectors` follows marker order and contains `None` for missing payloads. The
+caller closes the returned Echoframe store and the Phraser store.
+
+`find_unaligned_markers(markers)` prints the number of marker starts outside
+Phraser's recording grid and returns those marker objects in input order. It
+uses each recording's sample rate and the same sample rounding as extraction.
+It checks only start alignment, without loading audio or checking whether a
+complete 25 ms window fits.
+
 ## Load saved marker embeddings
 
 `load_embeddings.py` opens the decomposition store, loads saved markers, and
