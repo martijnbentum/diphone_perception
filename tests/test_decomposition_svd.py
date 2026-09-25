@@ -96,6 +96,88 @@ def test_constant_evaluation_reports_shift_and_zero_variance():
     assert_allclose(evaluation['mean_shift'], [3, 4])
 
 
+def test_covariance_evaluation_separates_mean_shift_and_detects_correlation():
+    '''Mean shifts leave score covariance and correlation unchanged.'''
+    fitted = svd.fit_svd([[-2, 0], [2, 0], [0, -1], [0, 1]])
+    scores = np.array([[-2, -1], [0, 0], [2, 1]])
+    X = scores @ fitted['directions'].T + fitted['mean']
+    baseline = svd.evaluate_covariance(X, fitted)
+    shifted = svd.evaluate_covariance(X + [10, 20], fitted)
+    expected = np.array([[4, 2], [2, 1]])
+
+    assert_allclose(baseline['score_covariance'], expected)
+    assert_allclose(shifted['score_covariance'], expected)
+    expected_correlation = np.ones((2, 2))
+    assert_allclose(baseline['score_correlation'], expected_correlation)
+    assert baseline['off_diagonal_ratio'] == pytest.approx(np.sqrt(8) / 5)
+    fitted_covariance = np.diag(fitted['eigenvalues'])
+    relative_error = np.linalg.norm(expected - fitted_covariance, ord='fro')
+    relative_error /= np.linalg.norm(fitted_covariance, ord='fro')
+    observed_error = baseline['relative_covariance_error']
+    assert observed_error == pytest.approx(relative_error)
+    assert baseline['rms_off_diagonal_correlation'] == pytest.approx(1)
+    assert baseline['max_abs_off_diagonal_correlation'] == pytest.approx(1)
+
+
+def test_covariance_evaluation_marks_zero_variance_correlations_undefined():
+    '''A constant component makes its correlation row undefined.'''
+    fitted = svd.fit_svd([[-2, 0], [2, 0], [0, -1], [0, 1]])
+    scores = np.array([[-1, 0], [0, 0], [1, 0]])
+    X = scores @ fitted['directions'].T + fitted['mean']
+
+    result = svd.evaluate_covariance(X, fitted)
+
+    assert_allclose(result['score_covariance'], [[1, 0], [0, 0]])
+    assert result['score_correlation'][0, 0] == pytest.approx(1)
+    assert np.isnan(result['score_correlation'][0, 1:]).all()
+    assert np.isnan(result['score_correlation'][1]).all()
+    assert result['off_diagonal_ratio'] == 0
+    assert np.isnan(result['rms_off_diagonal_correlation'])
+    assert np.isnan(result['max_abs_off_diagonal_correlation'])
+
+
+def test_covariance_evaluation_handles_zero_denominators():
+    '''Zero fitting and evaluation covariances have undefined ratios.'''
+    fit_matrix = np.ones((3, 2))
+    eval_matrix = np.ones((4, 2))
+    fitted = svd.fit_svd(fit_matrix)
+
+    result = svd.evaluate_covariance(eval_matrix, fitted)
+
+    expected = np.zeros((2, 2))
+    assert_array_equal(result['score_covariance'], expected)
+    assert np.isnan(result['score_correlation']).all()
+    assert np.isnan(result['off_diagonal_ratio'])
+    assert np.isnan(result['relative_covariance_error'])
+    assert np.isnan(result['rms_off_diagonal_correlation'])
+    assert np.isnan(result['max_abs_off_diagonal_correlation'])
+
+
+def test_covariance_evaluation_one_component_retains_matrix_shape():
+    '''A one-component result stays 2D and has no pairwise summary.'''
+    fitted = svd.fit_svd([[-1], [1]])
+
+    with pytest.warns(UserWarning, match='one component'):
+        result = svd.evaluate_covariance([[-1], [1]], fitted)
+
+    assert_array_equal(result['score_covariance'], [[2]])
+    assert_allclose(result['score_correlation'], [[1]])
+    assert result['off_diagonal_ratio'] == 0
+    assert result['relative_covariance_error'] == pytest.approx(0, abs=1e-14)
+    assert np.isnan(result['rms_off_diagonal_correlation'])
+    assert np.isnan(result['max_abs_off_diagonal_correlation'])
+
+
+def test_covariance_evaluation_warns_when_fitted_basis_is_incomplete():
+    '''Warn when the fitted score space omits embedding directions.'''
+    fitted = svd.fit_svd([[1, 0, 0], [0, 1, 0], [0, 0, 1]])
+
+    with pytest.warns(UserWarning, match='do not span'):
+        result = svd.evaluate_covariance([[2, 0, 0], [0, 2, 0]], fitted)
+
+    assert result['score_covariance'].shape == (2, 2)
+
+
 @pytest.mark.parametrize('X', [[], [1, 2], [[1, 2]], [[], []],
     [[0], [np.nan]], [[0], [np.inf]], [[0], [1j]]])
 def test_fit_rejects_invalid_matrices(X):

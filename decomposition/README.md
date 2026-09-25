@@ -402,13 +402,16 @@ layer, collar, and pooling settings consistent across both splits.
 
 ```python
 from decomposition.svd import fit_svd, transform, summarize_spectrum
-from decomposition.svd import evaluate_svd, save_svd, load_svd
+from decomposition.svd import evaluate_svd, evaluate_covariance
+from decomposition.svd import save_svd, load_svd
 
 # X_fit and X_eval are matrices from the respective recording splits.
 decomposition = fit_svd(X_fit)
 scores = transform(X_eval, decomposition)
 summary = summarize_spectrum(decomposition)
 evaluation = evaluate_svd(X_eval, decomposition)
+covariance = evaluate_covariance(X_eval, decomposition)
+print(covariance['relative_covariance_error'])
 save_svd(decomposition, 'final_layer9_svd.npz')
 decomposition = load_svd('final_layer9_svd.npz')
 ```
@@ -435,6 +438,18 @@ reports the evaluation-minus-fitting mean in embedding coordinates (`mean_shift`
 and fitted coordinates (`score_mean_shift`). Variances are measured around
 evaluation means with `ddof=1`, separately from those shifts. Fractions can sum
 below one when the fitted basis does not span the evaluation variation.
+
+`evaluate_covariance` compares the covariance of held-out scores with the
+diagonal covariance from fitting eigenvalues. Off-diagonal covariance shows
+whether fitted directions remain uncorrelated; relative covariance error also
+captures changed component variances. Correlations give low-variance modes
+equal relative weight, while covariance metrics emphasize high-variance
+structure. Undefined ratios or correlations are NaN. A warning identifies an
+incomplete fitted basis or a single component with no pairwise correlations.
+Small metrics support stability of covariance geometry, but do not establish
+identical distributions or preservation of task information. Use
+`evaluate_svd` to inspect mean shifts separately. No generalisation threshold
+is imposed.
 
 `save_svd` creates parent directories and refuses to overwrite an existing file.
 It saves the fitted dictionary only; keep model and sample provenance separately.

@@ -1,6 +1,7 @@
 '''Fit and evaluate centered SVD on sample-by-dimension matrices.'''
 
 from pathlib import Path
+import warnings
 
 import numpy as np
 
@@ -105,6 +106,67 @@ def evaluate_svd(X, decomposition):
         'variance_fractions': fractions,
         'mean_shift': X.mean(axis=0) - decomposition['mean'],
         'score_mean_shift': scores.mean(axis=0),
+    }
+
+
+def evaluate_covariance(X, decomposition):
+    '''Compare held-out score covariance with fitted component variances.
+
+    X:              held-out matrix with at least two rows
+    decomposition:  dictionary returned by fit_svd or load_svd
+
+    Covariance is centered on held-out score means, so mean shift is separate.
+    A fitted basis smaller than the embedding dimension covers only its span.
+    Undefined ratios and pairwise correlations are NaN.
+    '''
+    X = _as_matrix(X, min_rows=2)
+    scores = transform(X, decomposition)
+    n_components = scores.shape[1]
+    if n_components < X.shape[1]:
+        message = 'fitted directions do not span all embedding dimensions'
+        warnings.warn(message, UserWarning, stacklevel=2)
+    if n_components == 1:
+        message = 'one component has no off-diagonal correlation pairs'
+        warnings.warn(message, UserWarning, stacklevel=2)
+
+    covariance = np.cov(scores, rowvar=False, ddof=1)
+    covariance = np.atleast_2d(covariance)
+    variances = np.diag(covariance)
+    standard_deviations = np.sqrt(variances)
+    correlation_denominator = np.outer(
+        standard_deviations, standard_deviations)
+    correlation = np.full(covariance.shape, np.nan)
+    np.divide(covariance, correlation_denominator, out=correlation,
+        where=correlation_denominator > 0)
+
+    off_diagonal = covariance - np.diag(variances)
+    covariance_norm = np.linalg.norm(covariance, ord='fro')
+    off_diagonal_ratio = np.nan
+    if covariance_norm > 0:
+        off_diagonal_ratio = np.linalg.norm(off_diagonal, ord='fro')
+        off_diagonal_ratio /= covariance_norm
+
+    fitted_covariance = np.diag(decomposition['eigenvalues'])
+    fitted_norm = np.linalg.norm(fitted_covariance, ord='fro')
+    relative_error = np.nan
+    if fitted_norm > 0:
+        difference = covariance - fitted_covariance
+        relative_error = np.linalg.norm(difference, ord='fro') / fitted_norm
+
+    upper_triangle = correlation[np.triu_indices(n_components, k=1)]
+    valid_pairs = upper_triangle[np.isfinite(upper_triangle)]
+    rms_correlation = np.nan
+    max_correlation = np.nan
+    if len(valid_pairs):
+        rms_correlation = np.sqrt(np.mean(valid_pairs ** 2))
+        max_correlation = np.max(np.abs(valid_pairs))
+    return {
+        'score_covariance': covariance,
+        'score_correlation': correlation,
+        'off_diagonal_ratio': float(off_diagonal_ratio),
+        'relative_covariance_error': float(relative_error),
+        'rms_off_diagonal_correlation': float(rms_correlation),
+        'max_abs_off_diagonal_correlation': float(max_correlation),
     }
 
 
