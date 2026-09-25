@@ -137,6 +137,8 @@ def test_aligned_marker_selects_recording_frame(tmp_path, monkeypatch):
     actual = store.save_many.call_args.args[0][0][1]
     expected = recording_mfcc(marker.audio)[20:21]
     np.testing.assert_allclose(actual, expected, rtol=1e-4, atol=1e-3)
+    direct = extract_mfcc.marker_to_mfcc(marker)
+    np.testing.assert_allclose(direct, expected, rtol=1e-4, atol=1e-3)
 
 
 def test_shifted_marker_uses_audio_on_both_sides_for_deltas(tmp_path):
@@ -151,7 +153,7 @@ def test_shifted_marker_uses_audio_on_both_sides_for_deltas(tmp_path):
     marker = make_marker('shifted', start=200, sample_rate=sample_rate,
         filename=filename)
 
-    result = extract_mfcc._marker_start_mfcc(marker)
+    result = extract_mfcc.marker_to_mfcc(marker)
 
     start = round(marker.start / 1000 * sample_rate)
     hop = round(0.01 * sample_rate)
@@ -169,6 +171,8 @@ def test_rejects_marker_without_complete_window():
 
     with pytest.raises(ValueError, match='complete MFCC window'):
         extract_mfcc.extract_marker_mfcc([marker], store=store, verbose=False)
+    with pytest.raises(ValueError, match='complete MFCC window'):
+        extract_mfcc.marker_to_mfcc(marker)
 
 
 def test_owned_store_closes_after_extraction_error(monkeypatch):

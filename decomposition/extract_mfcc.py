@@ -94,6 +94,18 @@ def extract_marker_mfcc(markers, store=None,
     return store
 
 
+def marker_to_mfcc(marker):
+    '''Return one (1, 39) MFCC row without storing it.
+
+    marker:  marker with recording-relative start and end times in ms
+
+    The 25 ms target window starts at marker.start. Neighboring 10 ms frames
+    are included where audio is available to compute deltas and delta-deltas.
+    '''
+    _validate_marker(marker)
+    return _marker_start_mfcc(marker)
+
+
 def find_unaligned_markers(markers):
     '''Report and return markers whose starts miss Phraser's recording grid.
 

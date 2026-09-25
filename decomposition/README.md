@@ -298,6 +298,18 @@ uses each recording's sample rate and the same sample rounding as extraction.
 It checks only start alignment, without loading audio or checking whether a
 complete 25 ms window fits.
 
+For a single marker, `marker_to_mfcc(marker)` returns a `(1, 39)` NumPy array
+without opening or writing an Echoframe store:
+
+```python
+from decomposition.extract_mfcc import marker_to_mfcc
+
+mfcc_row = marker_to_mfcc(markers[0])
+```
+
+It requires enough recording audio for the target 25 ms window and uses
+neighboring audio for deltas where available.
+
 ## Load saved marker embeddings
 
 `load_embeddings.py` opens the decomposition store, loads saved markers, and
