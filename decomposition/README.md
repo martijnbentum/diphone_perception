@@ -263,6 +263,7 @@ distinct from the phone-probing MFCC store and the decomposition model stores.
 from decomposition.extract_mfcc import extract_marker_mfcc
 from decomposition.extract_mfcc import find_unaligned_markers
 from decomposition.load_embeddings import load_cgn, load_markers
+from decomposition.load_mfcc import load_mfcc
 
 cgn = load_cgn()
 try:
@@ -270,11 +271,7 @@ try:
     unaligned = find_unaligned_markers(markers)
     mfcc_store = extract_marker_mfcc(markers, workers=8)
     try:
-        keys = [mfcc_store.make_echoframe_key('acoustic_feature',
-            feature_name='mfcc', phraser_key=marker.key)
-            for marker in markers]
-        vectors = mfcc_store.load_many_frames(keys, frame='center',
-            keep_missing=True)
+        matrix = load_mfcc(markers, store=mfcc_store)
     finally:
         mfcc_store.close()
 finally:
@@ -288,9 +285,10 @@ grid matches the marker. Otherwise it reads a short audio interval and anchors
 the MFCC grid at the marker start. Both paths use neighboring recording audio
 for delta calculations, clipped at recording boundaries. Markers need enough
 remaining audio for one complete 25 ms window; they need not follow Phraser's
-recording-aligned grid. Existing payloads are skipped after a shape check;
-`vectors` follows marker order and contains `None` for missing payloads. The
-caller closes the returned Echoframe store and the Phraser store.
+recording-aligned grid. Existing payloads are skipped after a shape check.
+`load_mfcc` returns a `(n_markers, 39)` matrix in marker order and raises for
+missing or malformed payloads. The caller closes the returned Echoframe store
+and the Phraser store.
 
 `find_unaligned_markers(markers)` prints the number of marker starts outside
 Phraser's recording grid and returns those marker objects in input order. It
@@ -309,6 +307,70 @@ mfcc_row = marker_to_mfcc(markers[0])
 
 It requires enough recording audio for the target 25 ms window and uses
 neighboring audio for deltas where available.
+
+## Measure marker energy and frequency bands
+
+`audio/intensity.py` computes a [Praat-style intensity](https://github.com/praat/praat.github.io/blob/master/fon/Sound_to_Intensity.cpp)
+value at the center of the marker's 25 ms frame. The Kaiser-20 analysis
+window spans `6.4 / pitch_floor` seconds (64 ms at the default 100 Hz), so
+this value includes audio outside the marker frame. A marker too close to a
+recording boundary for the full window returns `NaN`. The result uses
+Praat's `2e-5` amplitude reference; uncalibrated digital audio cannot be
+interpreted as physical dB SPL.
+
+`audio/frequency_band.py` computes mean-square power in 0–500, 500–1000,
+1000–2000, and 2000–4000 Hz bands over the exact 25 ms marker frame. Its
+marker wrapper returns four dBFS values in that order. Silence in a band
+returns negative infinity. Band differences describe spectral balance;
+power above 4000 Hz is excluded.
+
+```python
+from decomposition.audio.intensity import marker_to_intensity
+from decomposition.audio.frequency_band import marker_to_frequency_bands
+
+intensity = marker_to_intensity(markers[0])
+band_levels = marker_to_frequency_bands(markers[0])
+```
+
+For the full marker inventory, `audio/extract.py` groups markers by recording
+and reads each audio file once. Worker processes compute the measurements;
+the parent process writes rows to
+`locations.decomposition_random_frames_acoustics_db`, a SQLite file named
+`marker_acoustics.sqlite`. Each marker key identifies one row containing
+Praat-style intensity and four linear band powers. A missing full intensity
+window is stored as SQL `NULL` and loaded as `NaN`.
+
+Run multiprocessing extraction from a Python script:
+
+```python
+from decomposition.audio.extract import extract_marker_acoustics
+from decomposition.load_embeddings import load_cgn, load_markers
+
+if __name__ == '__main__':
+    cgn = load_cgn()
+    try:
+        markers = load_markers(cgn)
+        path = extract_marker_acoustics(markers)
+    finally:
+        cgn.close()
+```
+
+The extractor skips rows already stored with the same settings. Changed
+settings reset the table automatically. Pass `overwrite=True` after changing
+the implementation to clear the table and recompute the supplied markers;
+pass the complete marker inventory when overwriting. Workers receive plain
+filenames, times, and keys, not Phraser objects or database connections.
+
+The loader returns named NumPy arrays in input marker order and raises if any
+marker is missing:
+
+```python
+from decomposition.audio.database import load_marker_acoustics
+
+acoustics = load_marker_acoustics(markers)
+intensity = acoustics['intensity_db']
+low_band_power = acoustics['power_0_500']
+```
 
 ## Load saved marker embeddings
 
