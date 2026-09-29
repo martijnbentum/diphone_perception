@@ -27,6 +27,13 @@ class Table:
         self.manifest = sampling.load_manifest(self.region, self.components)
         self.markers = None
 
+    def __repr__(self):
+        comps = ','.join(self.components)
+        markers = '?' if self.markers is None else len(self.markers)
+        rows = len(self.rows) if hasattr(self, 'rows') else '?'
+        return (f'Table({self.select} {self.region} comps=[{comps}] '
+            f'layer={self.layer} markers={markers} rows={rows})')
+
     def load_markers(self):
         print('Loading markers...', flush=True)
         markers = list(self.cgn.markers.filter(label__startswith=self.label))
@@ -174,6 +181,19 @@ class Row:
         self.frequency_band_power = table.frequency_band_power[self.index]
         self.table = table
 
+    def __repr__(self):
+        info = self.marker_info
+        kind = 'speech' if info['speech'] else 'no-speech'
+        comp = info['comp']
+        phone = info['phone_label'] or '-'
+        if len(phone) > 4: phone = phone[:3] + '.'
+        phone = f'[{phone}]'
+        age = info['age'] if info['age'] is not None else '-'
+        gender = info['gender'] or '-'
+        return (f'Row({kind:<9} {comp:<6} p:{phone:<6} '
+            f'age={str(age):<5} g:{gender:<6} '
+            f'i:{self.intensity:>6.1f}dB)')
+
     def to_vector(self):
         '''Return scores and acoustic values as a flat numeric NumPy row.'''
         return np.concatenate((self.scores, self.mfcc,
@@ -206,7 +226,7 @@ def _marker_to_speaker_info(marker):
     speaker = marker.phrase.speaker if marker.phrase else None
     d = {}
     d['speaker'] = speaker.name if speaker else None
-    d['gender'] = speaker.gender if speaker else None
+    d['gender'] = speaker.gender() if speaker else None
     d['age'] = speaker.age if speaker else None
     return d
 
