@@ -98,14 +98,27 @@ def test_loader_preserves_marker_order_and_missing_intensity(tmp_path):
     marker_a = make_marker(b'a' * 22, 'unused.wav')
     marker_b = make_marker(b'b' * 22, 'unused.wav')
 
-    values = database.load_marker_acoustics([marker_b, marker_a], path)
+    values = database.load_marker_acoustic_vector(
+        [marker_b, marker_a], 'all', path)
 
     assert values['intensity_db'][0] == 65.0
     assert np.isnan(values['intensity_db'][1])
     np.testing.assert_array_equal(values['power_0_500'], [5.0, 1.0])
+    intensity_values = database.load_marker_acoustic_vector(
+        [marker_b, marker_a], 'intensity_db', path)
+    np.testing.assert_array_equal(intensity_values[:1], [65.0])
+    assert np.isnan(intensity_values[1])
+    by_marker = database.load_markers_acoustics([marker_b, marker_a], path)
+    assert list(by_marker) == [marker_b.key, marker_a.key]
+    assert by_marker[marker_b.key]['intensity_db'] == 65.0
+    assert by_marker[marker_b.key]['power_0_500'] == 5.0
+    assert np.isnan(by_marker[marker_a.key]['intensity_db'])
     with pytest.raises(ValueError, match='missing acoustics'):
-        database.load_marker_acoustics([
-            make_marker(b'c' * 22, 'unused.wav')], path)
+        database.load_marker_acoustic_vector([
+            make_marker(b'c' * 22, 'unused.wav')], 'all', path)
+    with pytest.raises(ValueError, match='unknown acoustic feature'):
+        database.load_marker_acoustic_vector(
+            [marker_b], 'unknown', path)
 
 
 @pytest.mark.multicore
@@ -119,7 +132,7 @@ def test_extraction_resumes_and_overwrites_in_the_same_file(tmp_path):
     path = tmp_path / 'acoustics.sqlite'
 
     extract.extract_marker_acoustics(markers, path, workers=1, verbose=False)
-    original = database.load_marker_acoustics(markers, path)
+    original = database.load_marker_acoustic_vector(markers, 'all', path)
     assert np.isnan(original['intensity_db'][0])
     assert np.isfinite(original['intensity_db'][1])
     assert original['power_0_500'][1] > 0
@@ -133,13 +146,13 @@ def test_extraction_resumes_and_overwrites_in_the_same_file(tmp_path):
     silence = np.zeros(8_000)
     soundfile.write(filename, silence, 16_000, subtype='FLOAT')
     extract.extract_marker_acoustics(markers, path, workers=1, verbose=False)
-    retained = database.load_marker_acoustics(markers, path)
+    retained = database.load_marker_acoustic_vector(markers, 'all', path)
     np.testing.assert_array_equal(retained['power_0_500'],
         original['power_0_500'])
 
     extract.extract_marker_acoustics(markers, path, workers=1,
         overwrite=True, verbose=False)
-    replaced = database.load_marker_acoustics(markers, path)
+    replaced = database.load_marker_acoustic_vector(markers, 'all', path)
     assert replaced['intensity_db'][1] == -300.0
     np.testing.assert_array_equal(replaced['power_0_500'], [0.0, 0.0])
     with sqlite3.connect(path) as connection:
@@ -163,12 +176,12 @@ def test_changed_settings_recompute_across_recordings(tmp_path):
     path = tmp_path / 'acoustics.sqlite'
 
     extract.extract_marker_acoustics(markers, path, workers=2, verbose=False)
-    original = database.load_marker_acoustics(markers, path)
+    original = database.load_marker_acoustic_vector(markers, 'all', path)
     silence = np.zeros(8_000)
     soundfile.write(first_file, silence, 16_000, subtype='FLOAT')
     extract.extract_marker_acoustics(markers, path, workers=2,
         pitch_floor=200, verbose=False)
-    updated = database.load_marker_acoustics(markers, path)
+    updated = database.load_marker_acoustic_vector(markers, 'all', path)
 
     assert original['power_0_500'][0] > 0
     assert updated['power_0_500'][0] == 0

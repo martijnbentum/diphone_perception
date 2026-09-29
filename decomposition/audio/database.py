@@ -14,15 +14,38 @@ COLUMNS = ('intensity_db', 'power_0_500', 'power_500_1000',
     'power_1000_2000', 'power_2000_4000')
 
 
-def load_marker_acoustics(markers, database=None):
-    '''Return named acoustic arrays in marker order from the SQLite file.
+def load_markers_acoustics(markers, database=None):
+    '''Return marker keys mapped to dictionaries of named acoustic values.
 
     markers:   iterable of saved markers with unique Phraser keys
     database:  SQLite path; None uses the decomposition acoustics database
 
+    Preserve marker input order in the outer dictionary. Missing intensity is
+    NaN. Raise ValueError if a marker has no stored row.
+    '''
+    markers = list(markers)
+    columns = load_marker_acoustic_vector(markers, 'all', database=database)
+    results = {}
+    for index, marker in enumerate(markers):
+        values = {}
+        for column in COLUMNS:
+            values[column] = float(columns[column][index])
+        results[marker.key] = values
+    return results
+
+
+def load_marker_acoustic_vector(markers, feature_name, database=None):
+    '''Return one acoustic array, or all named arrays, in marker order.
+
+    markers:       iterable of saved markers with unique Phraser keys
+    feature_name:  one of COLUMNS, or 'all' for a dictionary of arrays
+    database:      SQLite path; None uses the decomposition acoustics database
+
     A missing marker raises ValueError. Missing intensity within a stored row
     is returned as NaN; zero band power remains zero.
     '''
+    if feature_name != 'all' and feature_name not in COLUMNS:
+        raise ValueError(f'unknown acoustic feature: {feature_name}')
     markers = list(markers)
     if not markers: raise ValueError('markers must not be empty')
     keys = [bytes(marker.key) for marker in markers]
@@ -54,7 +77,12 @@ def load_marker_acoustics(markers, database=None):
             row.append(np.nan if value is None else value)
         rows.append(row)
     values = np.array(rows, dtype=np.float64)
-    return {column: values[:, index] for index, column in enumerate(COLUMNS)}
+    if feature_name == 'all':
+        vectors = {}
+        for index, column in enumerate(COLUMNS):
+            vectors[column] = values[:, index]
+        return vectors
+    return values[:, COLUMNS.index(feature_name)]
 
 
 def _prepare_database(connection, settings, overwrite):

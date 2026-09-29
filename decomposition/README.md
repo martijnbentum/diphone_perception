@@ -361,15 +361,20 @@ the implementation to clear the table and recompute the supplied markers;
 pass the complete marker inventory when overwriting. Workers receive plain
 filenames, times, and keys, not Phraser objects or database connections.
 
-The loader returns named NumPy arrays in input marker order and raises if any
-marker is missing:
+The vector loader returns one NumPy array in input marker order, or a
+dictionary of named arrays with `feature_name='all'`. For lookup by marker key,
+`load_markers_acoustics` returns a dictionary of named values. Both loaders
+raise if any marker is missing:
 
 ```python
-from decomposition.audio.database import load_marker_acoustics
+from decomposition.audio.database import load_marker_acoustic_vector
+from decomposition.audio.database import load_markers_acoustics
 
-acoustics = load_marker_acoustics(markers)
-intensity = acoustics['intensity_db']
+intensity = load_marker_acoustic_vector(markers, 'intensity_db')
+acoustics = load_marker_acoustic_vector(markers, 'all')
 low_band_power = acoustics['power_0_500']
+by_marker = load_markers_acoustics(markers)
+first_intensity = by_marker[markers[0].key]['intensity_db']
 ```
 
 ## Load saved marker embeddings
