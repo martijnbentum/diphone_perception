@@ -20,7 +20,8 @@ The results below were supplied from `significant_modes(speech, d)`,
 significant-mode lists used 100,000 random draws and Benjamini-Hochberg
 `alpha=0.01`. A later run reported the leading ten modes in each group with
 1,000,000 draws. The matrices, recording identities, and labels were not
-available for an independent check when this report was written.
+available for an independent numerical check; the figures below are supplied
+outputs.
 
 | Mode | Speech variance fraction | Non-speech variance fraction | Non-speech minus speech mean | Standardized difference |
 |---:|---:|---:|---:|---:|
@@ -48,6 +49,37 @@ differences have no confidence intervals or group-difference p-values here.
 SVD direction signs are arbitrary; the sign of a mean difference can reverse
 if the direction is flipped.
 
+## Held-out covariance geometry
+
+The general evaluation set is the combination of the speech and non-speech
+sets. `evaluate_covariance` gave the following results in the fitted SVD basis:
+
+| Metric | Combined eval | Speech | Non-speech |
+|---|---:|---:|---:|
+| Off-diagonal covariance ratio | 0.0558 | 0.3696 | 0.7641 |
+| Relative covariance error | 0.0563 | 0.4917 | 1.0553 |
+| RMS off-diagonal correlation | 0.00495 | 0.01058 | 0.03800 |
+
+The combined evaluation covariance is close to the fitting covariance and
+nearly diagonal in the fitted basis. Each conditional set has much stronger
+cross-mode covariance, especially non-speech. In the displayed first ten
+modes, speech modes 0 and 2 correlate at about -0.56; non-speech modes 1 and 4
+at about -0.70, and modes 1 and 8 at about +0.61. The small all-mode RMS
+correlations average over many weak pairs and do not rule out these strong
+individual pairs. The ratios are matrix-norm comparisons, not percentages of
+explained variance.
+
+For a combined set, total covariance contains within-group covariance and a
+term from the difference between group means. Signed cross-mode covariances
+can cancel between groups or against that mean-difference term. Thus the
+nearly diagonal combined covariance does not imply diagonal covariance in
+either group. Mode 0 illustrates the mean contribution: its combined variance
+is about 7.36, versus 2.82 in speech and 1.89 in non-speech, alongside the
+reported mean difference of 5.14. The result supports stable aggregate
+covariance geometry, while showing different conditional geometry. It does
+not establish a causal effect of speech status or provide uncertainty for the
+group differences.
+
 ## Recommended next steps
 
 1. Verify that neither evaluation matrix contributed embeddings to the SVD fit.
@@ -57,10 +89,24 @@ if the direction is flipped.
 2. Plot score distributions for modes 0 and 2 by group, with recording-level
    summaries. Check whether mode 0 separates groups across recordings or is
    driven by a few recordings or outliers.
-3. Estimate the mode 0 mean difference across recordings, using paired
+3. Reconstruct the combined covariance from group sample counts, group means,
+   and the two within-group covariance matrices. Confirm it matches the direct
+   combined estimate; then inspect how much of the strongest cross-mode terms
+   comes from within-group covariance versus the between-group mean term.
+4. Check the strongest pairs within recordings, starting with speech modes
+   0-2 and non-speech modes 1-4 and 1-8. Report each recording's group sample
+   counts and pairwise correlations; avoid interpreting estimates from
+   recordings with too few frames. Compare with correlations after centering
+   scores within each recording and group: this separates frame-level
+   co-fluctuation from differences in recording means. If the patterns recur
+   across recordings, resample whole recordings to obtain uncertainty
+   intervals for group correlations and their differences. This preserves
+   dependence among frames from the same recording and reduces the risk that
+   a few recordings drive the pooled result.
+5. Estimate the mode 0 mean difference across recordings, using paired
    recording differences where both groups occur and a recording-level
    bootstrap confidence interval. Treat frame rows from one recording as
    correlated rather than independent observations.
-4. Inspect whether mode 0 tracks acoustic energy, silence, background noise,
+6. Inspect whether mode 0 tracks acoustic energy, silence, background noise,
    speaker, or available speech context. Repeat the comparison on another set
    of held-out recordings before interpreting it as a speech-status mode.

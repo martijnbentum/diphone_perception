@@ -11,8 +11,8 @@ default_model_name = 'wav2vec2_nl1_checkpoint-200000'
 default_phraser_source_id = 'cgn-awd'
 
 
-def load_embeddings(markers, phraser_store=None, model_name=default_model_name, layer=9,
-    collar=2000, to_matrix=False):
+def load_embeddings(markers, phraser_store=None, model_name=default_model_name,
+    layer=9, collar=2000, to_matrix=False):
     '''Bulk-load an Echoframe Embeddings or CNNFeatures collection.
 
     Opens the Echoframe store selected by model_name and attaches phraser_store.
@@ -60,9 +60,11 @@ def load_embedding(marker, store, model_name=default_model_name, layer=9,
     without pooling or selecting frames; its array is available as .data.
     '''
     if layer == 'cnn':
-        o = store.phraser_key_to_cnn_feature(marker.key, model_name, collar=collar)
+        o = store.phraser_key_to_cnn_feature(marker.key, model_name,
+            collar=collar)
     else:
-        o = store.phraser_key_to_embedding(marker.key, model_name, layer, collar=collar)
+        o = store.phraser_key_to_embedding(marker.key, model_name, layer,
+            collar=collar)
     return o
 
 def check_embedding_alignment(embeddings, manifest=None, region='nl',

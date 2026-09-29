@@ -15,6 +15,19 @@ from phraser import Store
 
 DEFAULT_SAMPLE_COUNT = 418_500
 
+def marker_to_audio_info(marker, manifest):
+    '''Return 'fit' or 'eval' for a marker, based on the manifest.'''
+    audio_info = None
+    for info in manifest['audio_infos']:
+        if str(marker.audio.filename) == str(info['filename']):
+            audio_info = info
+            break
+    frame_index = int(marker.label.split('_')[-1])
+    if frame_index not in audio_info['frame_indices']:
+        raise ValueError(f'marker {marker.label} not in manifest frame_indices')
+    return audio_info
+
+
 def load_splits(region='nl', components=('comp-k', 'comp-o'),
     per_marker=False):
     '''Load fitting/evaluation filenames or one split label per marker.
@@ -148,7 +161,7 @@ def load_manifest(region = 'nl', components = ('comp-k', 'comp-o')):
     comps = '_'.join([x.split('-')[-1] for x in components])
     input_filename = f / f'region-{region}_comps-{comps}.json'
     if not input_filename.exists():
-        m = f'no manifest found at {input_filename}. please run:\n' 
+        m = f'no manifest found at {input_filename}. please run:\n'
         m += f'cgn_store = load_cgn_store()\n make_manifest('
         m += f'cgn_store, region="{region}", components={components})\n first.'
         raise FileNotFoundError(m)
@@ -163,11 +176,11 @@ def iter_marker_info(manifest, store, label = 'decomp_random_frames'):
     '''
     for info in progressbar(manifest['audio_infos']):
         frames = Frames(info['n_frames'])
-        duration = info['duration_ms'] 
+        duration = info['duration_ms']
         for frame_index in info['frame_indices']:
             selected = frames[frame_index]
             start = s_to_ms(selected.start_time)
-            end = s_to_ms(selected.end_time) 
+            end = s_to_ms(selected.end_time)
             audio_key = bytes.fromhex(info['audio_key'])
             audio = store.load(audio_key)
             l = f'{label}_{frame_index}'
@@ -182,7 +195,7 @@ def audio_to_info(audio):
     duration = audio.duration
     component = audio_to_component(audio)
     frames = make_frames_from_duration(duration / 1000)
-    n_frames = len(frames) 
+    n_frames = len(frames)
     return {'audio_key': audio.key.hex(), 'filename': str(audio.filename),
         'component': component, 'duration_ms': duration,
         'n_frames': n_frames, 'split': None, 'frame_indices': []}
