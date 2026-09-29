@@ -28,6 +28,7 @@ class Table:
         self.markers = None
 
     def load_markers(self):
+        print('Loading markers...', flush=True)
         markers = list(self.cgn.markers.filter(label__startswith=self.label))
         load_embeddings.check_marker_alignment(markers, self.manifest,
             self.region, self.components, label=self.label)
@@ -38,25 +39,30 @@ class Table:
                 m = f'# marker {len(markers)} != # split {len(split_list)}'
                 raise ValueError('marker and split counts must match' + m)
             selected = []
-            for marker, split in zip(markers, split_list):
-                if split == self.select: selected.append(marker)
+            bar = progressbar(markers, prefix='Selecting markers: ')
+            for index, marker in enumerate(bar):
+                if split_list[index] == self.select: selected.append(marker)
             markers = selected
         for name in ('embeddings', 'scores', 'mfcc', 'intensity',
             'frequency_band_power', 'frequency_band_names', 'marker_infos',
             'rows'):
             if hasattr(self, name): delattr(self, name)
         self.markers = markers
+        print(f'Loaded {len(markers)} markers.', flush=True)
 
     def load_mfcc(self, store=None):
         '''Load a 39-column MFCC matrix in marker order.'''
         if self.markers is None: self.load_markers()
+        print('Loading MFCCs...', flush=True)
         self.mfcc = mfcc_loader.load_mfcc(self.markers, store=store)
         if hasattr(self, 'rows'): del self.rows
+        print('Loaded MFCCs.', flush=True)
         return self.mfcc
 
     def load_acoustic_features(self, database=None):
         '''Load dB intensity and linear frequency-band power in marker order.'''
         if self.markers is None: self.load_markers()
+        print('Loading acoustic features...', flush=True)
         values = acoustic_database.load_marker_acoustic_vector(
             self.markers, 'all', database=database)
         names = acoustic_database.COLUMNS[1:]
@@ -69,10 +75,12 @@ class Table:
         self.frequency_band_power = frequency_band_power
         self.frequency_band_names = names
         if hasattr(self, 'rows'): del self.rows
+        print('Loaded acoustic features.', flush=True)
         return intensity, frequency_band_power
 
     def load_embeddings(self):
         if self.markers is None: self.load_markers()
+        print('Loading embeddings...', flush=True)
         embeddings = load_embeddings.load_embeddings(self.markers, self.cgn,
             layer=self.layer)
         self.embeddings = embeddings.embeddings
@@ -80,21 +88,37 @@ class Table:
             m = f': {len(self.embeddings)} != {len(self.markers)}'
             m += 'embeddings and markers must have equal length'
             raise ValueError('embeddings and markers must have equal length')
+        print('Loaded embeddings.', flush=True)
 
     def load_decomposition(self):
+        print('Loading decomposition...', flush=True)
         p = locations.random_frames_decomposition
         self.decomposition = svd.load_svd(p)
+        print('Loaded decomposition.', flush=True)
 
     def compute_svd_scores(self):
         if not hasattr(self, 'decomposition'): self.load_decomposition()
         if not hasattr(self, 'embeddings'): self.load_embeddings()
-        m = np.array([embed.data.mean(axis=0) for embed in self.embeddings])
+        print('Computing SVD scores...', flush=True)
+        means = []
+        bar = progressbar(self.embeddings, prefix='Embedding means: ')
+        for embed in bar:
+            means.append(embed.data.mean(axis=0))
+        m = np.array(means)
         self.scores = svd.transform(m, self.decomposition)
         if hasattr(self, 'rows'): del self.rows
+        print('Computed SVD scores.', flush=True)
 
     def set_marker_infos(self):
-        marker_infos = [marker_info_dict(marker) for marker in self.markers]
+        if self.markers is None: self.load_markers()
+        print('Loading marker info...', flush=True)
+        marker_infos = []
+        bar = progressbar(self.markers, prefix='Marker info: ')
+        for marker in bar:
+            info = marker_info_dict(marker)
+            marker_infos.append(info)
         self.marker_infos = marker_infos
+        print('Loaded marker info.', flush=True)
 
     def make_rows(self):
         '''Build rows from the loaded marker-aligned values.'''
@@ -120,11 +144,22 @@ class Table:
     def _load(self):
         '''Load every marker-aligned value needed by Row.'''
         if self.markers is None: self.load_markers()
-        if not hasattr(self, 'scores'): self.compute_svd_scores()
-        if not hasattr(self, 'mfcc'): self.load_mfcc()
+        steps = []
+        if not hasattr(self, 'decomposition'):
+            steps.append(('decomposition', self.load_decomposition))
+        if not hasattr(self, 'embeddings'):
+            steps.append(('embeddings', self.load_embeddings))
+        if not hasattr(self, 'scores'):
+            steps.append(('SVD scores', self.compute_svd_scores))
+        if not hasattr(self, 'mfcc'):
+            steps.append(('MFCCs', self.load_mfcc))
         if not hasattr(self, 'intensity') or not hasattr(self,
             'frequency_band_power'):
-            self.load_acoustic_features()
+            steps.append(('acoustic features', self.load_acoustic_features))
+        if not steps: return
+        bar = progressbar(steps, prefix='Table loading: ')
+        for _, load in bar:
+            load()
 
 
 class Row:
