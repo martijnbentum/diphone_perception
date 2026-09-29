@@ -20,11 +20,12 @@ DEFAULT_BATCH_SIZE = 5_000
 READ_CHUNK_SIZE = 100
 
 
-def migrate_mfcc_shards(root, batch_size=DEFAULT_BATCH_SIZE):
+def migrate_mfcc_shards(root, batch_size=DEFAULT_BATCH_SIZE, resume=False):
     '''Rebuild an MFCC store and retain the original as a backup.
 
     root:        path to the existing Echoframe MFCC store
     batch_size:  number of MFCCs copied per write batch
+    resume:      continue a partial replacement after an interrupted read
 
     Stop all writers before running this one-time migration. The replacement
     and backup are siblings of root, on the same filesystem. A failed build
@@ -35,8 +36,10 @@ def migrate_mfcc_shards(root, batch_size=DEFAULT_BATCH_SIZE):
     if not root.is_dir(): raise ValueError(f'MFCC store does not exist: {root}')
     rebuilt = root.with_name(f'{root.name}.resharded')
     backup = root.with_name(f'{root.name}.before_reshard')
-    if rebuilt.exists(): raise FileExistsError(rebuilt)
     if backup.exists(): raise FileExistsError(backup)
+    if rebuilt.exists() and not resume: raise FileExistsError(rebuilt)
+    if resume and not rebuilt.is_dir():
+        raise FileNotFoundError(f'partial replacement not found: {rebuilt}')
 
     source = echoframe.Store(str(root))
     destination = None
@@ -44,17 +47,18 @@ def migrate_mfcc_shards(root, batch_size=DEFAULT_BATCH_SIZE):
         keys = source.index.all_echoframe_keys
         if not keys: raise ValueError('MFCC store is empty')
         source_txnid = source.index.last_txnid()
-        if source.config_path.exists():
+        if not resume and source.config_path.exists():
             rebuilt.mkdir()
             shutil.copy2(source.config_path, rebuilt / 'config.json')
         destination = echoframe.Store(str(rebuilt),
             max_shard_items=MAX_SHARD_ITEMS)
-        expected = defaultdict(set)
-        samples = {}
+        expected, samples, initial_saved = _resume_state(source, destination,
+            keys, batch_size) if resume else (defaultdict(set), {}, 0)
         start = monotonic()
-        print(f'Migrating {len(keys)} MFCCs; write batch {batch_size}, '
+        print(f'Migrating {len(keys)} MFCCs from item {initial_saved}; '
+            f'write batch {batch_size}, '
             f'read chunk {READ_CHUNK_SIZE}', flush=True)
-        for offset in range(0, len(keys), batch_size):
+        for offset in range(initial_saved, len(keys), batch_size):
             batch_keys = keys[offset:offset + batch_size]
             metadata = source.index.load_many(batch_keys, store=source)
             _check_metadata(metadata, batch_keys)
@@ -63,7 +67,8 @@ def migrate_mfcc_shards(root, batch_size=DEFAULT_BATCH_SIZE):
                 chunk = metadata[read_offset:read_offset + READ_CHUNK_SIZE]
                 payloads.extend(source.storage.load_many(chunk))
                 read_count = offset + len(payloads)
-                _report_progress(read_count, offset, len(keys), start)
+                _report_progress(read_count, offset, len(keys), start,
+                    initial_saved)
             items = []
             for position, (key, record, payload) in enumerate(zip(
                     batch_keys, metadata, payloads, strict=True)):
@@ -81,8 +86,9 @@ def migrate_mfcc_shards(root, batch_size=DEFAULT_BATCH_SIZE):
                 _check_copy(record, new_record)
                 expected[new_record.shard_id].add(
                     new_record.echoframe_key.hex())
-            saved_count = offset + len(batch_keys)
-            _report_progress(saved_count, saved_count, len(keys), start)
+            saved_now = offset + len(batch_keys)
+            _report_progress(saved_now, saved_now, len(keys), start,
+                initial_saved)
 
         if source.index.last_txnid() != source_txnid:
             raise RuntimeError('source store changed during migration')
@@ -108,16 +114,59 @@ def migrate_mfcc_shards(root, batch_size=DEFAULT_BATCH_SIZE):
     return backup
 
 
-def _report_progress(read, saved, total, start):
+def _report_progress(read, saved, total, start, initial_saved=0):
     '''Print read/write counts and a rough time-to-completion estimate.'''
     elapsed = monotonic() - start
-    completed = saved or read
-    remaining = total - completed
+    completed = (saved - initial_saved) or (read - initial_saved)
+    remaining = total - (saved if saved > initial_saved else read)
     eta = elapsed * remaining / completed
     elapsed_text = str(timedelta(seconds=round(elapsed)))
     eta_text = str(timedelta(seconds=round(eta)))
     print(f'Read {read}/{total}; saved {saved}/{total}; '
         f'elapsed {elapsed_text}; rough ETA {eta_text}', flush=True)
+
+
+def _resume_state(source, destination, keys, batch_size):
+    '''Check completed batches in a partial replacement before resuming.'''
+    saved_keys = destination.index.all_echoframe_keys
+    count = len(saved_keys)
+    if saved_keys != keys[:count]:
+        raise ValueError('partial replacement keys are not a source prefix')
+    if count % batch_size and count != len(keys):
+        raise ValueError('partial replacement ends inside a write batch')
+    print(f'Checking {count} saved MFCCs before resuming', flush=True)
+    expected = defaultdict(set)
+    samples = {}
+    for shard_id in destination.index.list_shards():
+        records = destination.index.find_by_shard(shard_id,
+            store=destination)
+        for record in records:
+            expected[shard_id].add(record.echoframe_key.hex())
+    for offset in range(0, count, batch_size):
+        batch_keys = saved_keys[offset:offset + batch_size]
+        source_records = source.index.load_many(batch_keys, store=source)
+        copied_records = destination.index.load_many(batch_keys,
+            store=destination)
+        _check_metadata(source_records, batch_keys)
+        _check_metadata(copied_records, batch_keys)
+        for original, copied in zip(source_records, copied_records,
+                strict=True):
+            _check_copy(original, copied)
+        checked = min(offset + batch_size, count)
+        print(f'Checked metadata {checked}/{count}', flush=True)
+    sample_keys = saved_keys[::1000]
+    for offset in range(0, len(sample_keys), READ_CHUNK_SIZE):
+        batch_keys = sample_keys[offset:offset + READ_CHUNK_SIZE]
+        records = source.index.load_many(batch_keys, store=source)
+        payloads = source.storage.load_many(records)
+        for key, payload in zip(batch_keys, payloads, strict=True):
+            samples[key] = np.asarray(payload).copy()
+        checked = min(offset + READ_CHUNK_SIZE, len(sample_keys))
+        print(f'Checked payload samples {checked}/{len(sample_keys)}',
+            flush=True)
+    _verify_destination(destination, saved_keys, expected, samples)
+    print(f'Resuming after {count} verified MFCCs', flush=True)
+    return expected, samples, count
 
 
 def _check_metadata(metadata, keys):
@@ -144,6 +193,9 @@ def _verify_destination(store, keys, expected, samples):
     '''Verify indexed keys, HDF5 dataset names, and sampled payloads.'''
     if set(store.index.all_echoframe_keys) != set(keys):
         raise ValueError('replacement index keys differ from source')
+    shard_files = {path.stem for path in store.storage.root.glob('*.h5')}
+    if shard_files != set(expected):
+        raise ValueError('replacement shard files differ from index')
     for shard_id, names in expected.items():
         indexed = store.index.shard_entry_count(shard_id)
         if indexed != len(names):
@@ -175,8 +227,11 @@ def main():
         default=locations.decomposition_random_frames_echoframe_mfcc_store)
     parser.add_argument('--batch-size', type=int,
         default=DEFAULT_BATCH_SIZE)
+    parser.add_argument('--resume', action='store_true',
+        help='verify and continue an interrupted partial replacement')
     args = parser.parse_args()
-    migrate_mfcc_shards(args.root, batch_size=args.batch_size)
+    migrate_mfcc_shards(args.root, batch_size=args.batch_size,
+        resume=args.resume)
 
 
 if __name__ == '__main__':
