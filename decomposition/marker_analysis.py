@@ -6,6 +6,7 @@ from decomposition.audio import database as acoustic_database
 import locations
 
 import numpy as np
+from progressbar import progressbar
 
 def load_cgn_store():
     '''Open the default CGN Phraser store and return it.'''
@@ -99,7 +100,8 @@ class Table:
         '''Build rows from the loaded marker-aligned values.'''
         self._load()
         self.rows = []
-        for index, marker in enumerate(self.markers):
+        bar = progressbar(self.markers)
+        for index, marker in enumerate(bar):
             row = Row(marker, self, index=index)
             self.rows.append(row)
         return self.rows
