@@ -3,6 +3,7 @@
 import argparse
 import shutil
 from collections import defaultdict
+from datetime import timedelta
 from pathlib import Path
 from time import monotonic
 
@@ -16,6 +17,7 @@ import locations
 
 MAX_SHARD_ITEMS = 20_000
 DEFAULT_BATCH_SIZE = 5_000
+READ_CHUNK_SIZE = 100
 
 
 def migrate_mfcc_shards(root, batch_size=DEFAULT_BATCH_SIZE):
@@ -50,11 +52,18 @@ def migrate_mfcc_shards(root, batch_size=DEFAULT_BATCH_SIZE):
         expected = defaultdict(set)
         samples = {}
         start = monotonic()
+        print(f'Migrating {len(keys)} MFCCs; write batch {batch_size}, '
+            f'read chunk {READ_CHUNK_SIZE}', flush=True)
         for offset in range(0, len(keys), batch_size):
             batch_keys = keys[offset:offset + batch_size]
             metadata = source.index.load_many(batch_keys, store=source)
             _check_metadata(metadata, batch_keys)
-            payloads = source.storage.load_many(metadata)
+            payloads = []
+            for read_offset in range(0, len(metadata), READ_CHUNK_SIZE):
+                chunk = metadata[read_offset:read_offset + READ_CHUNK_SIZE]
+                payloads.extend(source.storage.load_many(chunk))
+                read_count = offset + len(payloads)
+                _report_progress(read_count, offset, len(keys), start)
             items = []
             for position, (key, record, payload) in enumerate(zip(
                     batch_keys, metadata, payloads, strict=True)):
@@ -72,11 +81,8 @@ def migrate_mfcc_shards(root, batch_size=DEFAULT_BATCH_SIZE):
                 _check_copy(record, new_record)
                 expected[new_record.shard_id].add(
                     new_record.echoframe_key.hex())
-            done = min(offset + batch_size, len(keys))
-            elapsed = monotonic() - start
-            eta = elapsed * (len(keys) - done) / done
-            print(f'Copied {done}/{len(keys)} MFCCs; ETA {eta / 60:.1f} min',
-                flush=True)
+            saved_count = offset + len(batch_keys)
+            _report_progress(saved_count, saved_count, len(keys), start)
 
         if source.index.last_txnid() != source_txnid:
             raise RuntimeError('source store changed during migration')
@@ -100,6 +106,18 @@ def migrate_mfcc_shards(root, batch_size=DEFAULT_BATCH_SIZE):
     print(f'Migrated MFCC store: {root}', flush=True)
     print(f'Original store retained at: {backup}', flush=True)
     return backup
+
+
+def _report_progress(read, saved, total, start):
+    '''Print read/write counts and a rough time-to-completion estimate.'''
+    elapsed = monotonic() - start
+    completed = saved or read
+    remaining = total - completed
+    eta = elapsed * remaining / completed
+    elapsed_text = str(timedelta(seconds=round(elapsed)))
+    eta_text = str(timedelta(seconds=round(eta)))
+    print(f'Read {read}/{total}; saved {saved}/{total}; '
+        f'elapsed {elapsed_text}; rough ETA {eta_text}', flush=True)
 
 
 def _check_metadata(metadata, keys):

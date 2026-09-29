@@ -2,6 +2,8 @@
 
 import tempfile
 import unittest
+from contextlib import redirect_stdout
+from io import StringIO
 from pathlib import Path
 from unittest import mock
 
@@ -29,11 +31,15 @@ class TestMigrateMfccShards(unittest.TestCase):
                 keys.append(key)
             source.close()
 
+            output = StringIO()
             with mock.patch.object(migrate_mfcc_shards,
-                    'MAX_SHARD_ITEMS', 2):
+                    'MAX_SHARD_ITEMS', 2), redirect_stdout(output):
                 backup = migrate_mfcc_shards.migrate_mfcc_shards(root,
                     batch_size=2)
 
+            self.assertIn('Read 2/7; saved 0/7;', output.getvalue())
+            self.assertIn('rough ETA', output.getvalue())
+            self.assertIn('saved 7/7;', output.getvalue())
             rebuilt = echoframe.Store(str(root))
             original = echoframe.Store(str(backup))
             try:
