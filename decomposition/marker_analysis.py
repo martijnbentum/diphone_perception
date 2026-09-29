@@ -104,6 +104,17 @@ class Table:
             self.rows.append(row)
         return self.rows
 
+    def vector_names(self):
+        '''Return column names for Row.to_vector in vector order.'''
+        self._load()
+        names = [f'mode_{index}' for index in range(self.scores.shape[1])]
+        for kind in ('mfcc', 'delta_mfcc', 'delta2_mfcc'):
+            for index in range(13):
+                names.append(f'{kind}_{index}')
+        names.append('intensity_db')
+        names.extend(self.frequency_band_names)
+        return tuple(names)
+
     def _load(self):
         '''Load every marker-aligned value needed by Row.'''
         if self.markers is None: self.load_markers()
@@ -125,6 +136,11 @@ class Row:
         self.intensity = table.intensity[self.index]
         self.frequency_band_power = table.frequency_band_power[self.index]
         self.table = table
+
+    def to_vector(self):
+        '''Return scores and acoustic values as a flat numeric NumPy row.'''
+        return np.concatenate((self.scores, self.mfcc,
+            np.array([self.intensity]), self.frequency_band_power))
 
 def marker_info_row(marker):
     return marker_info_dict(marker)
