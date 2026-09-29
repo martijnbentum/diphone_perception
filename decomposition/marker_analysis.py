@@ -1,6 +1,8 @@
 from decomposition import sampling
 from decomposition import load_embeddings
+from decomposition import load_mfcc as mfcc_loader
 from decomposition import svd
+from decomposition.audio import database as acoustic_database
 import locations
 
 import numpy as np
@@ -28,17 +30,42 @@ class Table:
         markers = list(self.cgn.markers.filter(label__startswith=self.label))
         load_embeddings.check_marker_alignment(markers, self.manifest,
             self.region, self.components, label=self.label)
+        if self.select != 'all':
+            split_list = sampling.load_splits(self.region, self.components,
+                per_marker=True)
+            if len(split_list) != len(markers):
+                m = f'# marker {len(markers)} != # split {len(split_list)}'
+                raise ValueError('marker and split counts must match' + m)
+            selected = []
+            for marker, split in zip(markers, split_list):
+                if split == self.select: selected.append(marker)
+            markers = selected
+        for name in ('embeddings', 'scores', 'mfcc', 'intensity',
+            'frequency_band_power', 'frequency_band_names', 'marker_infos'):
+            if hasattr(self, name): delattr(self, name)
         self.markers = markers
-        if self.select == 'all': return
-        split_list = sampling.load_splits(self.region, self.components,
-            per_marker=True)
-        if len(split_list) != len(self.markers):
-            m = f'# marker {len(self.markers)} != # split {len(split_list)}'
-            raise ValueError('marker and split counts must match' + m)
-        markers = []
-        for marker, split in zip(self.markers, split_list):
-            if split == self.select: markers.append(marker)
-        self.markers = markers
+
+    def load_mfcc(self, store=None):
+        '''Load a 39-column MFCC matrix in marker order.'''
+        if self.markers is None: self.load_markers()
+        self.mfcc = mfcc_loader.load_mfcc(self.markers, store=store)
+        return self.mfcc
+
+    def load_acoustic_features(self, database=None):
+        '''Load dB intensity and linear frequency-band power in marker order.'''
+        if self.markers is None: self.load_markers()
+        values = acoustic_database.load_marker_acoustic_vector(
+            self.markers, 'all', database=database)
+        names = acoustic_database.COLUMNS[1:]
+        intensity = values['intensity_db']
+        bands = []
+        for name in names:
+            bands.append(values[name])
+        frequency_band_power = np.column_stack(bands)
+        self.intensity = intensity
+        self.frequency_band_power = frequency_band_power
+        self.frequency_band_names = names
+        return intensity, frequency_band_power
 
     def load_embeddings(self):
         if self.markers is None: self.load_markers()
