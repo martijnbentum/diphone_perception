@@ -41,7 +41,8 @@ class Table:
                 if split == self.select: selected.append(marker)
             markers = selected
         for name in ('embeddings', 'scores', 'mfcc', 'intensity',
-            'frequency_band_power', 'frequency_band_names', 'marker_infos'):
+            'frequency_band_power', 'frequency_band_names', 'marker_infos',
+            'rows'):
             if hasattr(self, name): delattr(self, name)
         self.markers = markers
 
@@ -49,6 +50,7 @@ class Table:
         '''Load a 39-column MFCC matrix in marker order.'''
         if self.markers is None: self.load_markers()
         self.mfcc = mfcc_loader.load_mfcc(self.markers, store=store)
+        if hasattr(self, 'rows'): del self.rows
         return self.mfcc
 
     def load_acoustic_features(self, database=None):
@@ -65,6 +67,7 @@ class Table:
         self.intensity = intensity
         self.frequency_band_power = frequency_band_power
         self.frequency_band_names = names
+        if hasattr(self, 'rows'): del self.rows
         return intensity, frequency_band_power
 
     def load_embeddings(self):
@@ -86,22 +89,45 @@ class Table:
         if not hasattr(self, 'embeddings'): self.load_embeddings()
         m = np.array([embed.data.mean(axis=0) for embed in self.embeddings])
         self.scores = svd.transform(m, self.decomposition)
+        if hasattr(self, 'rows'): del self.rows
 
     def set_marker_infos(self):
         marker_infos = [marker_info_dict(marker) for marker in self.markers]
         self.marker_infos = marker_infos
 
+    def make_rows(self):
+        '''Build rows from the loaded marker-aligned values.'''
+        self._load()
+        self.rows = []
+        for index, marker in enumerate(self.markers):
+            row = Row(marker, self, index=index)
+            self.rows.append(row)
+        return self.rows
+
+    def _load(self):
+        '''Load every marker-aligned value needed by Row.'''
+        if self.markers is None: self.load_markers()
+        if not hasattr(self, 'scores'): self.compute_svd_scores()
+        if not hasattr(self, 'mfcc'): self.load_mfcc()
+        if not hasattr(self, 'intensity') or not hasattr(self,
+            'frequency_band_power'):
+            self.load_acoustic_features()
+
 
 class Row:
-    def __init__(self, marker, table):
+    def __init__(self, marker, table, index=None):
         self.marker = marker
+        if index is None: index = table.markers.index(marker)
+        self.index = index
         self.marker_info = marker_info_row(marker)
-        self.scores = table.scores[table.markers.index(marker)]
-        self.table= table
+        self.scores = table.scores[self.index]
+        self.mfcc = table.mfcc[self.index]
+        self.intensity = table.intensity[self.index]
+        self.frequency_band_power = table.frequency_band_power[self.index]
+        self.table = table
 
 def marker_info_row(marker):
-    d = marker_info_dict(marker)
-    return d.values()
+    return marker_info_dict(marker)
 
 def marker_info_dict(marker):
     filename = marker.audio.filename
