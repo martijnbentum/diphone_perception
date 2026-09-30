@@ -531,3 +531,34 @@ Run the SVD tests from the repository root:
 These tests use synthetic matrices and temporary files; no corpus or model
 stores are needed. They cover reconstruction, covariance, spectrum summaries,
 held-out variance and mean shifts, input validation, and persistence.
+
+## Explore recording effects in evaluation scores
+
+`recording_analysis.py` takes `marker_analysis.Row` objects from
+`Table(select='eval')`. The default sensitivity sample uses non-speech markers,
+retains recordings with at least 10 such markers, and draws at most 50 per
+recording with a fixed seed. The minimum is checked before capping, and the
+same selected rows are used for every mode.
+
+```python
+from decomposition.marker_analysis import Table
+from decomposition.recording_analysis import fit_recording_models
+
+table = Table(cgn, select='eval')  # cgn is an open Phraser store
+rows = table.make_rows()
+result = fit_recording_models(rows, mode_indices=range(9))
+print(result['sample'])
+for model in result['models']:
+    print(model['mode_index'], model['recording_intercept']['icc'],
+        model['between_recording_fraction'])
+```
+
+Each fit contains an intercept-only baseline and a Gaussian model with a random
+intercept for recording. The recording and residual variances are estimated by
+REML;
+`icc` is the estimated fraction of model variance attributable to recording.
+`between_recording_fraction` is a separate, descriptive fraction of total
+sample score variation explained by differences among the sampled recording
+means. It is not a causal estimate or a significance test. A zero-variation
+mode has an undefined ICC (`NaN`). To inspect speech separately, pass
+`speech=True`; the analysis does not combine speech and non-speech in one fit.
