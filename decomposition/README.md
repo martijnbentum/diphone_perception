@@ -561,4 +561,8 @@ REML;
 sample score variation explained by differences among the sampled recording
 means. It is not a causal estimate or a significance test. A zero-variation
 mode has an undefined ICC (`NaN`). To inspect speech separately, pass
-`speech=True`; the analysis does not combine speech and non-speech in one fit.
+`speech=True`. For a sample containing both statuses, call
+`make_recording_sample(rows, speech=None)`; its minimum and cap apply to all
+markers together within each recording. Passing `speech=None` to
+`fit_recording_models` also fits both statuses together, so that ICC includes
+speech-status differences and is not a status-adjusted recording effect.

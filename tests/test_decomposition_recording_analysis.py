@@ -55,6 +55,30 @@ def test_sample_rejects_non_eval_rows():
         make_recording_sample(rows)
 
 
+def test_sample_can_include_both_speech_statuses():
+    rows = ([_row('a.wav', index, [index], speech=index >= 4)
+        for index in range(8)]
+        + [_row('b.wav', index, [index], speech=index >= 2)
+            for index in range(4)]
+        + [_row('c.wav', index, [index], speech=index == 1)
+            for index in range(2)])
+    sample = make_recording_sample(rows, speech=None, min_frames=4,
+        max_frames=6)
+    reversed_sample = make_recording_sample(reversed(rows), speech=None,
+        min_frames=4, max_frames=6)
+
+    assert sample['speech'] is None
+    assert sample['n_status_rows'] == 14
+    assert sample['n_eligible_rows'] == 12
+    assert sample['n_eligible_recordings'] == 2
+    assert sample['n_capped_recordings'] == 1
+    assert sample['n_sampled_rows'] == 10
+    assert {row.marker_info['speech'] for row in sample['rows']} == {
+        False, True}
+    assert [row.marker_info['marker_key'] for row in sample['rows']] == [
+        row.marker_info['marker_key'] for row in reversed_sample['rows']]
+
+
 def test_balanced_reml_matches_random_intercept_anova():
     # In a balanced one-way design, positive REML components equal the
     # within-group and between-group ANOVA method-of-moments components.

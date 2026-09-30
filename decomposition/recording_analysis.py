@@ -11,17 +11,17 @@ def make_recording_sample(rows, speech=False, min_frames=10,
     '''Select a reproducible sensitivity sample of evaluation markers.
 
     rows:        marker_analysis.Row objects from Table(select='eval')
-    speech:      False selects non-speech; True selects speech
-    min_frames:  minimum selected-status markers in a recording
+    speech:      False selects non-speech; True selects speech; None selects both
+    min_frames:  minimum selected markers in a recording
     max_frames:  maximum markers sampled uniformly per recording
     seed:        non-negative integer seed for the random cap
 
     Return selected rows and counts before and after filtering. The threshold
-    is applied after selecting speech status. Marker keys and filenames make
-    selection independent of the input row order.
+    and cap apply to the combined rows when speech is None. Marker keys and
+    filenames make selection independent of the input row order.
     '''
-    if not isinstance(speech, bool):
-        raise ValueError('speech must be True or False')
+    if speech is not None and not isinstance(speech, bool):
+        raise ValueError('speech must be True, False, or None')
     for name, value in (('min_frames', min_frames),
             ('max_frames', max_frames)):
         if (isinstance(value, bool)
@@ -40,7 +40,8 @@ def make_recording_sample(rows, speech=False, min_frames=10,
         select = getattr(getattr(row, 'table', None), 'select', None)
         if select is not None and select != 'eval':
             raise ValueError('rows must come from Table(select=\'eval\')')
-        if bool(row.marker_info['speech']) != speech: continue
+        if speech is not None and bool(row.marker_info['speech']) != speech:
+            continue
         filename = str(row.marker_info['filename'])
         groups[filename].append(row)
 
@@ -160,13 +161,15 @@ def fit_recording_models(rows, mode_indices=range(9), speech=False,
 
     rows:          marker_analysis.Row objects from Table(select='eval')
     mode_indices:  mode indices to fit; defaults to modes 0 through 8
-    speech:        False selects non-speech; True selects speech
+    speech:        False selects non-speech; True selects speech; None selects both
     min_frames:    minimum selected-status markers per recording
     max_frames:    maximum sampled markers per recording
     seed:          seed for the random cap
 
     Return sample diagnostics and one fit per mode. All modes use the same
-    selected markers, so mode comparisons do not change the sample.
+    selected markers, so mode comparisons do not change the sample. A fit with
+    speech=None also includes the difference between speech and non-speech;
+    its recording ICC should not be read as a status-adjusted recording effect.
     '''
     mode_indices = list(mode_indices)
     if not mode_indices: raise ValueError('mode_indices must not be empty')
